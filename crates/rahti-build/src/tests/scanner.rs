@@ -617,6 +617,52 @@ fn top_level_group_layouts_are_roots_of_their_own() {
     );
 }
 
+/// `@{children}` in a root layout serves the same markup as `<slot />` but
+/// anchors no `<template pp-component>`, so the document ships without its
+/// reactive boundary and nothing looks wrong. Only the build knows the
+/// layout is a root, so only the build can refuse it.
+#[test]
+#[should_panic(expected = "root layout with no `<slot />`")]
+fn a_root_layout_interpolating_children_is_refused() {
+    let tree = Tree::new("root-noslot");
+    tree.page("page.rs").file(
+        "layout.rs",
+        "pub fn layout(children: Html) -> Html {\n\
+         \x20   html! { <html><body>@{children}</body></html> }\n\
+         }\n",
+    );
+    scan(tree.path());
+}
+
+#[test]
+fn a_root_layout_with_a_slot_is_kept() {
+    let tree = Tree::new("root-slot");
+    tree.page("page.rs").file(
+        "layout.rs",
+        "pub fn layout(children: Html) -> Html {\n\
+         \x20   html! { <html><body><slot /></body></html> }\n\
+         }\n",
+    );
+
+    assert!(walk_tree(&tree).entry("layout.rs").root);
+}
+
+/// A `<slot />` named in a comment is prose, not markup — it satisfies
+/// nothing.
+#[test]
+#[should_panic(expected = "root layout with no `<slot />`")]
+fn a_slot_in_a_comment_does_not_count() {
+    let tree = Tree::new("root-comment-slot");
+    tree.page("page.rs").file(
+        "layout.rs",
+        "// The page renders at `<slot />` below.\n\
+         pub fn layout(children: Html) -> Html {\n\
+         \x20   html! { <html><body>@{children}</body></html> }\n\
+         }\n",
+    );
+    scan(tree.path());
+}
+
 /// A page with no document of its own, in an app that has two: navigating to
 /// it would swap its markup into whichever shell happened to be on screen.
 #[test]

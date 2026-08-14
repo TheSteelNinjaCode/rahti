@@ -212,6 +212,12 @@ The name is the one derived from the layout's path, the same name the manifest
 reports and the `X-PP-Root-Layout` header sends. Nothing is written by hand and
 nothing has to be kept in step.
 
+The injection anchors on `<slot />` and on nothing else. Interpolating
+`@{children}` in a root layout would serve the same markup with no boundary in
+it — the page renders, and client navigation breaks with nothing looking
+wrong — so the build refuses a root layout whose `html!` contains no
+`<slot />`.
+
 A layout that needs the boundary somewhere else — around its own reactive
 chrome rather than only the page — writes a `pp-component` itself. That is the
 ordinary override: an author-written marker anywhere in the block turns the

@@ -123,6 +123,9 @@ pub fn scan(app_dir: &Path) -> Scan {
         // `app/layout.rs` has nothing above it, so it is a document root
         // whether or not it says so.
         let root = kind == Kind::Layout && (dirs.is_empty() || declares_root(&file));
+        if root {
+            check_root_slot(&file);
+        }
 
         entries.push(Entry {
             kind,
@@ -343,6 +346,38 @@ fn declares_root(file: &str) -> bool {
     fs::read_to_string(file)
         .map(|src| src.lines().any(|line| line.trim() == ROOT_MARKER))
         .unwrap_or(false)
+}
+
+/// A root layout renders its children through `<slot />`, and nothing else.
+///
+/// `@{children}` compiles and serves the same markup — but the document's
+/// reactive boundary, the `<template pp-component="…">` the macro injects, is
+/// anchored on `<slot />`. With no slot nothing is injected, the document has
+/// no region for client navigation to swap, and nothing about the served page
+/// looks wrong. The macro cannot catch this — it never sees the function
+/// signature — so the build does, here, where a layout is known to be a root.
+///
+/// Held to files that render markup at all: a pass-through layout
+/// (`{ children }`) has no `html!` block, so there is nothing to anchor and
+/// nothing to check. Text-scanned with comment lines left out, like
+/// [`declared_component`]: a doc comment naming `<slot />` is prose.
+fn check_root_slot(file: &str) {
+    let src = fs::read_to_string(file).unwrap_or_default();
+    let code_contains = |needle: &str| {
+        src.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .any(|line| line.contains(needle))
+    };
+    if code_contains("html!") && !code_contains("<slot") {
+        panic!(
+            "rahti: {file} is a root layout with no `<slot />`.\n  \
+             The `<template pp-component=\"…\">` that owns the document's reactive \
+             region is injected around `<slot />`; interpolating `@{{children}}` \
+             instead renders the page but ships no boundary, and client \
+             navigation breaks silently.\n  \
+             Put `<slot />` where the page should render."
+        );
+    }
 }
 
 /// Every `layout.rs` that wraps this page, outermost first.
