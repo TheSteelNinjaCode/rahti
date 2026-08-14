@@ -79,4 +79,4 @@ cargo install cargo-rahti
 cargo rahti new smoke-test --tailwind
 ```
 
-The generated `Cargo.toml` should carry `rahti = "0.0.12"`, not a path.
+The generated `Cargo.toml` should carry `rahti = "0.0.13"`, not a path.

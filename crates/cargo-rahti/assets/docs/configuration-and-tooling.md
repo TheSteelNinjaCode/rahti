@@ -9,7 +9,7 @@
 {
   "$schema": "./rahti.schema.json",
   "schema": 1,
-  "createdWith": "0.0.12",
+  "createdWith": "0.0.13",
   "app": {
     "dir": "src/app",
     "public": "public"

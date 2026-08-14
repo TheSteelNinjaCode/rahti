@@ -775,13 +775,6 @@ pub fn layout_rs(title: &str) -> String {
 /// instead: the rendered page carries `<template pp-component="…">` there,
 /// derived from this file's path. Nothing to write, and nothing to keep in
 /// step.
-///
-/// No `pp-loading-content="true"` is written here. That marker names the
-/// region a `loading.rs` replaces while the next page is fetched, and the
-/// runtime takes the first marked element in the document — so it belongs in
-/// the deepest layout that wraps exactly what the swap should replace (a
-/// dashboard layout's content pane, say, so its top bar stays put). Marking
-/// this root slot would swap the whole page and override every layout below.
 pub fn layout(children: Html) -> Html {{
     html! {{
         <!DOCTYPE html>
