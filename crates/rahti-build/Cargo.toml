@@ -1,0 +1,16 @@
+[package]
+name = "rahti-build"
+description = "Build step for the Rahti web framework: scans the app directory, writes the router, and compiles the stylesheet."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `rahti.config.json` is read here and written by the scaffold, so the format
+# has to be as easy to generate as it is to parse — see the module docs in
+# `lib.rs`. Used through `Value`, not `derive`: every key is optional and
+# defaulted, which a struct would have to spell out twice.
+serde_json = "1"

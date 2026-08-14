@@ -1,0 +1,626 @@
+//! The scaffold: what it writes, and what it records having written.
+
+use super::*;
+
+/// A directory that removes itself, so a failed assertion does not leave a
+/// project behind for the next run to trip over.
+struct Tree(PathBuf);
+
+impl Tree {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("cargo-rahti-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("a temporary directory");
+        Tree(path)
+    }
+
+    fn read(&self, path: &str) -> String {
+        fs::read_to_string(self.0.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn scaffold(tree: &Tree, tailwind: bool) -> Ledger {
+    scaffold_with(tree, tailwind, None)
+}
+
+fn scaffold_with(tree: &Tree, tailwind: bool, db: Option<Backend>) -> Ledger {
+    scaffold_full(tree, tailwind, db, false)
+}
+
+fn scaffold_full(tree: &Tree, tailwind: bool, db: Option<Backend>, ws: bool) -> Ledger {
+    let options = Options {
+        name: "demo".to_string(),
+        tailwind,
+        db,
+        ws,
+        local: None,
+    };
+    let mut ledger = Ledger::new();
+    write_project(&tree.0, &options, tailwind, db, ws, &mut ledger).expect("a written project");
+    write_config(&tree.0, tailwind, db, ws, &ledger).expect("a written config");
+    ledger
+}
+
+// -------------------------------------------------------------------- names
+
+/// The name becomes a cargo package and a directory, so what one of those
+/// would refuse later is refused here, where the message can say why.
+#[test]
+fn a_usable_name_is_accepted() {
+    assert!(check_name("my-app").is_ok());
+    assert!(check_name("my_app").is_ok());
+    assert!(check_name("app2").is_ok());
+}
+
+#[test]
+fn an_unusable_name_is_refused() {
+    assert!(check_name("").is_err());
+    assert!(
+        check_name("my app").is_err(),
+        "a space is not a package name"
+    );
+    assert!(
+        check_name("my/app").is_err(),
+        "a separator would escape the directory"
+    );
+    assert!(
+        check_name("2fast").is_err(),
+        "cargo will not take a leading digit"
+    );
+}
+
+// ------------------------------------------------------------------ options
+
+/// A flag adds a feature. There is no flag that removes one, so the whole of
+/// the command line is what to add.
+#[test]
+fn the_engine_flag_is_read() {
+    assert!(Options::parse(&["app", "--tailwind"]).unwrap().tailwind);
+}
+
+/// Leaving the flag out is how you say no — and the only way, which is the
+/// point. An interactive run still asks; nothing else does.
+#[test]
+fn no_flag_is_the_way_to_say_no() {
+    assert!(!Options::parse(&["app"]).unwrap().tailwind);
+    assert!(Options::parse(&["app"]).unwrap().db.is_none());
+}
+
+#[test]
+fn a_missing_name_is_reported() {
+    assert!(Options::parse(&["--tailwind"]).is_err());
+}
+
+#[test]
+fn an_unknown_option_is_reported() {
+    assert!(Options::parse(&["app", "--turbo"]).is_err());
+}
+
+#[test]
+fn local_takes_the_path_after_it() {
+    let options = Options::parse(&["app", "--local", "/checkout"]).unwrap();
+    assert_eq!(options.local.as_deref(), Some("/checkout"));
+    assert!(
+        Options::parse(&["app", "--local"]).is_err(),
+        "the path is not optional"
+    );
+}
+
+// ------------------------------------------------------------------- ledger
+
+/// Every hash recorded has to describe the bytes actually on disk, because a
+/// later comparison has nothing else to go on.
+#[test]
+fn the_ledger_matches_what_was_written() {
+    let tree = Tree::new("ledger");
+    let ledger = scaffold(&tree, false);
+
+    assert!(!ledger.is_empty());
+    for (path, hash) in &ledger {
+        let bytes = fs::read(tree.0.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        assert_eq!(
+            &sha256::hex(&bytes),
+            hash,
+            "{path} does not match its ledger entry"
+        );
+    }
+}
+
+/// The build owns the compiled stylesheet from the first compile onward, so a
+/// hash taken at scaffold time would be wrong before anyone could read it —
+/// and an upgrade would take that for an edit the author made.
+#[test]
+fn a_file_the_build_owns_is_not_in_the_ledger() {
+    let tree = Tree::new("untracked");
+    let ledger = scaffold(&tree, true);
+
+    assert!(!ledger.contains_key("public/css/styles.css"));
+    assert!(
+        tree.0.join("public/css/styles.css").is_file(),
+        "it still has to exist for the first build to overwrite"
+    );
+}
+
+#[test]
+fn the_config_records_the_ledger_and_the_choice() {
+    let tree = Tree::new("config");
+    scaffold(&tree, false);
+
+    let config = tree.read("rahti.config.json");
+    assert!(config.contains("\"schema\": 1"), "{config}");
+    assert!(config.contains("\"createdWith\""), "{config}");
+    assert!(config.contains("\"engine\": \"plain\""), "{config}");
+    assert!(
+        config.contains("\"src/app/page.rs\""),
+        "the ledger is written:\n{config}"
+    );
+}
+
+// ------------------------------------------------------------------ engines
+
+/// A project that chose plain CSS should carry no trace of the other choice —
+/// that is the whole promise of the question being asked.
+#[test]
+fn a_plain_project_carries_nothing_of_tailwind() {
+    let tree = Tree::new("plain");
+    let ledger = scaffold(&tree, false);
+
+    assert!(!ledger.contains_key("public/js/tailwind-merge.mjs"));
+    assert!(!tree.0.join("public/js/tailwind-merge.mjs").exists());
+
+    let main_js = tree.read("public/js/main.js");
+    assert!(!main_js.contains("twMerge"), "{main_js}");
+
+    let globals = tree.read("src/app/globals.css");
+    assert!(!globals.contains("tailwindcss"), "{globals}");
+
+    let config = tree.read("rahti.config.json");
+    assert!(
+        !config.contains("\"download\""),
+        "no compiler to fetch:\n{config}"
+    );
+}
+
+#[test]
+fn a_tailwind_project_carries_the_helper_and_the_directives() {
+    let tree = Tree::new("tw");
+    let ledger = scaffold(&tree, true);
+
+    assert!(ledger.contains_key("public/js/tailwind-merge.mjs"));
+    assert!(tree.read("public/js/main.js").contains("twMerge"));
+    assert!(
+        tree.read("src/app/globals.css")
+            .contains("@import \"tailwindcss\"")
+    );
+    assert!(
+        tree.read("rahti.config.json")
+            .contains("\"engine\": \"tailwind\"")
+    );
+}
+
+/// The layout's single parent element is `<html>`, which is no place for a
+/// `pp-component`: the client runtime would treat the whole document as a
+/// component and re-render it, taking `<head>` and `<body>` with it — a blank
+/// page from a freshly scaffolded project. `html!` handles that itself by
+/// naming the `<template>` it injects around the slot, so the scaffolded file
+/// writes neither.
+#[test]
+fn the_layout_leaves_the_component_marker_to_the_macro() {
+    let tree = Tree::new("layout");
+    scaffold(&tree, true);
+
+    let layout = tree.read("src/app/layout.rs");
+    let markup: String = layout
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !markup.contains("pp-component"),
+        "the marker is injected, not written:\n{layout}"
+    );
+    assert!(
+        markup.contains("<slot />"),
+        "the slot is where it goes:\n{layout}"
+    );
+}
+
+/// Both engines produce the same project but for the files that must differ.
+#[test]
+fn the_engines_differ_only_where_they_must() {
+    let plain = Tree::new("same-plain");
+    let tailwind = Tree::new("same-tw");
+    let a = scaffold(&plain, false);
+    let b = scaffold(&tailwind, true);
+
+    let differ = [
+        "src/app/globals.css",
+        "src/app/page.rs",
+        "public/js/main.js",
+    ];
+    for path in a.keys().filter(|p| b.contains_key(*p)) {
+        let same = a[path] == b[path];
+        if differ.contains(&path.as_str()) {
+            assert!(!same, "{path} should differ between engines");
+        } else {
+            assert!(same, "{path} should be identical between engines");
+        }
+    }
+}
+
+// ----------------------------------------------------------------- database
+
+#[test]
+fn the_database_flag_is_read() {
+    let db = |args: &[&str]| Options::parse(args).unwrap().db;
+
+    assert_eq!(db(&["app", "--db", "postgres"]), Some(Backend::Postgres));
+    assert_eq!(db(&["app", "--db", "mysql"]), Some(Backend::MySql));
+    assert_eq!(db(&["app", "--db", "sqlite"]), Some(Backend::Sqlite));
+}
+
+/// The backend that needs no server running is the one worth having as the
+/// short form.
+#[test]
+fn a_bare_db_flag_is_sqlite() {
+    assert_eq!(
+        Options::parse(&["app", "--db"]).unwrap().db,
+        Some(Backend::Sqlite)
+    );
+
+    let both = Options::parse(&["app", "--db", "--tailwind"]).unwrap();
+    assert_eq!(
+        both.db,
+        Some(Backend::Sqlite),
+        "a flag after --db is a flag"
+    );
+    assert!(both.tailwind, "and it still counts as itself");
+}
+
+#[test]
+fn a_misspelled_backend_is_refused() {
+    assert!(Options::parse(&["app", "--db", "postgress"]).is_err());
+}
+
+/// A project with no database is a project with no database: no directories,
+/// no dependency, no mention of it anywhere.
+#[test]
+fn a_project_without_a_database_carries_nothing_of_one() {
+    let tree = Tree::new("no-db");
+    let ledger = scaffold_with(&tree, true, None);
+
+    for path in ledger.keys() {
+        assert!(!path.starts_with("src/models"), "{path}");
+        assert!(!path.starts_with("src/migrations"), "{path}");
+        assert!(path != "src/db.rs", "{path}");
+    }
+
+    assert!(!tree.read("Cargo.toml").contains("sea-orm"));
+    assert!(!tree.read("src/main.rs").contains("mod db;"));
+    assert!(!tree.read("rahti.config.json").contains("\"db\""));
+
+    // `.env` still exists, and it is not a database file: AUTH_SECRET lives
+    // there whether or not the project has a database, and a `.env` that only
+    // appeared once you chose SQLite would be a trap.
+    let env = tree.read(".env");
+    assert!(!env.contains("DATABASE_URL"), "{env}");
+    assert!(env.contains("AUTH_SECRET="), "{env}");
+    assert!(tree.read(".gitignore").contains("/.env"));
+}
+
+#[test]
+fn a_database_project_gets_the_files_that_wire_one_up() {
+    let tree = Tree::new("with-db");
+    scaffold_with(&tree, true, Some(Backend::Sqlite));
+
+    // The worked example everything else is copied from.
+    assert!(
+        tree.read("src/models/todo.rs")
+            .contains("DeriveEntityModel")
+    );
+    assert!(
+        tree.read("src/migrations/m20260101_000001_create_todo.rs")
+            .contains("create_table")
+    );
+    // The connection, reached the only way a stateless handler can reach one.
+    assert!(tree.read("src/db.rs").contains("OnceLock"));
+    assert!(tree.read("src/main.rs").contains("db::connect().await"));
+    assert!(tree.read("src/main.rs").contains("mod models;"));
+}
+
+/// The feature is the one thing about a backend that is not interchangeable,
+/// so the manifest has to name the right one.
+#[test]
+fn the_manifest_names_the_backend_feature() {
+    for (backend, feature) in [
+        (Backend::Sqlite, "sqlx-sqlite"),
+        (Backend::Postgres, "sqlx-postgres"),
+        (Backend::MySql, "sqlx-mysql"),
+    ] {
+        let tree = Tree::new(&format!("feature-{feature}"));
+        scaffold_with(&tree, true, Some(backend));
+
+        let manifest = tree.read("Cargo.toml");
+        assert!(manifest.contains(feature), "{backend:?}:\n{manifest}");
+        assert!(manifest.contains("sea-orm-migration"), "{manifest}");
+    }
+}
+
+/// The config records which backend, and deliberately not how to reach it.
+#[test]
+fn the_config_records_the_backend_and_not_the_credential() {
+    let tree = Tree::new("db-config");
+    scaffold_with(&tree, true, Some(Backend::Postgres));
+
+    let config = tree.read("rahti.config.json");
+    assert!(config.contains("\"backend\": \"postgres\""), "{config}");
+    assert!(config.contains("\"models\": \"src/models\""), "{config}");
+    assert!(
+        !config.contains("DATABASE_URL") && !config.contains("password"),
+        "a connection string is a credential and this file is committed:\n{config}"
+    );
+}
+
+/// `.env` holds the credentials, so it is written once and never tracked —
+/// tracking it would have `upgrade` compare a hash against somebody's
+/// password, and would make it a file the scaffold believes it may rewrite.
+///
+/// `.env.example` is untracked for its own reason: it carries this project's
+/// generated cookie name, and an upgrade that regenerated it would silently
+/// disagree with the `.env` beside it.
+#[test]
+fn neither_env_file_is_tracked() {
+    let tree = Tree::new("db-env");
+    let ledger = scaffold_with(&tree, true, Some(Backend::Sqlite));
+
+    assert!(tree.read(".env").contains("DATABASE_URL="));
+    assert!(
+        !ledger.contains_key(".env"),
+        "the credential is not the scaffold's"
+    );
+    assert!(
+        !ledger.contains_key(".env.example"),
+        "regenerating it would change the project's cookie name"
+    );
+    assert!(tree.0.join(".env.example").exists(), "still written once");
+    assert!(tree.read(".gitignore").contains("/.env"));
+}
+
+// ------------------------------------------------------- generated secrets
+
+/// The whole point of generating them: two projects made on one machine do not
+/// share a signing key or a cookie name.
+#[test]
+fn two_projects_get_different_secrets() {
+    let one = Tree::new("secret-one");
+    let other = Tree::new("secret-two");
+    scaffold_with(&one, true, Some(Backend::Sqlite));
+    scaffold_with(&other, true, Some(Backend::Sqlite));
+
+    let value = |tree: &Tree, key: &str| {
+        tree.read(".env")
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{key}=")))
+            .map(|v| v.trim_matches('"').to_string())
+            .unwrap_or_else(|| panic!("{key} is not in .env"))
+    };
+
+    assert_ne!(value(&one, "AUTH_SECRET"), value(&other, "AUTH_SECRET"));
+    assert_ne!(
+        value(&one, "AUTH_COOKIE_NAME"),
+        value(&other, "AUTH_COOKIE_NAME")
+    );
+}
+
+/// The real key goes in the ignored file. The committed example gets the
+/// placeholder the runtime refuses to start a release build on — a secret in
+/// git is not a secret, and the example has to say so rather than look
+/// configured.
+#[test]
+fn the_example_carries_a_placeholder_and_not_the_key() {
+    let tree = Tree::new("secret-example");
+    scaffold_with(&tree, true, Some(Backend::Sqlite));
+
+    let env = tree.read(".env");
+    let example = tree.read(".env.example");
+
+    let secret = env
+        .lines()
+        .find_map(|line| line.strip_prefix("AUTH_SECRET="))
+        .expect("a secret")
+        .trim_matches('"')
+        .to_string();
+
+    assert!(secret.len() >= 32, "a real key: {secret}");
+    assert_ne!(secret, t::SECRET_PLACEHOLDER);
+    assert!(
+        !example.contains(&secret),
+        "the committed file must not carry the key:\n{example}"
+    );
+    assert!(
+        example.contains(&format!("AUTH_SECRET=\"{}\"", t::SECRET_PLACEHOLDER)),
+        "{example}"
+    );
+}
+
+/// The cookie name is not a credential — it is the project's identity under a
+/// shared parent domain — so both files carry the same one. A clone that read
+/// a different name out of the example would write a second cookie.
+#[test]
+fn both_env_files_agree_on_the_cookie_name() {
+    let tree = Tree::new("cookie-name");
+    scaffold_with(&tree, true, Some(Backend::Sqlite));
+
+    let name_in = |contents: &str| {
+        contents
+            .lines()
+            .find_map(|line| line.strip_prefix("AUTH_COOKIE_NAME="))
+            .map(|v| v.trim_matches('"').to_string())
+            .expect("a cookie name")
+    };
+
+    let real = name_in(&tree.read(".env"));
+    assert_eq!(real, name_in(&tree.read(".env.example")));
+    // A legal cookie name without quoting: hex, and long enough not to collide.
+    assert_eq!(real.len(), 16, "{real}");
+    assert!(real.chars().all(|c| c.is_ascii_hexdigit()), "{real}");
+}
+
+/// All three, under the names `rahti::auth` reads.
+#[test]
+fn the_env_file_names_the_three_auth_variables() {
+    let tree = Tree::new("auth-vars");
+    scaffold_with(&tree, true, None);
+    let env = tree.read(".env");
+
+    for key in ["AUTH_SECRET", "AUTH_COOKIE_NAME", "SESSION_LIFETIME_HOURS"] {
+        assert!(env.contains(&format!("{key}=")), "{key} missing:\n{env}");
+    }
+}
+
+/// Adding a database changes the files it has to change and no others.
+#[test]
+fn a_database_changes_only_what_it_must() {
+    let without = Tree::new("diff-none");
+    let with = Tree::new("diff-db");
+    let a = scaffold_with(&without, true, None);
+    let b = scaffold_with(&with, true, Some(Backend::Sqlite));
+
+    // The guide is one of them: a database project's `AGENTS.md` carries the
+    // database rules and the `database.md` table row.
+    let differ = ["Cargo.toml", "src/main.rs", ".gitignore", "AGENTS.md"];
+    for path in a.keys().filter(|p| b.contains_key(*p)) {
+        let same = a[path] == b[path];
+        if differ.contains(&path.as_str()) {
+            assert!(!same, "{path} should differ once there is a database");
+        } else {
+            assert!(same, "{path} should be identical either way");
+        }
+    }
+}
+
+// ------------------------------------------------------------ documentation
+
+/// Rahti is not in anyone's training data, so a project that leaves the
+/// scaffold without its documentation gives the next coding agent nothing to
+/// read. The guide and the convention documents are scaffold files like any
+/// other: written, ledgered, and refreshed by `upgrade` until edited.
+#[test]
+fn every_project_carries_its_own_documentation() {
+    let tree = Tree::new("docs");
+    let ledger = scaffold(&tree, false);
+
+    assert!(ledger.contains_key("AGENTS.md"));
+    assert!(ledger.contains_key("CLAUDE.md"));
+    assert_eq!(tree.read("CLAUDE.md"), "@AGENTS.md\n");
+
+    for (doc, _) in t::CORE_DOCS {
+        let path = format!("docs/conventions/{doc}");
+        assert!(ledger.contains_key(&path), "{path} is not in the ledger");
+        assert!(tree.0.join(&path).is_file(), "{path} was not written");
+    }
+}
+
+/// The guide must only ever name documents the project actually has: a table
+/// row pointing at a file the scaffold did not write sends the reader
+/// searching for something their checkout does not contain.
+#[test]
+fn the_guide_names_only_documents_the_project_has() {
+    let bare = Tree::new("guide-bare");
+    scaffold(&bare, false);
+
+    let guide = bare.read("AGENTS.md");
+    assert!(!guide.contains("database.md"), "{guide}");
+    assert!(!guide.contains("websockets.md"), "{guide}");
+    assert!(!bare.0.join("docs/conventions/database.md").exists());
+    assert!(!bare.0.join("docs/conventions/websockets.md").exists());
+
+    let full = Tree::new("guide-full");
+    let ledger = scaffold_full(&full, false, Some(Backend::Sqlite), true);
+
+    let guide = full.read("AGENTS.md");
+    assert!(guide.contains("docs/conventions/database.md"), "{guide}");
+    assert!(guide.contains("docs/conventions/websockets.md"), "{guide}");
+    assert!(ledger.contains_key("docs/conventions/database.md"));
+    assert!(ledger.contains_key("docs/conventions/websockets.md"));
+}
+
+/// The copies under `assets/docs/` exist because a published crate cannot
+/// read a file outside its own directory. This holds each one byte-identical
+/// to its canonical original in `docs/conventions/`, the same promise the
+/// client runtime keeps between its two copies.
+#[test]
+fn shipped_docs_match_the_canonical_conventions() {
+    let canonical = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/conventions");
+
+    let mut shipped: Vec<(&str, &str)> = t::CORE_DOCS.to_vec();
+    shipped.push(("database.md", t::DOC_DATABASE));
+    shipped.push(("websockets.md", t::DOC_WEBSOCKETS));
+
+    for (doc, embedded) in shipped {
+        let original = fs::read_to_string(canonical.join(doc))
+            .unwrap_or_else(|e| panic!("docs/conventions/{doc}: {e}"));
+        assert_eq!(
+            original.replace("\r\n", "\n"),
+            embedded.replace("\r\n", "\n"),
+            "assets/docs/{doc} has drifted from docs/conventions/{doc} — \
+             copy the canonical file over it"
+        );
+    }
+}
+
+// --------------------------------------------------------------- websockets
+
+#[test]
+fn ws_is_off_unless_asked_for() {
+    assert!(!Options::parse(&["app"]).unwrap().ws);
+    assert!(Options::parse(&["app", "--ws"]).unwrap().ws);
+}
+
+/// The feature has to land inside the dependency table whichever form the
+/// dependency takes — a published version, or a `--local` path.
+#[test]
+fn ws_puts_the_feature_on_the_rahti_dependency() {
+    let with = t::cargo_toml("demo", "\"0.0.7\"", None, true);
+    assert!(
+        with.contains("rahti = { version = \"0.0.7\", features = [\"ws\"] }"),
+        "{with}"
+    );
+
+    let local = t::cargo_toml("demo", "{ path = \"/checkout/crates/rahti\" }", None, true);
+    assert!(
+        local.contains("rahti = { path = \"/checkout/crates/rahti\", features = [\"ws\"] }"),
+        "{local}"
+    );
+    // The build dependency has no `ws` feature to name.
+    assert!(
+        local.contains("rahti-build = { path = \"/checkout/crates/rahti-build\" }"),
+        "{local}"
+    );
+
+    let without = t::cargo_toml("demo", "\"0.0.7\"", None, false);
+    assert!(without.contains("rahti = \"0.0.7\""), "{without}");
+    assert!(!without.contains("ws"), "{without}");
+}
+
+/// `upgrade` reads the key back to regenerate the same project, so the
+/// choice has to be in the config.
+#[test]
+fn ws_is_recorded_in_the_config() {
+    let tree = Tree::new("ws-config");
+    scaffold_full(&tree, false, None, true);
+    let config = fs::read_to_string(tree.0.join("rahti.config.json")).expect("a config");
+    assert!(config.contains("\"ws\": true"), "{config}");
+
+    let tree = Tree::new("ws-config-off");
+    scaffold_full(&tree, false, None, false);
+    let config = fs::read_to_string(tree.0.join("rahti.config.json")).expect("a config");
+    assert!(!config.contains("\"ws\""), "{config}");
+}

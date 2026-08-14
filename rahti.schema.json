@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Rahti project configuration",
+  "description": "The project's single source of truth. Settings are yours to edit; `schema`, `createdWith` and `scaffold` are written by the scaffold and read by the upgrade command.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this schema, so an editor can offer completion and validation."
+    },
+    "schema": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The configuration shape this file is written for. A build refuses a file claiming a higher number than it understands, rather than reading a key it would get wrong."
+    },
+    "createdWith": {
+      "type": "string",
+      "description": "The Rahti version that scaffolded this project. Provenance, not a constraint: the version actually in use is the one in Cargo.toml."
+    },
+    "app": {
+      "type": "object",
+      "description": "Where the file-system router and the static files live.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "default": "src/app",
+          "description": "Root of the file-system router, relative to the crate root. Every page.rs, layout.rs and route.rs below it becomes a URL."
+        },
+        "public": {
+          "type": "string",
+          "default": "public",
+          "description": "Static files, relative to the working directory the server runs in. Its *contents* are served from `/`: public/css/styles.css becomes /css/styles.css. Override at runtime with RAHTI_PUBLIC_DIR."
+        }
+      },
+      "additionalProperties": false
+    },
+    "server": {
+      "type": "object",
+      "description": "The address the compiled binary listens on. A deployment overrides it from the environment: PORT wins over server.port, HOST over server.host.",
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Bind address, unless the HOST environment variable names another. The default wildcard answers on every interface, which is what a container needs; narrow it to 127.0.0.1 to keep a development server off the local network.",
+          "default": "0.0.0.0"
+        },
+        "port": {
+          "type": "integer",
+          "description": "Bind port, unless the PORT environment variable names another.",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 3000
+        }
+      },
+      "additionalProperties": false
+    },
+    "css": {
+      "type": "object",
+      "description": "The stylesheet build. Nothing here is required: with no `css` object and no entry file, the build does not change.",
+      "properties": {
+        "engine": {
+          "enum": ["tailwind", "plain", "none"],
+          "default": "tailwind",
+          "description": "How `entry` becomes `output`. \"tailwind\" compiles it with the Tailwind standalone CLI. \"plain\" copies it as it is, appending any stylesheets your component libraries ship — no CLI, no download, no network. \"none\" leaves `output` alone so you manage the public directory yourself. Under every engine you edit `entry` and the browser is served `output`, so switching is one word, not a migration."
+        },
+        "entry": {
+          "type": "string",
+          "default": "src/app/globals.css",
+          "description": "The stylesheet you edit, relative to the crate root. Compiled, copied, or ignored according to `engine`. Built only if it exists."
+        },
+        "output": {
+          "type": "string",
+          "default": "public/css/styles.css",
+          "description": "Where the compiled sheet lands. Under the public directory so it is served, and checked in so a clone with no CLI still has one."
+        },
+        "version": {
+          "type": "string",
+          "description": "Which Tailwind standalone CLI release to use. Pinned rather than floating: a stylesheet that changes because upstream released is not wanted."
+        },
+        "download": {
+          "type": "boolean",
+          "default": false,
+          "description": "Fetch the CLI when it is not already in .rahti/bin/, on PATH, or named by RAHTI_TAILWIND. Off by default: a build script that reaches the network unasked breaks --offline, vendored trees and sandboxed CI, and the committed stylesheet means nothing is lost by waiting to be asked."
+        },
+        "minify": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compress the output. A setting rather than a profile switch on purpose: `output` is committed, so tying it to the build profile would have release and debug builds committing the file back and forth forever."
+        },
+        "sha256": {
+          "type": "object",
+          "description": "Expected hash of the downloaded CLI, one entry per platform — a checksum is of one specific binary, so a team on mixed machines needs an entry each. A platform with no entry downloads unverified and the build prints its hash to paste in. Once listed, a binary that stops matching is refused rather than run.",
+          "patternProperties": {
+            "^(windows|linux|macos)-(x64|arm64)$": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ws": {
+      "type": "boolean",
+      "description": "The project uses WebSockets: its Cargo.toml carries the `ws` feature on the `rahti` dependency, which is what compiles `rahti::ws` and the `#[socket]` attribute. Absent means no — the same reading as an absent `db`. The build itself never needs this key (a `#[socket]` in the tree is what wires the endpoint); it exists so `cargo rahti upgrade` knows the manifest is expected to carry the feature, and can say precisely what to add when it does not."
+    },
+    "db": {
+      "type": ["object", "null"],
+      "description": "The database wiring. Absent — or null — means the project has no database: no directories are created, no modules are generated, and nothing in the build mentions SeaORM. Note what is *not* here: the connection string. It carries credentials and this file is committed, so the URL is read from DATABASE_URL at runtime and lives in an ignored .env.",
+      "properties": {
+        "backend": {
+          "enum": ["sqlite", "postgres", "mysql"],
+          "default": "sqlite",
+          "description": "Which engine the application talks to. Recorded rather than inferred from the connection string, because the string is not in this file to read. It decides one thing — the `sea-orm` feature your Cargo.toml needs (sqlx-sqlite, sqlx-postgres, sqlx-mysql) — and is otherwise only used to make a message name the right engine. A misspelling is refused rather than defaulted: falling back to SQLite would wire a database nobody is talking to."
+        },
+        "models": {
+          "type": "string",
+          "default": "src/models",
+          "description": "Where the entities live, relative to the crate root. A flat directory: one file per table, named after it in snake_case. `mod.rs` is generated from the contents — the entities themselves are yours, and Rahti neither writes nor reads SeaORM code."
+        },
+        "migrations": {
+          "type": "string",
+          "default": "src/migrations",
+          "description": "Where the migrations live, relative to the crate root. `mod.rs` is generated and carries the `Migrator`, which lists every file here in filename order — so name a migration mYYYYMMDD_NNNNNN_<what>.rs and adding the file is the whole of adding the migration. A migration written but never pushed into a hand-maintained list is the quietest failure there is: the file exists, the table does not, and nothing says why."
+        }
+      },
+      "additionalProperties": false
+    },
+    "scaffold": {
+      "type": "object",
+      "description": "What the scaffold wrote, and the SHA-256 of each file at the moment it was written. The upgrade command compares these to decide whether a file is still its own to change: a hash that matches may be rewritten or removed silently, one that differs is yours and is left alone with a note. This is why an upgrade can retire a feature without ever destroying work.",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  },
+  "additionalProperties": false
+}

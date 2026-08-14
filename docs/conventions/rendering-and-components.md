@@ -1,0 +1,304 @@
+# Rendering and Components
+
+## `html!` Ownership Split
+
+Rahti has two expression dialects:
+
+| Syntax | Owner | Evaluation time |
+| --- | --- | --- |
+| `@{rust_expression}` | Rust/Rahti | server render |
+| `{javascript_expression}` | PulsePoint | browser render |
+
+```rust
+html! {
+    <section>
+        <h1>@{server_title}</h1>
+        <button onclick={setCount(count + 1)}>{count}</button>
+        <script>
+            const [count, setCount] = pp.state(@{initial_count});
+        </script>
+    </section>
+}
+```
+
+Use quoted Rust strings for authored text:
+
+```rust
+<p>"Stable authored text"</p>
+```
+
+Plain HTML-like text is accepted, but Rust tokenization makes punctuation and
+whitespace fragile. Quoted text is the convention.
+
+The two dialects also print differently. `@{…}` renders a Rust value through
+`Display`, so `false` renders `false`. `{…}` serializes its result the way
+React serializes a JSX child, so a `bool` or an `Option::None` seeded into the
+browser renders as *nothing at all* — a correct value with no visible output.
+The complete table, including the attribute rules, is under "Value Rendering"
+in `pulsepoint.md`; read it before binding a value that is not a string or a
+number.
+
+## Roots, Raw-Text Elements, and Attributes
+
+An `html!` block produces one rooted markup value. A document doctype may
+precede the document root. Void elements are self-closing in authored markup.
+
+Attribute forms:
+
+```rust
+<a href=@{url}>@{label}</a>
+<input value={name} oninput={setName(target.value)} />
+```
+
+Rahti quotes dynamic attributes in emitted HTML. Client expressions remain
+present for PulsePoint.
+
+`<script>` and `<style>` bodies are raw text. Browser JavaScript/CSS braces
+remain literal. `@{...}` is supported inside `<script>` and renders through
+`RenderJs`; it is not lifted inside `<style>`.
+
+## Escaping and Trusted Markup
+
+Rust strings and values are escaped in text and attribute position. Attributes
+also escape quotes. `Html` is already trusted and passes through.
+
+- `Html::escape(text)` creates safe text markup.
+- `Html::from_raw(raw)` trusts the caller completely; use only with sanitized
+  or framework-authored markup.
+- `Html::empty()` represents no output.
+- `Html::concat(iter)` joins several `Html` fragments in order.
+- `Option<T: Render>` renders its value or nothing.
+
+Inside `<script>`, primitives render as JavaScript literals, strings are JSON
+quoted, `Option::None` is `null`, and `Json(&serializable_value)` embeds
+objects/arrays. Rahti neutralizes `<` in serialized script values to prevent a
+value from closing the surrounding script.
+
+To show literal PulsePoint braces as text, use a brace character reference
+such as `"&#123;user&#125;"`; the macro protects it so the browser runtime
+does not treat it as a binding.
+
+## Components
+
+A component is an ordinary PascalCase Rust function:
+
+```rust
+use crate::rahti::{Html, component, html};
+
+#[component]
+pub fn Card(title: &str, children: Html) -> Html {
+    html! {
+        <section>
+            <h2>@{title}</h2>
+            <slot />
+        </section>
+    }
+}
+```
+
+Call it as a tag. A tag name starting with a capital letter is a component —
+no HTML tag starts uppercase — and its attributes name the function's
+parameters:
+
+```rust
+<Card title="Profile">
+    <p>"Ada"</p>
+</Card>
+```
+
+A prop value is a Rust expression: a literal as written (`title="Profile"`,
+`count=3`), or `@{expr}` for anything computed. A bare prop is the boolean
+shorthand — `<Card wide>` passes `wide: true`. A client `{…}` binding is not
+a prop value and fails to compile: a component runs at render, and there is
+nothing of the browser in it.
+
+The tag form is compile-time sugar over the function call. `Card` is still an
+ordinary function, and the call form is what expression contexts use — a
+loop, a condition, a `map`:
+
+```rust
+@{Html::concat(users.iter().map(|user| Card(user, Html::empty())))}
+```
+
+Prop mistakes fail with rustc's ordinary struct-literal errors: a missing
+prop is "missing field", an unknown one is "no field named", a doubled one is
+"specified more than once". Behind the tag, `#[component]` generates a hidden
+props struct sharing the function's name; the one `use` that imports the
+component imports both, and an aliased import
+(`use lib::Button as Installed;` → `<Installed … />`) carries the pair along.
+
+Rules:
+
+- use `#[component]` with no arguments;
+- name the function in PascalCase — the capital is what makes a tag resolve
+  to it;
+- return `Html`;
+- end branches/returns in the `html!` value being returned;
+- take props as normal typed Rust arguments;
+- keep one root — a literal element, or a single component tag (see
+  Composition below);
+- do not manually stamp `pp-component` unless implementing a deliberate
+  framework boundary.
+
+The attribute stamps a stable component identifier derived from function name
+and source location. That boundary gives each rendered instance its own
+PulsePoint state.
+
+A convention file under `app/` is named the same way, from its path. The one
+block shaped differently is a document — a root layout, whose single parent
+element is `<html>`. Stamping that element would make the whole document a
+component, so `html!` injects `<template pp-component="...">` around the
+`<slot />` instead. See `routing.md`.
+
+## Composition
+
+A block — a page, or another component — may render a component tag as its
+whole output:
+
+```rust
+#[component]
+pub fn Spotlight(children: Html) -> Html {
+    html! {
+        <Card title="Spotlight">@{children}</Card>
+    }
+}
+```
+
+A block rooted in a component tag owns no element of its own, so it takes no
+`pp-component` marker and adds no reactive scope: it dissolves into the
+component it renders, exactly as a React wrapper that returns another
+component contributes no DOM. The browser runtime reads one identity per
+element, and that element is the inner component's. Consequences:
+
+- a wrapper that only forwards props and children needs no element around
+  the inner tag;
+- a component that carries its own `<script>` keeps an element root — or a
+  fragment root, which is one — since a dissolved wrapper has no block for
+  the script to live in;
+- a page rooted in a component tag ships no page marker; the children the
+  page writes between the tags are still the page's own fragments, named by
+  the file as always;
+- a root layout keeps its literal `<html>` root — a document's doctype and
+  document element are written in the layout, with components inside them.
+
+## Fragments
+
+A block that renders siblings may root itself in `<>…</>`:
+
+```rust
+#[component]
+pub fn Pair(label: &str) -> Html {
+    html! {
+        <>
+            <dt>@{label}</dt>
+            <dd><slot /></dd>
+        </>
+    }
+}
+```
+
+The fragment ships as a comment pair carrying the block's name:
+
+```html
+<!--pp:pair_3f2a91c8--><dt>Role</dt><dd>Engineer</dd><!--/pp-->
+```
+
+Comments are legal in every content context, so the served markup stays
+valid wherever the fragment lands — `<tbody>`, `<ul>`, `<select>` included —
+and a page without JavaScript renders the siblings bare, exactly as written.
+At hydration the browser runtime turns the pair into a live
+layout-invisible boundary: that is where the block's name lands, where its
+`<script>` lives, and where its re-renders happen, so a fragment-rooted
+component keeps its own state like any other. The boundary's box is removed
+from layout — the siblings participate in the parent's flex, grid, or flow
+as direct items.
+
+Rules and consequences:
+
+- a fragment is a *root* — of an `html!` block, or of the children between a
+  component's tags. Inside an element, siblings need no wrapper and the form
+  is refused;
+- fragment-rooted children of a component tag are a single named block, so
+  bindings and a script inside them share one scope — the multi-root escape
+  from the reactive boundary rule's unstamped shapes;
+- under a table-model or `<select>` parent, the markers stay as served and
+  no boundary is created: the browser's parser polices those content models
+  on every re-render round-trip, so the fragment is grouping only there.
+  Rows render and morph correctly, but keep scripts and bindings out of a
+  fragment in those contexts — they would fall to the enclosing scope;
+- after hydration the boundary is an element in the DOM (outside the strict
+  contexts above), so a CSS child selector (`.parent > *`) sees it rather
+  than the siblings. Prefer class selectors inside fragments;
+- a root layout still writes `<html>` literally — a fragment is not a
+  document.
+
+## Children and Slots
+
+Children are not implicit in the function: declare `children: Html`, then
+place `<slot />`. At the call site they are what sits between the tags —
+markup, quoted text, other component tags, `@{…}` values, or several
+siblings, joined in order:
+
+```rust
+<Card title="Profile">
+    <p>"Ada"</p>
+    <Badge text="Rust" />
+</Card>
+```
+
+An empty tag pair — `<Card title="…"></Card>` — passes `Html::empty()`. A
+self-closing tag passes no `children` argument at all: it is the form for a
+component that declares none, and calling a component that does declare one
+self-closing fails with "missing field `children`".
+
+Children built in Rust are handed in with `@{…}`, or passed positionally
+through the call form. For repeated children:
+
+```rust
+let rows = Html::concat(items.iter().map(|item| html! {
+    <li>@{item}</li>
+}));
+```
+
+```rust
+<Card title="Rows">
+    <ul>@{rows}</ul>
+</Card>
+```
+
+A component that takes `children` and passes it on interpolates it between
+the next component's tags instead of writing `<slot />`.
+
+## Reactive Boundary Rule
+
+Each stamped `html!`/component block is a PulsePoint scope. Children between
+component tags are a block of their own when they have a single root element
+— the same block a separate `html! { … }` child argument is — so a client
+binding written there cannot read state declared by the parent page's script.
+This fails silently as literal/unbound client text. A child fragment with
+several roots, or none, is not stamped, matching the concatenated and
+escaped-text shapes.
+
+Keep state, functions, bindings, and the script that declares them in the same
+block. A reusable interactive child should be its own `#[component]` or carry
+its own script inside its own root.
+
+## Component Modules and Libraries
+
+Application component files live under `src/components/`. Nested directories
+are supported. File and directory names must be valid, non-keyword Rust module
+identifiers: do not start with a digit or use hyphens. Dotfiles and non-Rust
+files are ignored. `rahti-build` regenerates module files, making a direct file
+available as:
+
+```rust
+crate::components::<file>::<Component>
+```
+
+One file may export several components. A nested file is reached through its
+full generated module path.
+
+External component libraries depend on `rahti`, use the same macros, and may
+ship a package-root `ui.css`. The build detects them through dependency
+metadata, includes their Rust sources in Tailwind scanning, appends their CSS,
+and registers component RPCs through the link-time registry.

@@ -1,0 +1,16 @@
+[package]
+name = "rahti-macros"
+description = "Procedural macros for the Rahti web framework. Not used directly — re-exported by the `rahti` crate."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"

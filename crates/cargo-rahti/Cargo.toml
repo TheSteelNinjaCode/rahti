@@ -1,0 +1,36 @@
+# The scaffold. `cargo install cargo-rahti` puts a `cargo-rahti` binary on
+# PATH, and cargo turns `cargo rahti new app` into a call to it — the whole
+# subcommand mechanism is the name.
+[package]
+name = "cargo-rahti"
+description = "Create and maintain Rahti projects: cargo rahti new, cargo rahti upgrade."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# `assets/` is embedded with `include_bytes!`, so it has to travel in the
+# published package — a crate cannot read a file outside its own directory,
+# which is why the client runtime is copied here rather than referenced from
+# the repository's `public/`.
+include = ["src/**/*", "assets/**/*", "Cargo.toml"]
+
+[[bin]]
+name = "cargo-rahti"
+path = "src/main.rs"
+
+[dependencies]
+# For `sha256::hex`, which stamps every scaffolded file into the ledger. The
+# same function the build uses to check a downloaded binary — one hash
+# implementation, used for both trust questions.
+rahti-build.workspace = true
+# Reading a project's own rahti.config.json back — the same format the build
+# reads, so the same parser.
+serde_json = "1"
+# The per-project session secret and cookie name. Asked of the operating
+# system rather than derived from the clock or the project name: a key anyone
+# could regenerate from public facts is not a key. Same crate the runtime uses
+# for CSRF tokens.
+getrandom = "0.3"

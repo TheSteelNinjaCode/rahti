@@ -1,0 +1,216 @@
+# Rahti Agent Guide
+
+## Purpose
+
+This repository is the Rahti framework workspace: the crates under `crates/`,
+the canonical convention documentation under `docs/conventions/`, and the
+scaffold assets that `cargo rahti new` ships into every new application. No
+application lives here — users scaffold their own with `cargo rahti new`, the
+way `npx create-next-app` scaffolds a Next.js project. Treat the
+implementation and the crate test suites as the source of truth, and keep the
+convention documentation synchronized whenever a framework rule changes.
+
+Rahti is a server-rendered Rust framework with:
+
+- file-system routing under `src/app/` of an application;
+- typed HTML through `html!`;
+- ordinary Rust functions as components;
+- browser reactivity supplied by the bundled PulsePoint v2 runtime;
+- typed Rust RPCs, streaming responses, and uploads;
+- generated routing, component modules, manifests, and CSS integration.
+
+## Required Reading
+
+Read only the documents relevant to the change, but read this file first.
+The convention documents describe the framework from inside a scaffolded
+application, which is the perspective every rule below serves.
+
+| Work area | Canonical document |
+| --- | --- |
+| Repository architecture and generated files | `docs/conventions/architecture.md` |
+| Pages, layouts, route groups, dynamic routes, APIs, errors, 404s | `docs/conventions/routing.md` |
+| `html!`, interpolation, escaping, components, children | `docs/conventions/rendering-and-components.md` |
+| Browser state, hooks, bindings, events, lists, refs, SPA navigation | `docs/conventions/pulsepoint.md` |
+| Browser/backend development diagnostics and `.rahti/dev.log` | `docs/conventions/diagnostics.md` |
+| `#[rpc]`, errors, component RPCs, streams, files | `docs/conventions/rpc-and-uploads.md` |
+| WebSockets: `#[socket]`, `pp.socket`, the optional `ws` feature | `docs/conventions/websockets.md` |
+| Sessions, route protection, `#[rpc(auth)]` | `docs/conventions/authentication.md` |
+| SeaORM entities, migrations, the connection, database tests | `docs/conventions/database.md` |
+| Escaping, CSRF, redirects, upload trust, development exposure | `docs/conventions/security.md` |
+| `rahti.config.json`, CSS, static files, CLI, environment variables | `docs/conventions/configuration-and-tooling.md` |
+| Test placement and verification | `docs/conventions/testing.md` |
+
+When documentation and code disagree, verify the behavior in source and tests,
+fix the documentation in the same change, and call out the mismatch.
+
+## Non-Negotiable Framework Conventions
+
+These are the rules Rahti enforces on applications. Framework changes must
+preserve them, and documentation or scaffold changes must teach them.
+
+1. `rahti-build` owns the generated files in an application —
+   `src/routes.rs`, `src/components/mod.rs`, `src/models/mod.rs` and
+   `src/migrations/mod.rs` (when a database is configured), and
+   `.rahti/manifest.json`. Applications never hand-edit them; the framework
+   must keep regeneration deterministic and complete.
+2. Application routes live under the configured `app.dir` (`src/app` by
+   default). `_private` directories are ignored by the router.
+3. A page is `page.rs`; a layout is `layout.rs`; an error boundary is
+   `error.rs`; a navigation loading region is `loading.rs`; the root 404 is
+   `not-found.rs`; an unwrapped API endpoint is `route.rs`. A route segment
+   cannot contain both `page.rs` and `route.rs`.
+4. `html!` has one authored root: a literal element, a single component tag,
+   or a `<>…</>` fragment. The root layout is the exception: it writes a
+   literal `<html>` root, optionally preceded by a doctype.
+5. Server values use `@{rust_expression}`. PulsePoint/browser expressions use
+   `{javascript_expression}`. Never interchange the two.
+6. Text in `html!` is authored as quoted Rust strings. Runtime values are
+   escaped; `Html::from_raw` is only for explicitly trusted markup.
+7. Components are PascalCase functions marked `#[component]`, return `Html`,
+   and take props as normal Rust arguments. In markup they are called as
+   tags — `<Card title="…">…</Card>` — where props are named attributes
+   (literal or `@{expr}`); the function-call form remains for expression
+   contexts such as loops and conditionals.
+8. Children are an explicit `Html` argument rendered with `<slot />`. An
+   empty tag pair passes `Html::empty()`, a self-closing tag passes no
+   `children` at all. `Html::concat(...)` joins a list built in Rust.
+9. A reactive block and its `<script>` must be self-contained. PulsePoint
+   state does not cross an `html!` component/children boundary.
+10. A page-owned `#[rpc]` sits beside its caller in that `page.rs`; a
+    component-owned `#[rpc]` sits in the component file. Component RPC names
+    are application-wide; the same page RPC name may exist on different page
+    URLs.
+11. RPC parameters are owned, deserializable types (`String`, not `&str`).
+    RPC return values must serialize. Failures go through `rahti::Result<T>`.
+12. PulsePoint's runtime-managed DOM attributes (`data-pp-*`, `pp-owner`,
+    `pp-ref-owner`, the root-layout markers) are never written by hand —
+    not in applications, not in scaffold templates, not in documentation
+    examples.
+13. PulsePoint is a shipped binary asset. Its canonical copy in this
+    repository is `crates/cargo-rahti/assets/js/pp-reactive-v2.min.js`,
+    which `cargo rahti new` installs into a project as
+    `public/js/pp-reactive-v2.min.js`, mounted by `public/js/main.js`.
+    Never hand-edit the bundle; replace it wholesale. Describe it by its
+    *behaviour* — what a page renders, what a binding updates, what reaches
+    `.rahti/dev.log`. Documentation, doc comments, and code comments name the
+    bundle or name nothing: no JavaScript or TypeScript module filenames, no
+    line numbers inside the bundle, and no filesystem paths outside the
+    repository. Everything a reader is pointed at must exist in their own
+    checkout.
+14. A layout that owns a document below the app root declares
+    `pub const ROOT_LAYOUT: bool = true;` on a line of its own and renders a
+    complete document. Rahti derives that layout's identity from its path and
+    puts it in three places: the `<template>` injected around its `<slot />`,
+    the `X-PP-Root-Layout` header, and a `pp-root-layout` meta tag.
+15. A `loading.rs` is not a layer and inherits nothing. It takes no
+    arguments, is rendered once at startup, and ships in every document; the
+    browser picks one by walking the path it is *leaving* up to the nearest
+    region. That walk is over literal segments, so a `loading.rs` under a
+    dynamic segment is a build error. It does nothing until a layout marks
+    the region it replaces with `pp-loading-content="true"`.
+16. Development browser warnings/errors and Rahti-handled backend failures
+    are written as JSON Lines to `.rahti/dev.log` in an application. That
+    file is generated, gitignored, and never shipped.
+17. The database is SeaORM and belongs to the application, not the framework.
+    `rahti` does not depend on it, and `rahti-build` generates the module
+    wiring without reading a line of it. `src/models/` holds one flat file
+    per table; `src/migrations/` one flat file per change, named
+    `mYYYYMMDD_NNNNNN_<what>.rs` because filename order is application order.
+    The migration is the schema. The connection is a process-wide static
+    (`crate::db::db()`) installed from `main`; `db::migrate()` is never
+    automatic.
+18. A connection string is a credential. It lives in `DATABASE_URL` via an
+    ignored `.env`, never in `rahti.config.json`, which records only which
+    backend the project is on.
+19. Authentication is a signed session cookie and a route policy, and nothing
+    else. `rahti::auth` owns the cookie and the guard; the application owns
+    `src/auth.rs` — which routes are private, and how a password is checked.
+    There are no OAuth providers and no roles. Do not add either without
+    being asked.
+20. The auth policy is installed once from `main` with
+    `rahti::auth::configure(...)`, before the router is built. Everywhere
+    else reads `rahti::auth::settings()` — the installed policy.
+21. `#[rpc(auth)]` is not a substitute for listing a route in
+    `private_routes`, and listing the route is not a substitute for
+    `#[rpc(auth)]`. The guard decides who may load a page; the attribute
+    decides who may make the call.
+22. Auth reads exactly three environment values: `AUTH_SECRET`,
+    `AUTH_COOKIE_NAME`, and the optional `SESSION_LIFETIME_HOURS`. The first
+    two are generated per project by `cargo rahti new` so no two applications
+    share a signing key or a cookie name. `AUTH_SECRET` is a credential and
+    lives in the ignored `.env`; `.env.example` carries the placeholder
+    `change-me`, which a release build refuses to start on. In development a
+    missing secret is invented and warned about; in production it stops the
+    server. Do not add a fourth variable.
+23. `rahti::load_env()` is the only `.env` reader in the process. Do not
+    write a second copy.
+24. The session payload is signed, not encrypted, and readable by whoever
+    holds the cookie. Sign in an id and what the UI needs; never a hash, a
+    token, or anything you would not show the user.
+
+## Repository Map
+
+- `crates/rahti/` - server runtime: HTML values, layouts, errors, RPC,
+  streaming, uploads, auth, sockets, statics, live reload, shutdown.
+- `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[socket]`.
+- `crates/rahti-build/` - configuration, filesystem scan, router/component
+  generation, manifest, dependency components, and CSS.
+- `crates/cargo-rahti/` - `cargo rahti new` and `cargo rahti upgrade`, plus
+  the scaffold assets under `assets/` (documents, templates, the PulsePoint
+  bundle).
+- `crates/rahti-ui/` - example installable component library and CSS.
+- `docs/conventions/` - the canonical convention documentation.
+- `rahti.schema.json` - the JSON schema for `rahti.config.json`.
+
+## Commands
+
+Run from the repository root.
+
+```text
+cargo check --workspace
+cargo test --workspace
+cargo fmt --all -- --check
+```
+
+During implementation, run the narrow package or test first, then the
+workspace suite before handing off a framework-wide change.
+
+The scaffold CLI is exercised from this checkout with:
+
+```text
+cargo run -p cargo-rahti -- new <name> --local <path>
+cargo run -p cargo-rahti -- upgrade --dry-run
+```
+
+`--local <path>` points the generated project's dependencies at this
+checkout instead of crates.io — scaffold a throwaway app into a temporary
+directory and `cargo run` it there to verify a change end to end.
+
+## Documentation Maintenance
+
+Documentation under `docs/conventions/` is written for coding agents and
+maintainers. State rules, supported shapes, ownership, generated behavior,
+and failure modes. Prefer a small verified example over a broad promise.
+
+Write every convention document for a reader inside a **scaffolded
+application**, not inside this repository. Teach each feature with an inline
+example the reader can paste. `architecture.md` and `testing.md` are the two
+exceptions — they describe this workspace and say so.
+
+Every convention document except `architecture.md` and `testing.md` ships
+into new applications through `cargo rahti new`, embedded from copies in
+`crates/cargo-rahti/assets/docs/`. A cargo-rahti test holds each copy
+byte-identical to its canonical file here, so after editing a shipped
+document, copy it over its `assets/docs/` twin in the same change.
+
+Document what Rahti implements today. Do not describe a planned feature, a
+migration path, or compatibility with something Rahti never shipped; a reader
+cannot tell an aspiration from a rule.
+
+When adding a feature:
+
+1. add or update implementation tests in the relevant crate;
+2. update the applicable convention document;
+3. update the feature inventory in `docs/conventions/architecture.md`;
+4. update `rahti.schema.json` when configuration changes;
+5. update scaffold assets/templates when new applications need the change.

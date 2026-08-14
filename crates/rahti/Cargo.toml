@@ -1,0 +1,73 @@
+[package]
+name = "rahti"
+description = "A file-system-routed web framework for Rust: pages, layouts and server functions, rendered on the server."
+# The workspace README is the framework's public face, and `rahti` is the
+# crate people mean when they say the framework's name — so it is the crate
+# whose page carries it.
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+# WebSockets: the `#[socket]` attribute, `rahti::ws`, and the endpoint the
+# generated router merges. A feature rather than a default because the wire
+# brings tokio-tungstenite with it, and an app that never opens a socket
+# should not compile it. `cargo rahti new --ws` is what turns it on.
+ws = ["axum/ws", "tokio/time"]
+
+[dependencies]
+# `multipart` is the upload half of the rpc wire — see src/rpc.rs.
+axum = { version = "0.8.9", features = ["multipart"] }
+# The session cookie — see src/auth.rs. Signed with HMAC-SHA256 and carried as
+# base64url, which is three small, boring crates rather than a hand-written
+# MAC: a comparison that is not constant-time is a forgeable session, and that
+# is not a thing to write twice.
+base64 = "0.22"
+hmac = "0.13"
+sha2 = "0.11"
+# CSRF tokens are asked of the operating system, not of the clock — see the
+# note in src/rpc.rs.
+getrandom = "0.3"
+# The streaming half of the upload wire. `axum::extract::Multipart` hands out
+# a `Field` borrowed from it, which cannot be given to a handler; multer — the
+# crate axum's own multipart is built on, so this adds nothing to the tree —
+# hands out an owned one. See `RpcUpload` in src/upload.rs.
+multer = "3.1"
+# Live reload watches `public/` at runtime — see src/dev.rs.
+notify = "8"
+# The rpc wire. Both already arrive with axum; named here because this crate
+# reads and writes the payload itself.
+serde = "1"
+serde_json = "1"
+rahti-macros.workspace = true
+# `fs` and `io-util` are the upload spool: a part past the threshold is
+# written to disk as it arrives rather than held, and a handler that blocks on
+# that write blocks the runtime thread it is on. See src/upload.rs.
+# `rt` is `task_local!`: the session belongs to the task serving the request,
+# which is what lets a page read it without taking it as an argument.
+tokio = { version = "1.53.1", features = ["fs", "io-util", "rt", "signal", "sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+# `ReaderStream` is `RpcFile::into_stream` — the shape an object-storage
+# client's `put` takes, without the file being read into memory first.
+tokio-util = { version = "0.7", features = ["io"] }
+inventory = "0.3.24"
+
+[dev-dependencies]
+# Driving a finished `Router` the way the generated one is built: a request
+# in, a response out, no socket in between.
+http-body-util = "0.1"
+# A real WebSocket client for the `ws` tests: an upgrade cannot be faked
+# through `tower::Service`, because the connection it hands over only exists
+# on a live socket. Only the tests dial one; `futures-util` is the Stream
+# and Sink traits that client speaks.
+tokio-tungstenite = "0.28"
+futures-util = "0.3"
+# `derive` is for the test types an rpc reads; the crate itself needs only
+# the traits.
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["catch-panic"] }
