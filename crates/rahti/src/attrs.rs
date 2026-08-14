@@ -124,6 +124,65 @@ impl Attrs {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// What this set says to do, in the order it was said: a value to write,
+    /// or `None` to take the attribute away.
+    ///
+    /// A set is built to be spread, and spreading it is usually the end of
+    /// it. This is for the code that has to *compose* one — a component that
+    /// merges a caller's attributes into its own has to know what the caller
+    /// named before it can decide what to add.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, Option<&str>)> {
+        self.0
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_deref()))
+    }
+
+    /// The attributes this set touches, in order — whether it writes them or
+    /// removes them.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(|(name, _)| name.as_str())
+    }
+
+    /// What this set writes under `name`: `None` if it does not name it at
+    /// all, `Some(None)` if it names it as a removal.
+    pub fn get(&self, name: &str) -> Option<Option<&str>> {
+        self.0
+            .iter()
+            .find(|(existing, _)| existing == name)
+            .map(|(_, value)| value.as_deref())
+    }
+}
+
+/// `Attrs::from([("id", "avatar"), ("data-user", "42")])` — the bulk
+/// spelling, for a set known all at once.
+impl<N: Into<String>, V: Into<String>, const K: usize> From<[(N, V); K]> for Attrs {
+    fn from(pairs: [(N, V); K]) -> Self {
+        pairs.into_iter().collect()
+    }
+}
+
+/// The same, for a set computed in Rust — `map(…).collect()`.
+impl<N: Into<String>, V: Into<String>> FromIterator<(N, V)> for Attrs {
+    fn from_iter<I: IntoIterator<Item = (N, V)>>(pairs: I) -> Self {
+        pairs
+            .into_iter()
+            .fold(Attrs::new(), |attrs, (name, value)| attrs.set(name, value))
+    }
+}
+
+impl<'a> IntoIterator for &'a Attrs {
+    type Item = (&'a str, Option<&'a str>);
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, (String, Option<String>)>,
+        fn(&'a (String, Option<String>)) -> (&'a str, Option<&'a str>),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_deref()))
+    }
 }
 
 /// Something `@{..expr}` can spread onto an element.
