@@ -100,11 +100,21 @@ pub fn expand(attr: TokenStream, item: TokenStream, file: &str) -> Result<TokenS
 ///
 /// The struct is what turns written-order props into named ones: a struct
 /// literal accepts its fields in any order, and its ordinary errors are the
-/// diagnostics for a missing, unknown or doubled prop. Only `__rahti_call`
+/// diagnostics for an unknown or doubled prop. Only `__rahti_call`
 /// knows the declaration order, and it is generated here, where that order
 /// is visible; the call site never needs it. The struct is generic over
 /// every field, so no parameter type — lifetimes included — is ever spelled
 /// out; handing the fields to the function is what pins them.
+///
+/// It also carries a `Default`, which is what lets a tag leave a prop out.
+/// `html!` closes every props literal with `..Default::default()`, so the
+/// fields the author wrote are theirs and the rest come from here — a
+/// component's defaults, reached the way React reaches them. The impl is
+/// written out rather than derived so the bound is visible: every prop type
+/// has to be `Default`, since the struct cannot know which fields a given
+/// call site will omit. `&str`, `bool`, numbers, `String`, `Option<T>` and
+/// `Html` all are; a prop that genuinely has no sensible default belongs in
+/// an `Option`.
 fn companion(signature: &[TokenTree], name: &str) -> Result<TokenStream, Error> {
     let fn_idx = signature
         .iter()
@@ -124,6 +134,18 @@ fn companion(signature: &[TokenTree], name: &str) -> Result<TokenStream, Error> 
         #[allow(non_snake_case, non_camel_case_types, dead_code)]
         #vis struct #ident<#(#types,)*> {
             #(pub #params: #types,)*
+        }
+        #[doc(hidden)]
+        #[allow(non_snake_case, dead_code)]
+        impl<#(#types: ::core::default::Default,)*> ::core::default::Default
+            for #ident<#(#types,)*>
+        {
+            #[inline]
+            fn default() -> Self {
+                Self {
+                    #(#params: ::core::default::Default::default(),)*
+                }
+            }
         }
         #[doc(hidden)]
         #[allow(non_snake_case, dead_code)]

@@ -28,10 +28,10 @@ impl Html {
     /// Nothing at all — what a caller passes for `children` it has no content
     /// for.
     ///
-    /// Rust has no default arguments, so a `children: Html` parameter is
-    /// mandatory at every call site. This is the empty one, and it is what a
-    /// component checks for with [`Html::is_empty`] when it wants to render a
-    /// fallback instead.
+    /// This is also `Html`'s [`Default`], which is what a component tag takes
+    /// for a `children: Html` prop it leaves out: `<Card title="…" />` and
+    /// `<Card title="…"></Card>` both arrive here. A component checks for it
+    /// with [`Html::is_empty`] when it wants to render a fallback instead.
     pub fn empty() -> Self {
         Html(String::new())
     }

@@ -389,6 +389,20 @@ fn emit(ops: Vec<Op>) -> TokenStream {
             // hands them to the function. The tag's children become the
             // `children` field, built by this same emitter; a self-closing
             // tag passes no such field at all.
+            //
+            // The literal ends in `..Default::default()`, which is what
+            // makes a prop optional: `<Button variant="outline">` fills the
+            // one it names and takes the component's defaults for the rest,
+            // the way a React component reads `{ variant = "default" }` out
+            // of its props. The call site cannot do this for itself — it
+            // deliberately does not know the parameter list, which is the
+            // whole reason the companion exists — so the struct's own
+            // `Default` supplies the omitted fields.
+            //
+            // The cost is that a forgotten prop is no longer "missing
+            // field": it compiles, and renders the default. The diagnostic
+            // that remains is for a prop whose type has no `Default`, which
+            // reports as an unsatisfied trait bound at the tag.
             Op::Component(call) => {
                 let name = call.name;
                 let mut fields = TokenStream::new();
@@ -401,7 +415,11 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                 }
                 body.extend(quote! {
                     ::rahti::Render::render_into(
-                        &(#name { #fields }.__rahti_call(#name)),
+                        &(#name {
+                            #fields
+                            ..::core::default::Default::default()
+                        }
+                        .__rahti_call(#name)),
                         &mut __rahti,
                     );
                 });
