@@ -38,6 +38,8 @@ does not discover routes at runtime.
 The server runtime exports:
 
 - `Html`, `Render`, `RenderJs`, and `Json`;
+- `Attrs`, `Attributes`, `AttrList`, `Presence`, and `attribute`: whether an
+  attribute is written at all, and what a `@{..spread}` puts on a tag;
 - layout and error-boundary response layers, including the root-layout layer
   that names the document a response was rendered in;
 - `Error`, `ErrorInfo`, and `Result`;
@@ -69,6 +71,14 @@ The server runtime exports:
   A `<>…</>` fragment roots several siblings between comment markers that
   carry the block's name; the runtime raises them into a layout-invisible
   boundary at hydration.
+- In an open tag it also decides attribute *presence*: an `@{…}` value writes
+  its own name, so `None` writes no attribute, and a `bool` on one of the
+  names HTML reads by presence writes `name=""` or nothing. The list of those
+  names is in `parse.rs`, consulted at compile time — the same `false` means
+  opposite things on `disabled` and on `aria-hidden`. `@{..expr}` spreads an
+  attribute set onto the element, and a tag carrying one builds its whole open
+  tag through `rahti::AttrList` so that a later attribute replaces an earlier
+  one instead of being written beside it.
 - `#[component]` validates a PascalCase function, stamps its returned root,
   and generates the hidden named-props companion the tag form calls through.
 - `#[rpc]` preserves the Rust function and generates its request shim and

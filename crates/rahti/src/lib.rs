@@ -14,6 +14,7 @@
 // calls it yet" is not a defect.
 #![allow(dead_code, unused_imports)]
 
+mod attrs;
 pub mod auth;
 mod dev;
 mod env;
@@ -32,6 +33,10 @@ pub mod ws;
 
 /// The auth layer, under the name generated code calls it by — beside `csrf`
 /// and `revalidate`, which is where it sits in the router.
+/// Attributes decided at runtime: whether one is written, and what a
+/// `@{..spread}` brings. `AttrList` and `attribute` are what `html!` expands
+/// into; `Attrs` and `Attributes` are what an application writes.
+pub use attrs::{AttrList, Attributes, Attrs, Presence, attribute};
 pub use auth::guard as auth_guard;
 pub use dev::{DEV_ENV, revalidate, routes as dev_routes};
 /// `.env` into the process environment, once. Called by `AuthSettings::from_env`

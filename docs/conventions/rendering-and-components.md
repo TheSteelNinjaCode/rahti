@@ -53,6 +53,89 @@ Attribute forms:
 Rahti quotes dynamic attributes in emitted HTML. Client expressions remain
 present for PulsePoint.
 
+An attribute name is written as it appears in markup: letters, digits, `-`,
+and `:` for a namespace prefix — `data-user-id`, `aria-label`, `xlink:href`,
+`xml:space`.
+
+### Whether an Attribute Is Written
+
+An `@{…}` value decides whether its attribute appears at all.
+
+| Value | Renders |
+| --- | --- |
+| anything ordinary | `name="value"` |
+| `Option::None` | nothing |
+| `Option::Some(v)` | whatever `v` renders |
+| `true` on a boolean attribute | `name=""` |
+| `false` on a boolean attribute | nothing |
+| `true` / `false` anywhere else | `name="true"` / `name="false"` |
+
+```rust
+<a href=@{maybe_url}>"Profile"</a>       // no href when None
+<input disabled=@{is_locked} />          // no disabled when false
+<span aria-hidden=@{decorative}>…</span> // aria-hidden="false" when false
+```
+
+A *boolean attribute* is one HTML reads by presence, and which one that is
+depends on the name — decided at compile time, not by the value's type. The
+list is the HTML specification's: `allowfullscreen`, `async`, `autofocus`,
+`autoplay`, `checked`, `controls`, `default`, `defer`, `disabled`, `download`,
+`formnovalidate`, `hidden`, `inert`, `ismap`, `itemscope`, `loop`, `multiple`,
+`muted`, `nomodule`, `novalidate`, `open`, `playsinline`, `readonly`,
+`required`, `reversed`, `selected`, and the three `shadowroot*` attributes.
+
+What is *not* on it matters as much. `aria-*` attributes are enumerated:
+`aria-hidden="false"` is a different thing from no `aria-hidden` at all, and
+dropping it would change what a screen reader announces. So are
+`contenteditable`, `draggable`, `spellcheck`, `translate` and `autocomplete`,
+which read their values as words. A `bool` written on any of them renders as
+the word it is.
+
+Nothing here changes a literal: `<input required>` and `hidden="until-found"`
+are written exactly as typed.
+
+### Spreading Attributes
+
+`@{..expr}` writes a set of attributes computed in Rust:
+
+```rust
+let extra = Attrs::new().set("id", "avatar").unset("stroke-width");
+
+html! {
+    <svg class="size-4" stroke-width="2" @{..extra}>…</svg>
+}
+```
+
+```html
+<svg class="size-4" id="avatar">…</svg>
+```
+
+Two dots, and inside `@{…}` — the server dialect. `{...attrs}` is JSX's
+spelling and does not work here: `{…}` in a tag belongs to PulsePoint, and the
+two dialects never trade places.
+
+An attribute written later replaces one written earlier, in place, so where
+the spread sits is what it means: after the attributes it overrides them,
+before them it supplies defaults. `Attrs::unset` removes an attribute
+outright, which no value can express.
+
+`@{..expr}` takes anything implementing `Attributes`: `Attrs`, pairs in an
+array, slice, `Vec` or map, and an `Option` of any of them — so a spread that
+is sometimes nothing is `@{..maybe}` rather than a branch around the tag. A
+`HashMap` spreads in sorted order, because markup that changes between two
+runs of the same code cannot be reviewed.
+
+Names are validated and values escaped, the same as everywhere else. A name
+markup cannot carry is dropped and reported through `debug_assert!` —
+development says so, and a release build serves the page without that one
+attribute. `pp-component` is the client runtime's and a spread never writes
+it.
+
+A spread is for elements. A component takes typed props, so a component that
+forwards attributes declares one — `attrs: Attrs` — and the caller passes it
+by name; an unknown prop stays a compile error rather than becoming an HTML
+attribute nobody meant to write.
+
 `<script>` and `<style>` bodies are raw text. Browser JavaScript/CSS braces
 remain literal. `@{...}` is supported inside `<script>` and renders through
 `RenderJs`; it is not lifted inside `<style>`.

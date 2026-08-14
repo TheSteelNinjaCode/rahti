@@ -3,6 +3,8 @@
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 
+use crate::attrs::Presence;
+
 #[cfg(test)]
 #[path = "tests/html.rs"]
 mod tests;
@@ -104,6 +106,23 @@ pub trait Render {
     fn render_attr_into(&self, out: &mut String) {
         self.render_into(out);
     }
+
+    /// Does this value put an attribute on the element at all?
+    ///
+    /// Defaults to [`Presence::Value`] — a value is written — which is the
+    /// answer for a string, a number, and anything an application implements
+    /// this trait for. The two that answer differently are the two JSX treats
+    /// specially: `Option::None` writes nothing, and a `bool` on a boolean
+    /// attribute writes `name=""` or nothing at all.
+    ///
+    /// `boolean` says whether the attribute is one HTML reads by presence.
+    /// `html!` decides that from the name at compile time, because the same
+    /// `false` means opposite things on `disabled` and on `aria-hidden`: the
+    /// first must disappear, and the second must stay and say `false`.
+    fn attribute_presence(&self, boolean: bool) -> Presence {
+        let _ = boolean;
+        Presence::Value
+    }
 }
 
 impl Render for Html {
@@ -142,6 +161,10 @@ impl<T: Render + ?Sized> Render for &T {
     fn render_attr_into(&self, out: &mut String) {
         (**self).render_attr_into(out);
     }
+
+    fn attribute_presence(&self, boolean: bool) -> Presence {
+        (**self).attribute_presence(boolean)
+    }
 }
 
 /// Renders the value if present, nothing if not — the usual way to make an
@@ -158,9 +181,40 @@ impl<T: Render> Render for Option<T> {
             value.render_attr_into(out);
         }
     }
+
+    /// Absent means the attribute is not written — `href=@{None}` renders no
+    /// `href`, rather than an empty one pointing at the current page. What is
+    /// present answers for itself, so `Option<bool>` behaves like the `bool`
+    /// inside it.
+    fn attribute_presence(&self, boolean: bool) -> Presence {
+        match self {
+            Some(value) => value.attribute_presence(boolean),
+            None => Presence::Absent,
+        }
+    }
 }
 
-/// Numbers and `bool` need no escaping, so they go straight in.
+/// A flag, which on a boolean attribute is the attribute itself.
+///
+/// `disabled=@{false}` writes no `disabled`, because HTML reads that attribute
+/// by whether it is there — `disabled="false"` disables the control. On any
+/// other name the flag is an ordinary value: `aria-hidden=@{false}` writes
+/// `aria-hidden="false"`, which is a different thing from writing nothing.
+impl Render for bool {
+    fn render_into(&self, out: &mut String) {
+        out.push_str(if *self { "true" } else { "false" });
+    }
+
+    fn attribute_presence(&self, boolean: bool) -> Presence {
+        match (boolean, self) {
+            (false, _) => Presence::Value,
+            (true, true) => Presence::Empty,
+            (true, false) => Presence::Absent,
+        }
+    }
+}
+
+/// Numbers need no escaping, so they go straight in.
 macro_rules! render_via_display {
     ($($ty:ty),* $(,)?) => {
         $(impl Render for $ty {
@@ -173,7 +227,7 @@ macro_rules! render_via_display {
 }
 
 render_via_display!(
-    bool, char, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
+    char, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
 );
 
 // ------------------------------------------------------------------- script
@@ -341,7 +395,7 @@ fn escape_text_into(text: &str, out: &mut String) {
     }
 }
 
-fn escape_attr_into(text: &str, out: &mut String) {
+pub(crate) fn escape_attr_into(text: &str, out: &mut String) {
     out.reserve(text.len());
     for c in text.chars() {
         match c {

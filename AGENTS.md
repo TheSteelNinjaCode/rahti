@@ -66,27 +66,39 @@ preserve them, and documentation or scaffold changes must teach them.
    `{javascript_expression}`. Never interchange the two.
 6. Text in `html!` is authored as quoted Rust strings. Runtime values are
    escaped; `Html::from_raw` is only for explicitly trusted markup.
-7. Components are PascalCase functions marked `#[component]`, return `Html`,
+7. An `@{…}` attribute value decides whether its attribute is written at all.
+   `Option::None` writes none, and a `bool` on one of the names HTML reads by
+   presence writes `name=""` or nothing. That list lives in `rahti-macros`'
+   `parse.rs` and is consulted by name at compile time: `aria-*`,
+   `contenteditable`, `draggable`, `spellcheck`, `translate` and
+   `autocomplete` are enumerated rather than boolean and stay off it, because
+   `aria-hidden="false"` says what no absent attribute says. `@{..expr}`
+   spreads an attribute set onto an element, last-wins — two dots, inside the
+   server dialect, never JSX's `{...expr}`, which is PulsePoint's. A component
+   takes typed props and declares `attrs: Attrs` to forward attributes; there
+   are no implicit rest-props, because an unknown prop has to stay a compile
+   error.
+8. Components are PascalCase functions marked `#[component]`, return `Html`,
    and take props as normal Rust arguments. In markup they are called as
    tags — `<Card title="…">…</Card>` — where props are named attributes
    (literal or `@{expr}`); the function-call form remains for expression
    contexts such as loops and conditionals.
-8. Children are an explicit `Html` argument rendered with `<slot />`. An
+9. Children are an explicit `Html` argument rendered with `<slot />`. An
    empty tag pair passes `Html::empty()`, a self-closing tag passes no
    `children` at all. `Html::concat(...)` joins a list built in Rust.
-9. A reactive block and its `<script>` must be self-contained. PulsePoint
-   state does not cross an `html!` component/children boundary.
-10. A page-owned `#[rpc]` sits beside its caller in that `page.rs`; a
+10. A reactive block and its `<script>` must be self-contained. PulsePoint
+    state does not cross an `html!` component/children boundary.
+11. A page-owned `#[rpc]` sits beside its caller in that `page.rs`; a
     component-owned `#[rpc]` sits in the component file. Component RPC names
     are application-wide; the same page RPC name may exist on different page
     URLs.
-11. RPC parameters are owned, deserializable types (`String`, not `&str`).
+12. RPC parameters are owned, deserializable types (`String`, not `&str`).
     RPC return values must serialize. Failures go through `rahti::Result<T>`.
-12. PulsePoint's runtime-managed DOM attributes (`data-pp-*`, `pp-owner`,
+13. PulsePoint's runtime-managed DOM attributes (`data-pp-*`, `pp-owner`,
     `pp-ref-owner`, the root-layout markers) are never written by hand —
     not in applications, not in scaffold templates, not in documentation
     examples.
-13. PulsePoint is a shipped binary asset. Its canonical copy in this
+14. PulsePoint is a shipped binary asset. Its canonical copy in this
     repository is `crates/cargo-rahti/assets/js/pp-reactive-v2.min.js`,
     which `cargo rahti new` installs into a project as
     `public/js/pp-reactive-v2.min.js`, mounted by `public/js/main.js`.
@@ -97,21 +109,21 @@ preserve them, and documentation or scaffold changes must teach them.
     line numbers inside the bundle, and no filesystem paths outside the
     repository. Everything a reader is pointed at must exist in their own
     checkout.
-14. A layout that owns a document below the app root declares
+15. A layout that owns a document below the app root declares
     `pub const ROOT_LAYOUT: bool = true;` on a line of its own and renders a
     complete document. Rahti derives that layout's identity from its path and
     puts it in three places: the `<template>` injected around its `<slot />`,
     the `X-PP-Root-Layout` header, and a `pp-root-layout` meta tag.
-15. A `loading.rs` is not a layer and inherits nothing. It takes no
+16. A `loading.rs` is not a layer and inherits nothing. It takes no
     arguments, is rendered once at startup, and ships in every document; the
     browser picks one by walking the path it is *leaving* up to the nearest
     region. That walk is over literal segments, so a `loading.rs` under a
     dynamic segment is a build error. It does nothing until a layout marks
     the region it replaces with `pp-loading-content="true"`.
-16. Development browser warnings/errors and Rahti-handled backend failures
+17. Development browser warnings/errors and Rahti-handled backend failures
     are written as JSON Lines to `.rahti/dev.log` in an application. That
     file is generated, gitignored, and never shipped.
-17. The database is SeaORM and belongs to the application, not the framework.
+18. The database is SeaORM and belongs to the application, not the framework.
     `rahti` does not depend on it, and `rahti-build` generates the module
     wiring without reading a line of it. `src/models/` holds one flat file
     per table; `src/migrations/` one flat file per change, named
@@ -119,22 +131,22 @@ preserve them, and documentation or scaffold changes must teach them.
     The migration is the schema. The connection is a process-wide static
     (`crate::db::db()`) installed from `main`; `db::migrate()` is never
     automatic.
-18. A connection string is a credential. It lives in `DATABASE_URL` via an
+19. A connection string is a credential. It lives in `DATABASE_URL` via an
     ignored `.env`, never in `rahti.config.json`, which records only which
     backend the project is on.
-19. Authentication is a signed session cookie and a route policy, and nothing
+20. Authentication is a signed session cookie and a route policy, and nothing
     else. `rahti::auth` owns the cookie and the guard; the application owns
     `src/auth.rs` — which routes are private, and how a password is checked.
     There are no OAuth providers and no roles. Do not add either without
     being asked.
-20. The auth policy is installed once from `main` with
+21. The auth policy is installed once from `main` with
     `rahti::auth::configure(...)`, before the router is built. Everywhere
     else reads `rahti::auth::settings()` — the installed policy.
-21. `#[rpc(auth)]` is not a substitute for listing a route in
+22. `#[rpc(auth)]` is not a substitute for listing a route in
     `private_routes`, and listing the route is not a substitute for
     `#[rpc(auth)]`. The guard decides who may load a page; the attribute
     decides who may make the call.
-22. Auth reads exactly three environment values: `AUTH_SECRET`,
+23. Auth reads exactly three environment values: `AUTH_SECRET`,
     `AUTH_COOKIE_NAME`, and the optional `SESSION_LIFETIME_HOURS`. The first
     two are generated per project by `cargo rahti new` so no two applications
     share a signing key or a cookie name. `AUTH_SECRET` is a credential and
@@ -142,9 +154,9 @@ preserve them, and documentation or scaffold changes must teach them.
     `change-me`, which a release build refuses to start on. In development a
     missing secret is invented and warned about; in production it stops the
     server. Do not add a fourth variable.
-23. `rahti::load_env()` is the only `.env` reader in the process. Do not
+24. `rahti::load_env()` is the only `.env` reader in the process. Do not
     write a second copy.
-24. The session payload is signed, not encrypted, and readable by whoever
+25. The session payload is signed, not encrypted, and readable by whoever
     holds the cookie. Sign in an id and what the UI needs; never a hash, a
     token, or anything you would not show the user.
 

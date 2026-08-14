@@ -86,6 +86,65 @@ const VOID: [&str; 14] = [
 /// elements, no escaping, and no `{…}` — a brace in JavaScript is a block.
 const RAW_TEXT: [&str; 2] = ["script", "style"];
 
+/// Attributes HTML reads by presence rather than by value.
+///
+/// `disabled="false"` disables the control, so a `false` written on one of
+/// these has to make the attribute disappear — which is what JSX does, and
+/// what [`is_boolean_attribute`] is consulted for.
+///
+/// The list is the HTML specification's, and what is *not* on it matters as
+/// much as what is. `aria-*` attributes are enumerated, not boolean:
+/// `aria-hidden="false"` is a different thing from no `aria-hidden` at all,
+/// and dropping it would change what a screen reader announces. So are
+/// `contenteditable`, `draggable`, `spellcheck`, `translate` and
+/// `autocomplete`, which read `"true"`/`"false"` or `"on"`/`"off"` as words.
+/// All of them are deliberately absent, and a `bool` written on one renders
+/// as the word it is.
+const BOOLEAN_ATTRS: [&str; 29] = [
+    "allowfullscreen",
+    "async",
+    "autofocus",
+    "autoplay",
+    "checked",
+    "controls",
+    "default",
+    "defer",
+    "disabled",
+    // Takes an optional filename, so a `false` on it means "not a download".
+    "download",
+    "formnovalidate",
+    // Enumerated since `hidden="until-found"`, but `hidden="false"` still
+    // hides, which is the failure this list exists to prevent.
+    "hidden",
+    "inert",
+    "ismap",
+    "itemscope",
+    "loop",
+    "multiple",
+    "muted",
+    "nomodule",
+    "novalidate",
+    "open",
+    "playsinline",
+    "readonly",
+    "required",
+    "reversed",
+    "selected",
+    "shadowrootclonable",
+    "shadowrootdelegatesfocus",
+    "shadowrootserializable",
+];
+
+/// Is this attribute one HTML reads by presence?
+///
+/// Decided by name alone rather than by name and element. `open` is boolean on
+/// `<details>` and meaningless on a `<div>`, and treating it as boolean on
+/// both costs nothing: an attribute that means nothing there is better left
+/// off than written as the word `false`.
+pub fn is_boolean_attribute(name: &str) -> bool {
+    BOOLEAN_ATTRS.contains(&name)
+}
+
 /// What a node at the top level of an `html!` block turned out to be.
 ///
 /// Rahti follows React's rule: a page, a layout or an error boundary renders
@@ -118,8 +177,22 @@ pub enum Op {
     Static(String),
     /// `@{expr}` in element position — escaped as text.
     Text(TokenStream),
-    /// `@{expr}` in attribute position — escaped for a quoted value.
-    Attr(TokenStream),
+    /// `name=@{expr}` — the whole attribute, because the value decides
+    /// whether there is one. The name is carried here rather than folded into
+    /// the static markup around it: `href=@{None}` writes nothing at all, and
+    /// a name already pushed cannot be taken back.
+    Attr {
+        /// The name with its leading space — ` href` — so the spacing goes
+        /// or stays with the attribute.
+        name: String,
+        expr: TokenStream,
+        /// The name is one HTML reads by presence. See [`BOOLEAN_ATTRS`].
+        boolean: bool,
+    },
+    /// The attributes of an element carrying a `@{..spread}`, built at
+    /// runtime so that a later one replaces an earlier one instead of being
+    /// written beside it. See [`TagAttr`].
+    OpenTag(Vec<TagAttr>),
     /// `@{expr}` inside a `<script>` body — rendered as JS source through
     /// `RenderJs`, the script-side counterpart of `Render`. Separate because
     /// JS source has no HTML escaping, and a string that renders bare in
@@ -131,6 +204,32 @@ pub enum Op {
     /// `<Card …>` — a call to the `#[component]` function of that name,
     /// rendered where the tag stands.
     Component(ComponentCall),
+}
+
+/// One attribute of an element whose open tag is built at runtime.
+///
+/// An element without a spread never produces these: its attributes fold into
+/// the static markup, exactly as before, and only an `@{…}` value survives to
+/// runtime. A spread is what forces the whole tag to be assembled, because
+/// what a spread carries is not known until it is evaluated — and writing an
+/// attribute twice and letting the browser take the first would make a spread
+/// lose to whatever it was meant to override.
+#[derive(Debug)]
+pub enum TagAttr {
+    /// `class="card"`, or a bare boolean attribute, or a client `{…}`
+    /// binding — anything whose text is known when it is written. The value
+    /// is unescaped here and escaped when the list is built, and `None` is
+    /// the bare form: `<input required>`.
+    Literal { name: String, value: Option<String> },
+    /// `width=@{size}` — the value decides whether the attribute is written.
+    Value {
+        name: String,
+        expr: TokenStream,
+        boolean: bool,
+    },
+    /// `@{..extra}` — everything the expression carries, folded in at the
+    /// point it was written.
+    Spread(TokenStream),
 }
 
 /// A component tag: `<Card title="…">…</Card>`.
@@ -476,6 +575,22 @@ impl Parser {
     /// Is the token `n` ahead a `{…}` group?
     fn brace_at(&self, n: usize) -> bool {
         matches!(self.peek_at(n), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace)
+    }
+
+    /// Does the braced group `n` ahead open with the spread's `..`?
+    ///
+    /// Only asked where both a spread and a plain `@{expr}` could stand, so
+    /// that each gets the message written for it.
+    fn spread_at(&self, n: usize) -> bool {
+        let Some(TokenTree::Group(g)) = self.peek_at(n) else {
+            return false;
+        };
+        g.stream()
+            .into_iter()
+            .take(2)
+            .filter(|tt| matches!(tt, TokenTree::Punct(p) if p.as_char() == '.'))
+            .count()
+            == 2
     }
 
     /// Does the token `n` ahead close off a run of text?
@@ -937,7 +1052,13 @@ impl Parser {
     fn component_props(
         &mut self,
         name: &str,
-    ) -> Result<(Vec<(proc_macro2::Ident, TokenStream)>, Vec<(String, String)>), Error> {
+    ) -> Result<
+        (
+            Vec<(proc_macro2::Ident, TokenStream)>,
+            Vec<(String, String)>,
+        ),
+        Error,
+    > {
         let mut props = Vec::new();
         let mut bindings = Vec::new();
         loop {
@@ -948,6 +1069,19 @@ impl Parser {
             }
             if self.is_punct(0, '>') || (self.is_punct(0, '/') && self.is_punct(1, '>')) {
                 return Ok((props, bindings));
+            }
+
+            // A spread is for elements, where a name is just markup. A
+            // component's props are typed parameters, and an attribute set
+            // has no way to know which of them it is filling.
+            if self.is_punct(0, '@') && self.brace_at(1) && self.spread_at(1) {
+                return self.err(format!(
+                    "rahti: `@{{..attrs}}` spreads attributes onto an element, and `<{name}>` \
+                     is a component.\n  A component's props are its parameters, so they are \
+                     named: `<{name} class=\"…\" />`. To forward a set of attributes, give \
+                     `{name}` an `attrs: ::rahti::Attrs` prop, pass it by name, and spread it \
+                     onto the element `{name}` renders."
+                ));
             }
 
             let prop = match self.next() {
@@ -1021,23 +1155,46 @@ impl Parser {
     }
 
     fn attributes(&mut self, markup: &mut String, ops: &mut Vec<Op>) -> Result<(), Error> {
+        let attrs = self.tag_attributes()?;
+        emit_attributes(attrs, markup, ops);
+        Ok(())
+    }
+
+    /// Everything between the tag name and the `>`, in written order.
+    ///
+    /// Collected before any of it is emitted, because one attribute decides
+    /// how all of them are written: a `@{..spread}` anywhere in the tag means
+    /// the open tag is assembled at runtime. See [`emit_attributes`].
+    fn tag_attributes(&mut self) -> Result<Vec<TagAttr>, Error> {
+        let mut attrs = Vec::new();
+
         loop {
             if self.peek().is_none() {
                 return self.err("rahti: unterminated tag — expected `>` or `/>`");
             }
             if self.is_punct(0, '>') || (self.is_punct(0, '/') && self.is_punct(1, '>')) {
-                return Ok(());
+                return Ok(attrs);
+            }
+
+            // `@{..expr}` — a spread, which stands where a name would.
+            if self.is_punct(0, '@') && self.brace_at(1) {
+                let span = self.span_now();
+                self.next(); // '@'
+                let Some(TokenTree::Group(g)) = self.next() else {
+                    unreachable!("checked by `brace_at`");
+                };
+                attrs.push(TagAttr::Spread(spread_expr(&g, span)?));
+                continue;
             }
 
             let name = self.attr_name()?;
             if name == COMPONENT_ATTR {
                 self.declares_component = true;
             }
-            markup.push(' ');
-            markup.push_str(&name);
 
             if !self.is_punct(0, '=') {
                 // Boolean attribute: `<input required>`.
+                attrs.push(TagAttr::Literal { name, value: None });
                 continue;
             }
             self.next(); // '='
@@ -1058,27 +1215,33 @@ impl Parser {
                             ),
                         });
                     }
-                    markup.push_str("=\"");
-                    markup.push_str(&escape_attr(&value));
-                    markup.push('"');
+                    attrs.push(TagAttr::Literal {
+                        name,
+                        value: Some(value),
+                    });
                 }
-                // `@{expr}` — a Rust expression, rendered into the value.
+                // `@{expr}` — a Rust expression. Whether it produces an
+                // attribute at all is the value's to say, so the name travels
+                // with it.
                 Some(TokenTree::Punct(p)) if p.as_char() == '@' && self.brace_at(1) => {
                     self.next(); // '@'
                     let Some(TokenTree::Group(g)) = self.next() else {
                         unreachable!("checked by `brace_at`");
                     };
-                    markup.push_str("=\"");
-                    ops.push(Op::Static(std::mem::take(markup)));
-                    ops.push(Op::Attr(g.stream()));
-                    markup.push('"');
+                    let boolean = is_boolean_attribute(&name);
+                    attrs.push(TagAttr::Value {
+                        name,
+                        expr: g.stream(),
+                        boolean,
+                    });
                 }
                 // `{expr}` — the client runtime binds this attribute.
                 Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {
                     self.next();
-                    markup.push_str("=\"");
-                    markup.push_str(&escape_attr(&binding_source(&g)));
-                    markup.push('"');
+                    attrs.push(TagAttr::Literal {
+                        name,
+                        value: Some(binding_source(&g)),
+                    });
                 }
                 _ => {
                     return self.err(format!(
@@ -1090,7 +1253,7 @@ impl Parser {
         }
     }
 
-    /// `div`, `my-element`, `http-equiv` — idents joined by `-`.
+    /// `div`, `my-element` — idents joined by `-`.
     fn tag_name(&mut self) -> Result<String, Error> {
         let mut name = match self.next() {
             Some(TokenTree::Ident(id)) => id.to_string(),
@@ -1116,8 +1279,14 @@ impl Parser {
         Ok(name)
     }
 
-    /// Same as a tag name, but `data-*` and `aria-*` may end in digits
-    /// (`aria-level-2`), which arrive as literals.
+    /// `class`, `http-equiv`, `xlink:href`, `xml:space` — idents joined by
+    /// `-` or `:`.
+    ///
+    /// Two things a tag name does not need. `data-*` and `aria-*` may end in
+    /// digits (`aria-level-2`), which arrive as literals rather than idents.
+    /// And a `:` separates a namespace prefix from the attribute under it,
+    /// which is how SVG carries `xlink:href` and how an icon exported from a
+    /// drawing program carries `xml:space`.
     fn attr_name(&mut self) -> Result<String, Error> {
         let mut name = match self.next() {
             Some(TokenTree::Ident(id)) => id.to_string(),
@@ -1129,18 +1298,21 @@ impl Parser {
             }
             None => return self.err("rahti: expected an attribute name"),
         };
-        while self.is_punct(0, '-') {
+        while self.is_punct(0, '-') || self.is_punct(0, ':') {
+            let separator = if self.is_punct(0, '-') { '-' } else { ':' };
             self.next();
             match self.next() {
                 Some(TokenTree::Ident(id)) => {
-                    name.push('-');
+                    name.push(separator);
                     name.push_str(&id.to_string());
                 }
                 Some(TokenTree::Literal(l)) => {
-                    name.push('-');
+                    name.push(separator);
                     name.push_str(&l.to_string());
                 }
-                _ => return self.err("rahti: expected a name after `-`"),
+                _ => {
+                    return self.err(format!("rahti: expected a name after `{separator}`"));
+                }
             }
         }
         Ok(name)
@@ -1160,6 +1332,104 @@ impl Parser {
     fn span_now(&self) -> Span {
         self.peek().map_or(self.last, |t| t.span())
     }
+}
+
+// --------------------------------------------------------------- attributes
+
+/// Turn a tag's attributes into writes.
+///
+/// Two ways, and which one is used is decided by whether a spread was written.
+///
+/// Without one, every attribute goes where it always went: names and literal
+/// values fold into `markup`, which becomes a single `push_str`, and only an
+/// `@{…}` survives as an op. The one change from writing the whole thing
+/// statically is that a dynamic attribute takes its name with it, since the
+/// value is what decides whether the attribute exists.
+///
+/// With one, the tag is built at runtime through an `AttrList`. That is what a
+/// spread needs to mean what it means: writing `class` twice and leaving the
+/// browser to take the first would make `<svg class="a" @{..attrs}>` ignore
+/// the spread, which is the opposite of what the same line does in JSX. Only
+/// tags that carry a spread pay for it.
+fn emit_attributes(attrs: Vec<TagAttr>, markup: &mut String, ops: &mut Vec<Op>) {
+    if !attrs.iter().any(|a| matches!(a, TagAttr::Spread(_))) {
+        for attr in attrs {
+            match attr {
+                TagAttr::Literal { name, value } => {
+                    markup.push(' ');
+                    markup.push_str(&name);
+                    if let Some(value) = value {
+                        markup.push_str("=\"");
+                        markup.push_str(&escape_attr(&value));
+                        markup.push('"');
+                    }
+                }
+                TagAttr::Value {
+                    name,
+                    expr,
+                    boolean,
+                } => {
+                    ops.push(Op::Static(std::mem::take(markup)));
+                    ops.push(Op::Attr {
+                        name: format!(" {name}"),
+                        expr,
+                        boolean,
+                    });
+                }
+                TagAttr::Spread(_) => unreachable!("checked above"),
+            }
+        }
+        return;
+    }
+
+    // The tag name is already in `markup`, and it stays static: a spread
+    // cannot rename an element, and the block's `pp-component` is written
+    // into this same chunk.
+    ops.push(Op::Static(std::mem::take(markup)));
+    ops.push(Op::OpenTag(attrs));
+}
+
+/// The expression inside `@{..expr}`, or an error explaining what was meant.
+///
+/// `..` is Rust's own spread — the token that finishes a struct literal — so a
+/// Rust author reads `@{..attrs}` the way they read `..Default::default()`.
+/// JSX spells it `{...attrs}`, which cannot be borrowed here: `{…}` in a tag
+/// is a client binding, and the two dialects never trade places. The
+/// three-dot spelling is recognised only to say so.
+fn spread_expr(g: &proc_macro2::Group, span: Span) -> Result<TokenStream, Error> {
+    let toks: Vec<TokenTree> = g.stream().into_iter().collect();
+    let dots = toks
+        .iter()
+        .take_while(|tt| matches!(tt, TokenTree::Punct(p) if p.as_char() == '.'))
+        .count();
+
+    if dots == 3 {
+        return Err(Error {
+            span: g.span(),
+            msg: "rahti: a spread is `@{..attrs}` — two dots, the way a Rust struct \
+                  literal spreads.\n  `{...attrs}` is JSX's spelling, and `{…}` in a tag \
+                  belongs to the client runtime."
+                .into(),
+        });
+    }
+    if dots != 2 {
+        return Err(Error {
+            span,
+            msg: "rahti: expected an attribute name, or a spread.\n  \
+                  A Rust value goes in an attribute's value — `class=@{name}` — and \
+                  `@{..attrs}` spreads a set of them onto the element."
+                .into(),
+        });
+    }
+
+    let expr: TokenStream = toks[2..].iter().cloned().collect();
+    if expr.is_empty() {
+        return Err(Error {
+            span: g.span(),
+            msg: "rahti: `@{..}` spreads nothing. Name what it spreads — `@{..attrs}`.".into(),
+        });
+    }
+    Ok(expr)
 }
 
 // ------------------------------------------------------------------ script

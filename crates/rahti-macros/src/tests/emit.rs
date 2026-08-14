@@ -4,6 +4,18 @@ use super::*;
 use proc_macro2::TokenStream;
 use std::str::FromStr;
 
+/// One attribute of a runtime-built open tag, as it was written.
+fn show_tag_attr(attr: &parse::TagAttr) -> String {
+    match attr {
+        parse::TagAttr::Literal { name, value } => match value {
+            Some(value) => format!(" {name}=\"{value}\""),
+            None => format!(" {name}"),
+        },
+        parse::TagAttr::Value { name, .. } => format!(" {name}=\"@{{}}\""),
+        parse::TagAttr::Spread(expr) => format!(" @{{..{expr}}}"),
+    }
+}
+
 fn ops_of(src: &str, file: &str) -> Vec<Op> {
     let stream = TokenStream::from_str(src).expect("test source does not tokenize");
     let parsed = parse::parse(stream).unwrap_or_else(|e| panic!("{}", e.msg));
@@ -15,7 +27,9 @@ fn markup(src: &str, file: &str) -> String {
         ops.iter()
             .map(|op| match op {
                 Op::Static(s) => s.clone(),
-                Op::Text(_) | Op::Attr(_) | Op::ScriptText(_) => "@{}".to_string(),
+                Op::Text(_) | Op::ScriptText(_) => "@{}".to_string(),
+                Op::Attr { name, .. } => format!("{name}=\"@{{}}\""),
+                Op::OpenTag(attrs) => attrs.iter().map(show_tag_attr).collect(),
                 Op::Slot => "<slot/>".to_string(),
                 Op::Component(call) => match &call.children {
                     None => format!("<{}/>", call.name),
@@ -158,11 +172,54 @@ fn interpolation_splits_the_static_runs() {
     assert!(out.contains("render_into (& (title)"), "{out}");
 }
 
+/// The name goes into the call with the value, because the value is what
+/// decides whether the attribute is written at all.
 #[test]
-fn an_attribute_expression_uses_the_attribute_escaping() {
+fn an_attribute_expression_writes_the_whole_attribute() {
     let ops = ops_of("<a href=@{url}>x</a>", "src/lib/widgets.rs");
     let out = emit(ops).to_string();
-    assert!(out.contains("render_attr_into (& (url)"), "{out}");
+    assert!(
+        out.contains("attribute (\" href\" , & (url) , false ,"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("href = \\\""),
+        "the name is not static: {out}"
+    );
+}
+
+/// The same call, with the flag that tells `rahti::attribute` this is a name
+/// HTML reads by presence.
+#[test]
+fn a_boolean_attribute_expression_is_marked_as_one() {
+    let ops = ops_of("<input disabled=@{off} />", "src/lib/widgets.rs");
+    let out = emit(ops).to_string();
+    assert!(
+        out.contains("attribute (\" disabled\" , & (off) , true ,"),
+        "{out}"
+    );
+}
+
+/// A tag carrying a spread builds its attributes instead of folding them, so
+/// that a later one replaces an earlier one.
+#[test]
+fn a_spread_builds_the_open_tag() {
+    let ops = ops_of("<div class=\"a\" @{..extra}>x</div>", "src/lib/widgets.rs");
+    let out = emit(ops).to_string();
+    assert!(out.contains("AttrList :: new ()"), "{out}");
+    assert!(out.contains("set (\"class\" , \"a\")"), "{out}");
+    assert!(out.contains("spread (& (extra))"), "{out}");
+    assert!(out.contains("write_into (& mut __rahti)"), "{out}");
+}
+
+/// And a tag without one does not: the cost of the list is paid only where
+/// the feature is used.
+#[test]
+fn a_tag_without_a_spread_still_folds_into_static_markup() {
+    let ops = ops_of("<div class=\"a\" id=\"b\">x</div>", "src/lib/widgets.rs");
+    let out = emit(ops).to_string();
+    assert!(!out.contains("AttrList"), "{out}");
+    assert_eq!(out.matches("push_str").count(), 1, "{out}");
 }
 
 /// `<slot />` is the `children` binding, so a block using one outside a

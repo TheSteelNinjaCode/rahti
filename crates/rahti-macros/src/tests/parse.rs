@@ -27,7 +27,23 @@ fn show(ops: &[Op]) -> String {
         match op {
             Op::Static(s) => out.push_str(s),
             Op::Text(expr) => out.push_str(&format!("@{{{expr}}}")),
-            Op::Attr(expr) => out.push_str(&format!("@{{{expr}}}")),
+            // The name travels with the value now, so the op writes the whole
+            // attribute — quotes included.
+            Op::Attr { name, expr, .. } => out.push_str(&format!("{name}=\"@{{{expr}}}\"")),
+            Op::OpenTag(attrs) => {
+                for attr in attrs {
+                    match attr {
+                        TagAttr::Literal { name, value } => match value {
+                            Some(value) => out.push_str(&format!(" {name}=\"{value}\"")),
+                            None => out.push_str(&format!(" {name}")),
+                        },
+                        TagAttr::Value { name, expr, .. } => {
+                            out.push_str(&format!(" {name}=\"@{{{expr}}}\""));
+                        }
+                        TagAttr::Spread(expr) => out.push_str(&format!(" @{{..{expr}}}")),
+                    }
+                }
+            }
             Op::ScriptText(expr) => out.push_str(&format!("@{{{expr}}}")),
             Op::Slot => out.push_str("<slot/>"),
             Op::Component(call) => {
@@ -170,6 +186,206 @@ fn attribute_values_are_escaped() {
     );
 }
 
+/// A `:` separates a namespace prefix from the attribute under it, which is
+/// how SVG carries `xlink:href` and how an icon exported from a drawing
+/// program carries `xml:space`.
+#[test]
+fn namespaced_attribute_names() {
+    assert_eq!(
+        render("<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=\"#a\" /></svg>"),
+        "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=\"#a\"></use></svg>"
+    );
+    assert_eq!(
+        render("<svg xml:space=\"preserve\">x</svg>"),
+        "<svg xml:space=\"preserve\">x</svg>"
+    );
+}
+
+#[test]
+fn a_namespace_prefix_with_nothing_after_it_is_refused() {
+    assert!(error("<svg xmlns:>x</svg>").contains("expected a name after `:`"));
+}
+
+// ------------------------------------------------------------- boolean names
+
+/// The table is consulted by name, and the flag it produces is what tells
+/// `rahti::attribute` that `false` means "no attribute" rather than the word.
+#[test]
+fn a_boolean_attribute_name_is_marked_as_one() {
+    let parsed = parse_ok("<input disabled=@{off} />");
+    let marked = parsed
+        .ops
+        .iter()
+        .any(|op| matches!(op, Op::Attr { name, boolean, .. } if name == " disabled" && *boolean));
+    assert!(marked, "{}", show(&parsed.ops));
+}
+
+/// The names that are *not* on it matter as much as the ones that are.
+/// `aria-hidden="false"` says something no absent attribute says.
+#[test]
+fn an_aria_attribute_is_not_boolean() {
+    for src in [
+        "<span aria-hidden=@{flag}>x</span>",
+        "<span aria-expanded=@{flag}>x</span>",
+        "<div contenteditable=@{flag}>x</div>",
+        "<div draggable=@{flag}>x</div>",
+        "<div spellcheck=@{flag}>x</div>",
+        "<input autocomplete=@{flag} />",
+    ] {
+        let parsed = parse_ok(src);
+        let marked = parsed
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::Attr { boolean, .. } if *boolean));
+        assert!(!marked, "{src} should not be a boolean attribute");
+    }
+}
+
+#[test]
+fn the_boolean_table_covers_the_html_ones() {
+    for name in [
+        "disabled",
+        "checked",
+        "readonly",
+        "required",
+        "hidden",
+        "open",
+        "multiple",
+        "selected",
+        "autofocus",
+        "async",
+        "defer",
+        "inert",
+        "loop",
+        "muted",
+        "novalidate",
+        "reversed",
+    ] {
+        assert!(is_boolean_attribute(name), "{name} is a boolean attribute");
+    }
+}
+
+#[test]
+fn the_boolean_table_leaves_the_enumerated_ones_out() {
+    for name in [
+        "aria-hidden",
+        "aria-expanded",
+        "aria-pressed",
+        "contenteditable",
+        "draggable",
+        "spellcheck",
+        "translate",
+        "autocomplete",
+        "class",
+        "value",
+    ] {
+        assert!(
+            !is_boolean_attribute(name),
+            "{name} is read by value, not by presence"
+        );
+    }
+}
+
+// -------------------------------------------------------------------- spread
+
+#[test]
+fn a_spread_is_an_attribute_of_its_own() {
+    assert_eq!(
+        render("<div class=\"a\" @{..extra}>x</div>"),
+        "<div class=\"a\" @{..extra}>x</div>"
+    );
+}
+
+/// A tag with a spread builds every one of its attributes, because they all
+/// have to go through the same list for a later one to replace an earlier one.
+#[test]
+fn a_spread_takes_the_whole_tag_with_it() {
+    let parsed = parse_ok("<div class=\"a\" id=@{n} @{..extra}>x</div>");
+    let attrs = parsed
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            Op::OpenTag(attrs) => Some(attrs),
+            _ => None,
+        })
+        .expect("an open tag built at runtime");
+
+    assert_eq!(attrs.len(), 3);
+    assert!(matches!(&attrs[0], TagAttr::Literal { name, .. } if name == "class"));
+    assert!(matches!(&attrs[1], TagAttr::Value { name, .. } if name == "id"));
+    assert!(matches!(attrs[2], TagAttr::Spread(_)));
+}
+
+/// And a tag without one is untouched: its attributes still fold into the
+/// static markup, and only an `@{…}` value survives to runtime.
+#[test]
+fn a_tag_without_a_spread_builds_nothing() {
+    let parsed = parse_ok("<div class=\"a\" id=@{n}>x</div>");
+
+    assert!(!parsed.ops.iter().any(|op| matches!(op, Op::OpenTag(_))));
+}
+
+#[test]
+fn a_spread_may_stand_alone_or_beside_a_binding() {
+    assert_eq!(render("<div @{..extra}>x</div>"), "<div @{..extra}>x</div>");
+    assert_eq!(
+        render("<button onclick={save()} @{..extra}>x</button>"),
+        "<button onclick=\"{save()}\" @{..extra}>x</button>"
+    );
+}
+
+#[test]
+fn several_spreads_are_folded_in_written_order() {
+    let parsed = parse_ok("<div @{..a} @{..b}>x</div>");
+    let attrs = parsed
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            Op::OpenTag(attrs) => Some(attrs),
+            _ => None,
+        })
+        .expect("an open tag built at runtime");
+
+    assert_eq!(attrs.len(), 2);
+    assert!(attrs.iter().all(|a| matches!(a, TagAttr::Spread(_))));
+}
+
+/// JSX spells a spread `{...props}`, and `{…}` in a tag is the client
+/// runtime's. The three-dot form is recognised only to say which dialect it
+/// landed in.
+#[test]
+fn the_jsx_spelling_is_refused_with_the_rahti_one() {
+    let message = error("<div @{...extra}>x</div>");
+
+    assert!(message.contains("@{..attrs}"), "{message}");
+    assert!(message.contains("client runtime"), "{message}");
+}
+
+#[test]
+fn a_spread_of_nothing_is_refused() {
+    assert!(error("<div @{..}>x</div>").contains("spreads nothing"));
+}
+
+/// A Rust value in the name position is the other way of writing this wrong,
+/// and the message names both shapes.
+#[test]
+fn a_rust_value_where_a_name_belongs_is_refused() {
+    let message = error("<div @{extra}>x</div>");
+
+    assert!(message.contains("class=@{name}"), "{message}");
+    assert!(message.contains("@{..attrs}"), "{message}");
+}
+
+/// A component's props are its parameters, and an attribute set has no way to
+/// know which of them it is filling. The message says what to do instead.
+#[test]
+fn a_spread_on_a_component_tag_is_refused() {
+    let message = error("<Card @{..extra} />");
+
+    assert!(message.contains("is a component"), "{message}");
+    assert!(message.contains("attrs: ::rahti::Attrs"), "{message}");
+}
+
 // ------------------------------------------------------------ interpolation
 
 #[test]
@@ -183,7 +399,7 @@ fn rust_interpolation_in_text_becomes_a_render_call() {
 fn rust_interpolation_in_an_attribute_becomes_an_attr_call() {
     let parsed = parse_ok("<a href=@{url}>x</a>");
     assert!(
-        parsed.ops.iter().any(|op| matches!(op, Op::Attr(_))),
+        parsed.ops.iter().any(|op| matches!(op, Op::Attr { .. })),
         "expected an attribute op"
     );
     assert_eq!(show(&parsed.ops), "<a href=\"@{url}\">x</a>");

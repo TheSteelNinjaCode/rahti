@@ -22,7 +22,7 @@ mod socket;
 #[path = "tests/emit.rs"]
 mod lib_tests;
 
-use parse::{COMPONENT_ATTR, Op, Parsed, SlotKind};
+use parse::{COMPONENT_ATTR, Op, Parsed, SlotKind, TagAttr};
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -367,9 +367,47 @@ fn emit(ops: Vec<Op>) -> TokenStream {
             Op::Text(expr) => body.extend(quote! {
                 ::rahti::Render::render_into(&(#expr), &mut __rahti);
             }),
-            Op::Attr(expr) => body.extend(quote! {
-                ::rahti::Render::render_attr_into(&(#expr), &mut __rahti);
+            // `name=@{expr}` — the whole attribute, because the value is what
+            // says whether there is one. `href=@{None}` writes nothing, and a
+            // `false` on an attribute HTML reads by presence writes nothing
+            // either; see `rahti::attribute` and the boolean table in
+            // `parse.rs`.
+            Op::Attr {
+                name,
+                expr,
+                boolean,
+            } => body.extend(quote! {
+                ::rahti::attribute(#name, &(#expr), #boolean, &mut __rahti);
             }),
+            // The attributes of a tag carrying `@{..spread}`, assembled so a
+            // later one replaces an earlier one rather than being written
+            // beside it.
+            Op::OpenTag(attrs) => {
+                let mut writes = TokenStream::new();
+                for attr in attrs {
+                    writes.extend(match attr {
+                        TagAttr::Literal { name, value } => {
+                            // A bare boolean attribute has no value to carry,
+                            // and `name=""` is how HTML spells the same thing.
+                            let value = value.unwrap_or_default();
+                            quote! { __rahti_attrs.set(#name, #value); }
+                        }
+                        TagAttr::Value {
+                            name,
+                            expr,
+                            boolean,
+                        } => quote! { __rahti_attrs.value(#name, &(#expr), #boolean); },
+                        TagAttr::Spread(expr) => quote! { __rahti_attrs.spread(&(#expr)); },
+                    });
+                }
+                body.extend(quote! {
+                    {
+                        let mut __rahti_attrs = ::rahti::AttrList::new();
+                        #writes
+                        __rahti_attrs.write_into(&mut __rahti);
+                    }
+                });
+            }
             // `@{…}` inside a `<script>`. The script side has its own trait
             // rather than reusing `Render`: JS source has no HTML escaping,
             // and a string that renders bare in markup needs quoting in a

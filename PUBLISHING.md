@@ -79,4 +79,5 @@ cargo install cargo-rahti
 cargo rahti new smoke-test --tailwind
 ```
 
-The generated `Cargo.toml` should carry `rahti = "0.0.14"`, not a path.
+The generated `Cargo.toml` should carry the version just published — the
+scaffold writes its own `CARGO_PKG_VERSION` — and not a path.
