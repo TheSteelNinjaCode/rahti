@@ -409,6 +409,28 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                 for (prop, value) in call.props {
                     fields.extend(quote! { #prop: #value, });
                 }
+                // Every `{…}` prop, as source, in one field. A component
+                // takes them with `bindings: &[(&str, &str)]` and writes
+                // them onto whatever element it renders, which is what puts
+                // `<Button onclick={save()}>` on the button itself.
+                //
+                // Only emitted when the tag wrote one, so a component that
+                // does not declare `bindings` is unaffected until somebody
+                // hands it a client expression — and then says so, as an
+                // unknown field at the tag.
+                if !call.bindings.is_empty() {
+                    let entries = call.bindings.iter().map(|(name, expr)| {
+                        quote! { (#name, #expr), }
+                    });
+                    // Spelled out as a slice. The props struct is generic
+                    // over every field, so there is no slice type for the
+                    // array literal to coerce towards and inference would
+                    // otherwise pin the field to `&[_; N]`.
+                    fields.extend(quote! {
+                        bindings: &[#(#entries)*]
+                            as &'static [(&'static str, &'static str)],
+                    });
+                }
                 if let Some(child) = call.children {
                     let block = emit(child.ops);
                     fields.extend(quote! { children: #block, });

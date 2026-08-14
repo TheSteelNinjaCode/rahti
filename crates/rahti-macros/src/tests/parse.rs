@@ -36,6 +36,9 @@ fn show(ops: &[Op]) -> String {
                 for (prop, value) in &call.props {
                     out.push_str(&format!(" {prop}={value}"));
                 }
+                for (name, expr) in &call.bindings {
+                    out.push_str(&format!(" {name}={{{expr}}}"));
+                }
                 match &call.children {
                     None => out.push_str("/>"),
                     Some(child) => {
@@ -579,11 +582,39 @@ fn a_component_does_not_disturb_the_outer_root() {
     assert_eq!(&markup[..offset], "<main");
 }
 
+/// A `{…}` prop is the client runtime's, so it is kept as source instead of
+/// evaluated. The component receives the expression and decides which
+/// element it lands on — which is how `<Button onclick={save()}>` puts a
+/// handler on the button.
 #[test]
-fn a_client_binding_is_not_a_prop() {
-    let msg = error("<div><Card title={name} /></div>");
-    assert!(msg.contains("client binding"), "{msg}");
-    assert!(msg.contains("title=@{…}"), "{msg}");
+fn a_client_binding_prop_is_carried_as_source() {
+    let parsed = parse_ok("<div><Button onclick={setCount(count + 1)}>x</Button></div>");
+    let Some(Op::Component(call)) = parsed.ops.iter().find(|op| matches!(op, Op::Component(_)))
+    else {
+        panic!("expected a component call in {:?}", parsed.ops);
+    };
+
+    assert!(call.props.is_empty(), "{:?}", call.props);
+    assert_eq!(
+        call.bindings,
+        vec![("onclick".to_string(), "setCount(count + 1)".to_string())]
+    );
+}
+
+/// Rust props and client bindings on the same tag stay in their own lanes.
+#[test]
+fn a_tag_may_carry_both_kinds_of_prop() {
+    let parsed = parse_ok(r#"<Button variant="outline" onclick={save()} />"#);
+    let [Op::Component(call)] = parsed.ops.as_slice() else {
+        panic!("expected one component call in {:?}", parsed.ops);
+    };
+
+    assert_eq!(call.props.len(), 1);
+    assert_eq!(call.props[0].0.to_string(), "variant");
+    assert_eq!(
+        call.bindings,
+        vec![("onclick".to_string(), "save()".to_string())]
+    );
 }
 
 /// Composition: a block may render another component as its whole output,

@@ -147,6 +147,21 @@ pub struct ComponentCall {
     /// Props in written order. Each value is a Rust expression: the literal
     /// as the author wrote it, or the contents of `@{…}` parenthesised.
     pub props: Vec<(proc_macro2::Ident, TokenStream)>,
+    /// Props written as `{…}` — the client runtime's, not Rust's, and the
+    /// reason a component tag can carry `onclick={save()}`.
+    ///
+    /// A component runs at render, so there is nothing of the browser in it
+    /// to evaluate these against. What it gets instead is the source: the
+    /// name and the expression as written, both as `&'static str`, which it
+    /// is free to write back out onto whatever element it renders. That is
+    /// what makes a component's event props behave like React's — the
+    /// handler ends up on the DOM node, and the runtime evaluates it there,
+    /// when it fires.
+    ///
+    /// They do not become fields of their own. All of them arrive as one
+    /// `bindings: &[(&str, &str)]` — see `lib.rs` — so a component opts into
+    /// the whole surface with one parameter instead of naming forty events.
+    pub bindings: Vec<(String, String)>,
     /// `None` for `<Card />`: nothing is passed, so a component that takes
     /// `children` fails with "missing field" until the caller writes
     /// `<Card></Card>` — or passes some.
@@ -828,7 +843,7 @@ impl Parser {
         }
         self.mark_root(Root::Component(name.clone(), open));
         let ident = proc_macro2::Ident::new(&name, name_span);
-        let props = self.component_props(&name)?;
+        let (props, bindings) = self.component_props(&name)?;
 
         if self.is_punct(0, '/') {
             self.next(); // '/'
@@ -839,6 +854,7 @@ impl Parser {
             ops.push(Op::Component(ComponentCall {
                 name: ident,
                 props,
+                bindings,
                 children: None,
             }));
             return Ok(());
@@ -898,6 +914,7 @@ impl Parser {
         ops.push(Op::Component(ComponentCall {
             name: ident,
             props,
+            bindings,
             children: Some(ChildBlock {
                 ops: child_ops,
                 component_slot: if single_root { child_slot } else { None },
@@ -911,13 +928,18 @@ impl Parser {
     ///
     /// A prop value is a Rust expression: a literal as written (`title="…"`,
     /// `count=3`), or `@{expr}`. A bare prop is JSX's boolean shorthand —
-    /// `<Card wide>` passes `wide: true`. A client `{…}` binding is refused:
-    /// a component runs at render, and there is nothing of the browser in it.
+    /// `<Card wide>` passes `wide: true`.
+    ///
+    /// A `{…}` value is the client runtime's, and is kept as source rather
+    /// than evaluated: it comes back in the second return value and reaches
+    /// the component as a `bindings` entry. See [`ComponentCall::bindings`].
+    #[allow(clippy::type_complexity)]
     fn component_props(
         &mut self,
         name: &str,
-    ) -> Result<Vec<(proc_macro2::Ident, TokenStream)>, Error> {
+    ) -> Result<(Vec<(proc_macro2::Ident, TokenStream)>, Vec<(String, String)>), Error> {
         let mut props = Vec::new();
+        let mut bindings = Vec::new();
         loop {
             if self.peek().is_none() {
                 return self.err(format!(
@@ -925,7 +947,7 @@ impl Parser {
                 ));
             }
             if self.is_punct(0, '>') || (self.is_punct(0, '/') && self.is_punct(1, '>')) {
-                return Ok(props);
+                return Ok((props, bindings));
             }
 
             let prop = match self.next() {
@@ -971,15 +993,23 @@ impl Parser {
                     value.set_span(g.span());
                     props.push((prop, TokenTree::Group(value).into()));
                 }
+                // `{expr}` — the client runtime's. Kept as the source the
+                // author wrote, for the component to put back on an element.
+                //
+                // Handed over without the braces, unlike an element's
+                // attribute: those go straight into markup, where the braces
+                // are what the runtime looks for, while a component receives
+                // an expression and chooses where it lands.
                 Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {
-                    return Err(Error {
-                        span: g.span(),
-                        msg: format!(
-                            "rahti: `{{…}}` is a client binding, and `{prop}` is a prop of \
-                             `{name}` — a Rust value, decided at render.\n  \
-                             Write `{prop}=@{{…}}`."
-                        ),
-                    });
+                    self.next();
+                    let source = binding_source(&g);
+                    let expr = source
+                        .strip_prefix('{')
+                        .and_then(|rest| rest.strip_suffix('}'))
+                        .unwrap_or(&source)
+                        .trim()
+                        .to_string();
+                    bindings.push((prop.to_string(), expr));
                 }
                 _ => {
                     return self.err(format!(
