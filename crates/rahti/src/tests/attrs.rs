@@ -335,17 +335,28 @@ fn set_replaces_and_unset_removes() {
 #[test]
 fn a_set_can_be_built_from_an_array_or_an_iterator() {
     let from_array = Attrs::from([("id", "avatar"), ("data-user", "42")]);
-    assert_eq!(list(|list| list.spread(&from_array)), " id=\"avatar\" data-user=\"42\"");
+    assert_eq!(
+        list(|list| list.spread(&from_array)),
+        " id=\"avatar\" data-user=\"42\""
+    );
 
-    let collected: Attrs = (1..=2).map(|n| (format!("data-{n}"), n.to_string())).collect();
-    assert_eq!(list(|list| list.spread(&collected)), " data-1=\"1\" data-2=\"2\"");
+    let collected: Attrs = (1..=2)
+        .map(|n| (format!("data-{n}"), n.to_string()))
+        .collect();
+    assert_eq!(
+        list(|list| list.spread(&collected)),
+        " data-1=\"1\" data-2=\"2\""
+    );
 }
 
 /// A set is usually built and spread, but a component that merges a caller's
 /// attributes into its own has to read what the caller named first.
 #[test]
 fn a_set_can_be_read_back() {
-    let attrs = Attrs::new().set("id", "a").unset("class").set("role", "img");
+    let attrs = Attrs::new()
+        .set("id", "a")
+        .unset("class")
+        .set("role", "img");
 
     assert_eq!(attrs.names().collect::<Vec<_>>(), ["id", "class", "role"]);
     assert_eq!(
