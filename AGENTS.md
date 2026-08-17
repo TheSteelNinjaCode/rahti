@@ -39,6 +39,7 @@ application, which is the perspective every rule below serves.
 | Escaping, CSRF, redirects, upload trust, development exposure | `docs/conventions/security.md` |
 | `rahti.config.json`, CSS, static files, CLI, environment variables | `docs/conventions/configuration-and-tooling.md` |
 | Test placement and verification | `docs/conventions/testing.md` |
+| Optional Windows/Android packaging, packaged paths, the loopback server | `docs/conventions/native-packaging.md` |
 
 When documentation and code disagree, verify the behavior in source and tests,
 fix the documentation in the same change, and call out the mismatch.
@@ -159,6 +160,28 @@ preserve them, and documentation or scaffold changes must teach them.
 25. The session payload is signed, not encrypted, and readable by whoever
     holds the cookie. Sign in an id and what the UI needs; never a hash, a
     token, or anything you would not show the user.
+26. A scaffolded project's startup lives in its `src/lib.rs`, behind
+    `initialize_application`, and returns a `StartupError` rather than
+    exiting. `src/main.rs` binds the public listener. An optional native
+    package binds a loopback one and calls the same function — Android has no
+    `main` to put this in, and a packaged process that exits during startup is
+    a program that did not open. `cargo-rahti` writes both files; do not
+    collapse them back into one.
+27. Native packaging is optional, additive, and **not in this workspace**. It
+    is a separate package — `rahti-native` and `cargo-rahti-native` — that a
+    project installs when it wants one. Nothing here may depend on Tauri, on
+    an Android SDK, or on those crates. `cargo rahti native` reaches the tool
+    by spawning it, which is why `cargo-rahti` gains no dependency from it.
+28. `rahti` carries the pieces that package depends on: `begin_shutdown` (a
+    packaged GUI never receives Ctrl+C), the default `dev-watch` feature (off,
+    `notify` leaves a mobile build), and the scaffold's
+    `initialize_application`. Removing or renaming one breaks a published
+    package that is not in this repository to fail with it.
+29. `rahti-build` runs generated Rust through rustfmt before writing it. The
+    generated files are checked in and `cargo fmt --all -- --check` is a
+    documented gate, so without it the formatter and the build undid each
+    other on every run. If rustfmt is absent the text is written as codegen
+    produced it, which still compiles.
 
 ## Repository Map
 
@@ -169,7 +192,9 @@ preserve them, and documentation or scaffold changes must teach them.
   generation, manifest, dependency components, and CSS.
 - `crates/cargo-rahti/` - `cargo rahti new` and `cargo rahti upgrade`, plus
   the scaffold assets under `assets/` (documents, templates, the PulsePoint
-  bundle).
+  bundle). `cargo rahti native` is forwarded from here to a separately
+  installed `cargo-rahti-native`; the forwarding is a `Command` spawn and adds
+  no dependency.
 - `crates/rahti-ui/` - example installable component library and CSS.
 - `docs/conventions/` - the canonical convention documentation.
 - `rahti.schema.json` - the JSON schema for `rahti.config.json`.

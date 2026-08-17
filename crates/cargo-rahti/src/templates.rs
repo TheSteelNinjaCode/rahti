@@ -20,11 +20,17 @@ pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js
 /// does — a published crate cannot read a file outside its own directory —
 /// and a test holds each one byte-identical to its canonical original.
 ///
-/// These eight are unconditional. The two that depend on a scaffold choice —
+/// These nine are unconditional. The two that depend on a scaffold choice —
 /// `database.md` and `websockets.md` — are below, written only when the
 /// choice was made: a guide that documents a feature the project does not
 /// have teaches an agent to reach for it.
-pub const CORE_DOCS: [(&str, &str); 8] = [
+///
+/// `native-packaging.md` is in the unconditional set even though `new` has no
+/// flag for it, because it is not a scaffold choice: a project opts in later
+/// by installing a separate tool, and the document is what tells the reader
+/// that the option exists and what it costs. Withholding it would leave
+/// somebody reaching for a Tauri tutorial and wiring the framework up by hand.
+pub const CORE_DOCS: [(&str, &str); 9] = [
     ("routing.md", include_str!("../assets/docs/routing.md")),
     (
         "rendering-and-components.md",
@@ -50,6 +56,10 @@ pub const CORE_DOCS: [(&str, &str); 8] = [
     (
         "configuration-and-tooling.md",
         include_str!("../assets/docs/configuration-and-tooling.md"),
+    ),
+    (
+        "native-packaging.md",
+        include_str!("../assets/docs/native-packaging.md"),
     ),
 ];
 
@@ -123,6 +133,27 @@ name = "{name}"
 version = "0.1.0"
 edition = "2024"
 
+# The application as a library, and a binary that calls it.
+#
+# `src/lib.rs` holds `initialize_application` — the database, the migrations,
+# the auth policy, the router — and `src/main.rs` binds the public listener.
+# The split is what lets an optional native package start the same application:
+# Android has no `main` to reach, it loads a library and calls into it. See
+# docs/conventions/native-packaging.md.
+[lib]
+name = "{lib}"
+path = "src/lib.rs"
+
+[[bin]]
+name = "{name}"
+path = "src/main.rs"
+
+# `native/` is the optional Tauri shell, written by `cargo rahti native init`.
+# Excluded so that a web build never resolves a native dependency; it is its
+# own workspace and is built from inside itself.
+[workspace]
+exclude = ["native"]
+
 [dependencies]
 axum = "0.8.9"
 rahti = {rahti_dep}
@@ -133,6 +164,11 @@ tower-http = {{ version = "0.7", features = ["catch-panic", "fs"] }}
 [build-dependencies]
 rahti-build = {build}
 "#,
+        // Cargo's own rule for a library target's name: the package name with
+        // its hyphens turned into underscores, because a crate name is a Rust
+        // identifier. Written out rather than left implicit so that
+        // `native/src/main.rs` can name it and be right.
+        lib = name.replace('-', "_"),
         build = rahti.replace("crates/rahti\"", "crates/rahti-build\"")
     )
 }
@@ -436,20 +472,46 @@ fn base64(bytes: &[u8]) -> String {
 /// implicit so that changing it is an obvious edit to an obvious line.
 const DEFAULT_LIFETIME_HOURS: u32 = 8;
 
-pub fn main_rs(db: bool) -> String {
+/// `src/lib.rs` — the application, and everything that starts it.
+///
+/// The startup sequence is here rather than in `main` because a Rahti project
+/// can have more than one host. The web binary is one. An optional native
+/// package is another, and on Android it is not a `main` at all: the operating
+/// system loads a library and calls into it, so a `main` that connected the
+/// database and built the router could not be reached from there.
+///
+/// It is also why every step returns rather than exits. A packaged process
+/// that calls `std::process::exit` during startup is, to the person who
+/// double-clicked it, a program that did not open.
+pub fn lib_rs(db: bool) -> String {
     let (modules, connect) = if db {
         (
             r#"
 /// The database connection, and the two directories `rahti-build` wires up
 /// from their contents: an entity per file, and a migration per file.
-mod db;
-mod migrations;
-mod models;
+pub mod db;
+pub mod migrations;
+pub mod models;
 "#,
             r#"
-    // Before the listener, so a project that cannot reach its database says
-    // so once at startup rather than once per request.
-    db::connect().await;
+    // Before the router, so a project that cannot reach its database says so
+    // once at startup rather than once per request.
+    db::connect()
+        .await
+        .map_err(|message| StartupError::new("database", message))?;
+
+    // Not automatic, and not the framework's to decide. Uncomment it to
+    // migrate on boot, or leave it and run migrations deliberately — a server
+    // that changes a schema because somebody restarted it is a surprise, and
+    // the production version of that surprise is much worse.
+    //
+    // Whichever you choose, this line is where both hosts read it from: the
+    // web binary and the native package call this same function, so the
+    // policy cannot differ between them.
+    //
+    // db::migrate()
+    //     .await
+    //     .map_err(|message| StartupError::new("migrations", message))?;
 "#,
         )
     } else {
@@ -460,21 +522,122 @@ mod models;
     // `format!` and closures of its own, and escaping every brace in it to
     // satisfy one placeholder makes a template nobody can read.
     let mut out = String::from(
-        r#"/// Framework runtime, from the `rahti` crate.
+        r#"//! The application, as a library.
+//!
+//! `initialize_application` is everything that turns this project into a
+//! running server, and `src/main.rs` is a short binary that calls it and binds
+//! the public address.
+//!
+//! The split is what lets an optional native package start the same
+//! application — see docs/conventions/native-packaging.md. Nothing here is
+//! specific to one: a web deployment that never packages anything is unchanged
+//! by it.
+
+/// Framework runtime, from the `rahti` crate.
 pub use rahti;
 
 /// Shared components. `mod.rs` is generated by `rahti-build` from the files
 /// in `src/components/`, so the directory name is part of the contract.
 mod components;
-mod routes;
+pub mod routes;
 "#,
     );
     out.push_str(modules);
-    out.push_str("\n#[tokio::main]\nasync fn main() {");
+    out.push_str(
+        r#"
+/// A started application: the router, and the address a web deployment binds
+/// it on.
+pub struct ApplicationRuntime {
+    pub router: axum::Router,
+    pub host: &'static str,
+    pub port: u16,
+}
+
+/// Why the application could not start.
+///
+/// A value rather than a printed line, so a host with no terminal has
+/// something to show.
+#[derive(Debug)]
+pub struct StartupError {
+    /// Which part of startup failed.
+    pub step: &'static str,
+    /// What went wrong, phrased for a person.
+    pub message: String,
+}
+
+impl StartupError {
+    #[allow(dead_code)]
+    fn new(step: &'static str, message: impl Into<String>) -> Self {
+        StartupError { step, message: message.into() }
+    }
+}
+
+impl std::fmt::Display for StartupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for StartupError {}
+
+/// Start the application, without binding anything.
+///
+/// An address is the one part of starting a server the two hosts genuinely
+/// disagree about, so it belongs to each of them: `main` binds the configured
+/// public address, and a native package binds a loopback port the operating
+/// system assigns.
+pub async fn initialize_application() -> Result<ApplicationRuntime, StartupError> {"#,
+    );
     out.push_str(connect);
     out.push_str(
         r#"
-    let app = routes::router();
+    // Once this project has private routes, its auth policy is installed here
+    // — before the router is built, because the guard the router installs
+    // reads the policy on every request, and an unconfigured policy protects
+    // nothing. Write `src/auth.rs`, declare `mod auth;` above, and uncomment:
+    //
+    // rahti::auth::configure(auth::settings());
+    //
+    // Here rather than in `main` so that both hosts install the same one: a
+    // native package calls this function too, and a packaged application whose
+    // private pages were public would be a quiet thing to ship.
+
+    Ok(ApplicationRuntime {
+        router: routes::router(),
+        host: routes::HOST,
+        port: routes::PORT,
+    })
+}
+"#,
+    );
+    out
+}
+
+/// `src/main.rs` — the web binary, and nothing else.
+pub fn main_rs(name: &str) -> String {
+    let lib = name.replace('-', "_");
+    format!(
+        r#"//! The web binary.
+//!
+//! Everything that turns this checkout into a running application is in
+//! `src/lib.rs`, so that an optional native package can call it too. What is
+//! left here is the part only a web deployment has: the public address, and a
+//! terminal to report to.
+
+use {lib}::{{initialize_application, rahti}};
+
+#[tokio::main]
+async fn main() {{
+    let app = match initialize_application().await {{
+        Ok(app) => app,
+        Err(e) => {{
+            // A terminal wants exactly this. A window has nowhere to print,
+            // which is why the error is returned rather than printed by the
+            // function that produced it.
+            eprintln!("rahti: the application could not start ({{}}): {{e}}", e.step);
+            std::process::exit(1);
+        }}
+    }};
 
     // The configured address, unless the environment names another: a
     // deployment sets `PORT` (and `HOST` if it needs one), so this line is
@@ -482,25 +645,24 @@ mod routes;
     // falls forward to the next free one — the line below names the address
     // that actually bound. In release a busy port is an error: whatever
     // routes traffic to this process points at the port it was given.
-    let listener = rahti::listen(routes::HOST, routes::PORT).await;
+    let listener = rahti::listen(app.host, app.port).await;
 
     // Not the bind address verbatim: `0.0.0.0` is every interface, which is
     // not somewhere a browser can go.
-    println!("Server running on {}", rahti::local_url(&listener));
+    println!("Server running on {{}}", rahti::local_url(&listener));
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
+    axum::serve(listener, app.router)
+        .with_graceful_shutdown(async {{
             rahti::shutdown_signal().await;
             println!("\nShutting down...");
-        })
+        }})
         .await
         .unwrap();
 
     println!("Server stopped.");
-}
-"#,
-    );
-    out
+}}
+"#
+    )
 }
 
 /// `src/db.rs` — the connection, and the whole of how one is reached.
@@ -552,30 +714,27 @@ pub fn db() -> &'static DatabaseConnection {
 /// 500. Exits rather than panicking: a backtrace through tokio describes the
 /// framework, and the cause is almost always the URL or a server that is not
 /// running.
-pub async fn connect() {
+pub async fn connect() -> Result<(), String> {
     // One `.env` reader for the process, in the framework — `AuthSettings`
     // needs the same file, and a project with no database still has one.
     // Idempotent, so neither caller has to know which ran first, and a real
     // environment variable still wins over the file.
     rahti::load_env();
 
-    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        eprintln!(
-            "rahti: DATABASE_URL is not set.\n  \
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return Err("DATABASE_URL is not set.\n  \
              It lives in `.env`, which is ignored by git because a connection \
              string is a credential.\n  \
              Copy `.env.example` to `.env`, or export it in your shell."
-        );
-        std::process::exit(1);
-    });
+            .to_string());
+    };
 
-    if let Err(e) = connect_to(&url).await {
-        eprintln!(
-            "rahti: cannot connect to the database: {e}\n  \
+    connect_to(&url).await.map_err(|e| {
+        format!(
+            "cannot connect to the database: {e}\n  \
              Check DATABASE_URL, and that the server is running."
-        );
-        std::process::exit(1);
-    }
+        )
+    })
 }
 
 /// Connect to a named database instead of DATABASE_URL.
@@ -583,7 +742,7 @@ pub async fn connect() {
 /// This is how a test gets one. SQLite needs no server, so a whole suite can
 /// run against a real engine:
 ///
-/// ```no_run
+/// ```ignore
 /// # async fn example() {
 /// let path = std::env::temp_dir().join("my-app-tests.db");
 /// let _ = std::fs::remove_file(&path);
@@ -591,7 +750,7 @@ pub async fn connect() {
 /// crate::db::connect_to(&format!("sqlite://{}?mode=rwc", path.display()))
 ///     .await
 ///     .unwrap();
-/// crate::db::migrate().await;
+/// crate::db::migrate().await.unwrap();
 /// # }
 /// ```
 ///
@@ -639,18 +798,17 @@ pub async fn connect_to(url: &str) -> Result<(), sea_orm::DbErr> {
 /// happens in production is much worse. Call it from a `main` branch behind
 /// an argument, or run it from a test, when you want it.
 ///
-/// ```no_run
+/// ```ignore
 /// # async fn example() {
-/// crate::db::migrate().await;
+/// crate::db::migrate().await.unwrap();
 /// # }
 /// ```
-pub async fn migrate() {
+pub async fn migrate() -> Result<(), String> {
     use sea_orm_migration::MigratorTrait;
 
-    if let Err(e) = crate::migrations::Migrator::up(db(), None).await {
-        eprintln!("rahti: a migration failed: {e}");
-        std::process::exit(1);
-    }
+    crate::migrations::Migrator::up(db(), None)
+        .await
+        .map_err(|e| format!("a migration failed: {e}"))
 }
 "#;
 
@@ -1044,6 +1202,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
     out.push_str(
         "| `rahti.config.json`, CSS, static files, the CLI | \
          `docs/conventions/configuration-and-tooling.md` |\n",
+    );
+    out.push_str(
+        "| Optional Windows/Android packaging, packaged paths, the loopback server | \
+         `docs/conventions/native-packaging.md` |\n",
     );
 
     out.push_str("\n## Non-Negotiable Conventions\n\n");

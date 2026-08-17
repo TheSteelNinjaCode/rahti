@@ -122,7 +122,8 @@ pub fn project_files(
         ("build.rs".into(), t::BUILD_RS.into()),
         (".cargo/config.toml".into(), t::CARGO_CONFIG.into()),
         (".gitignore".into(), t::gitignore(db.is_some()).into_bytes()),
-        ("src/main.rs".into(), t::main_rs(db.is_some()).into_bytes()),
+        ("src/lib.rs".into(), t::lib_rs(db.is_some()).into_bytes()),
+        ("src/main.rs".into(), t::main_rs(name).into_bytes()),
         ("src/app/layout.rs".into(), t::layout_rs(name).into_bytes()),
         (
             "src/app/page.rs".into(),

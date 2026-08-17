@@ -491,6 +491,15 @@ fn check_schema(value: &serde_json::Value) {
 }
 
 fn write_if_changed(path: &str, contents: &str) {
+    // Rust output goes through rustfmt first. See [`formatted`].
+    let owned;
+    let contents = if path.ends_with(".rs") {
+        owned = formatted(contents);
+        owned.as_str()
+    } else {
+        contents
+    };
+
     if fs::read_to_string(path).is_ok_and(|existing| existing == contents) {
         return;
     }
@@ -498,4 +507,65 @@ fn write_if_changed(path: &str, contents: &str) {
         fs::create_dir_all(parent).ok();
     }
     fs::write(path, contents).unwrap_or_else(|e| panic!("rahti: cannot write {path}: {e}"));
+}
+
+/// Generated Rust, as rustfmt would leave it.
+///
+/// ## Why the build does this
+///
+/// The generated files are checked in, and `cargo fmt --all -- --check` is one
+/// of the commands a Rahti project is told to run. Those two facts collide:
+/// rustfmt has opinions about the emitted code — it wraps the long `.layer(…)`
+/// chains and sorts the `mod` declarations — so the gate failed on a file
+/// nobody wrote. Worse, `cargo fmt --all` *fixed* it, and the next build put it
+/// back, so the two commands undid each other forever.
+///
+/// Formatting here settles it: what the build writes is already what rustfmt
+/// wants, so the check passes and running the formatter changes nothing.
+///
+/// This is deliberately not done in `codegen`. That module's job is to emit
+/// correct Rust, its tests assert on the text it emits, and neither should
+/// have to care what the current rustfmt thinks about line width.
+///
+/// ## When it cannot
+///
+/// rustfmt is part of a default toolchain but not guaranteed to be installed,
+/// and a build must not fail because a formatter is missing. Anything that
+/// goes wrong — no rustfmt, a non-zero exit, output that is not UTF-8 — leaves
+/// the text exactly as `codegen` produced it, which is valid Rust that
+/// compiles. The only thing lost is the `cargo fmt --check` gate, which is
+/// what the situation was before.
+///
+/// Costs one process per changed generated file, around 60ms. It runs on every
+/// build rather than only on a change, because whether there *is* a change can
+/// only be decided after formatting — the file on disk is the formatted one.
+fn formatted(source: &str) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let spawned = Command::new("rustfmt")
+        .args(["--emit", "stdout", "--edition", "2024"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+
+    let Ok(mut child) = spawned else {
+        return source.to_string();
+    };
+
+    // Dropped after the write so rustfmt sees end-of-input and can finish;
+    // holding it open would deadlock `wait_with_output`.
+    if let Some(mut stdin) = child.stdin.take() {
+        if stdin.write_all(source.as_bytes()).is_err() {
+            return source.to_string();
+        }
+    }
+
+    match child.wait_with_output() {
+        Ok(output) if output.status.success() => {
+            String::from_utf8(output.stdout).unwrap_or_else(|_| source.to_string())
+        }
+        _ => source.to_string(),
+    }
 }

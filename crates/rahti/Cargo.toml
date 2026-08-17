@@ -12,11 +12,27 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
+default = ["dev-watch"]
+
 # WebSockets: the `#[socket]` attribute, `rahti::ws`, and the endpoint the
 # generated router merges. A feature rather than a default because the wire
 # brings tokio-tungstenite with it, and an app that never opens a socket
 # should not compile it. `cargo rahti new --ws` is what turns it on.
 ws = ["axum/ws", "tokio/time"]
+
+# The `public/` filesystem watcher behind live reload — the half of dev mode
+# that pushes a CSS swap without a rebuild. On by default, because every web
+# project wants it and nobody should have to ask.
+#
+# It is a feature because `notify` is a native filesystem-notification library
+# and a packaged mobile application has no `public/` on disk to watch: its
+# assets are staged into internal storage once per version and never edited.
+# `rahti-native` therefore takes `rahti` with `default-features = false`, and
+# the dependency leaves the Android build entirely rather than being compiled
+# and then not called. Turning it off changes nothing else: `dev_routes` still
+# serves the reload stream and the diagnostics endpoint, so a boot-id reload
+# still works.
+dev-watch = ["dep:notify"]
 
 [dependencies]
 # `multipart` is the upload half of the rpc wire — see src/rpc.rs.
@@ -36,8 +52,10 @@ getrandom = "0.3"
 # crate axum's own multipart is built on, so this adds nothing to the tree —
 # hands out an owned one. See `RpcUpload` in src/upload.rs.
 multer = "3.1"
-# Live reload watches `public/` at runtime — see src/dev.rs.
-notify = "8"
+# Live reload watches `public/` at runtime — see src/dev.rs. Optional because
+# a packaged native application has no source tree to watch; see the
+# `dev-watch` feature.
+notify = { version = "8", optional = true }
 # The rpc wire. Both already arrive with axum; named here because this crate
 # reads and writes the payload itself.
 serde = "1"

@@ -57,7 +57,14 @@ The server runtime exports:
   to the next free one in dev mode while release treats it as an error;
 - `local_url`: where to open a browser for a listener, printing a wildcard
   bind address as `localhost` because `0.0.0.0` is not a destination;
-- development reload routes and graceful-shutdown coordination;
+- development reload routes and graceful-shutdown coordination — `signal` for
+  Ctrl+C, and `begin_shutdown` for a host that says when instead of waiting to
+  be told, which is what an installed application without a terminal needs;
+- behind the default `dev-watch` cargo feature: the `public/` filesystem
+  watcher. On for every web project; a build that turns it off keeps the reload
+  stream and the diagnostics endpoint and drops `notify` entirely, which is
+  what a packaged application wants — its assets are written to internal
+  storage once per version and nothing edits them;
 - the macros re-exported from `rahti-macros` — `#[socket]` only when `ws` is
   enabled, so the error for a socket without the feature names the feature
   rather than generated code.
@@ -134,6 +141,15 @@ On every relevant Cargo build it:
   `rahti.config.json` so a half-wired project is repaired by running it
   again.
 - `--dry-run` previews an upgrade.
+- `cargo rahti native <command>` is forwarded to `cargo-rahti-native`, a
+  separately installed executable. The forwarding is a `Command` spawn and adds
+  no dependency; a missing helper prints the line that installs it. Nothing
+  else in `cargo-rahti` knows native packaging exists.
+- A scaffolded project is a library plus a thin binary: `src/lib.rs` holds
+  `initialize_application` — the database, the migrations the project chooses
+  to run, the auth policy, the generated router — and `src/main.rs` calls it
+  and binds the configured address. The split is what lets an optional native
+  package start the same application without a second copy of the sequence.
 
 ## Implemented Feature Inventory
 
@@ -186,7 +202,12 @@ The current implementation covers:
 - generated manifest metadata for routes, layouts, errors, loading regions,
   components, RPCs, sockets, and the database;
 - scaffold creation — including each project's own `AGENTS.md`, `CLAUDE.md`,
-  and convention documentation — and non-destructive upgrades.
+  and convention documentation — and non-destructive upgrades;
+- the framework side of optional native packaging: shared application startup,
+  a shutdown a host can begin itself, and a `dev-watch` feature a mobile build
+  turns off. The packaging itself is a separate install and a separate
+  package — see `native-packaging.md` — so a project that never asks for one
+  compiles, downloads and resolves none of it.
 
 ## Source-of-Truth Order
 

@@ -331,8 +331,119 @@ fn a_database_project_gets_the_files_that_wire_one_up() {
     );
     // The connection, reached the only way a stateless handler can reach one.
     assert!(tree.read("src/db.rs").contains("OnceLock"));
-    assert!(tree.read("src/main.rs").contains("db::connect().await"));
-    assert!(tree.read("src/main.rs").contains("mod models;"));
+
+    // Wired from `src/lib.rs`, not `src/main.rs`: startup is shared with the
+    // optional native package, which has no `main` to call.
+    let lib = tree.read("src/lib.rs");
+    assert!(lib.contains("db::connect()"), "{lib}");
+    assert!(lib.contains("pub mod models;"), "{lib}");
+    assert!(lib.contains("initialize_application"), "{lib}");
+
+    // And the binary is the thin half that only knows an address.
+    let main = tree.read("src/main.rs");
+    assert!(main.contains("initialize_application()"), "{main}");
+    assert!(!main.contains("db::connect"), "{main}");
+}
+
+/// `src/lib.rs` must not call into a file the scaffold did not write.
+///
+/// The failure this catches happened: the template called
+/// `auth::settings()`, and `cargo rahti new` does not write an `src/auth.rs`
+/// — a project adds one when it wants private routes. Every scaffolded
+/// project failed to compile, and nothing in the suite noticed, because no
+/// test compiles a generated project.
+#[test]
+fn the_library_only_names_modules_it_declares() {
+    for (label, db) in [("mods-none", None), ("mods-db", Some(Backend::Sqlite))] {
+        let tree = Tree::new(label);
+        scaffold_with(&tree, false, db);
+        let lib = tree.read("src/lib.rs");
+
+        // What it declares.
+        let declared: Vec<&str> = lib
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let rest = line
+                    .strip_prefix("pub mod ")
+                    .or_else(|| line.strip_prefix("mod "))?;
+                rest.strip_suffix(';')
+            })
+            .collect();
+
+        // What it calls. A path at the start of a statement is either a module
+        // of this crate or a dependency, and the dependencies are known.
+        const CRATES: &[&str] = &["rahti", "std", "axum", "tokio", "serde", "self", "crate"];
+
+        for line in lib.lines() {
+            let code = line.trim();
+            if code.starts_with("//") || code.starts_with("///") {
+                continue;
+            }
+            let Some((head, _)) = code.split_once("::") else {
+                continue;
+            };
+            let ident: String = head
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+
+            // A module path is lowercase; anything capitalised is a type or an
+            // enum, and `StartupError::new` needs no `mod`.
+            let lowercase = ident.starts_with(|c: char| c.is_ascii_lowercase());
+            if ident.is_empty() || !lowercase || CRATES.contains(&ident.as_str()) {
+                continue;
+            }
+            assert!(
+                declared.contains(&ident.as_str()),
+                "{label}: src/lib.rs calls `{ident}::…` and declares no `mod {ident};` — \
+                 the generated project would not compile.\nline: {code}"
+            );
+        }
+
+        // And every module it declares is a file somebody writes: the
+        // scaffold, or `rahti-build` on the first cargo build.
+        const GENERATED: &[&str] = &["components", "routes", "models", "migrations"];
+
+        for module in declared {
+            if GENERATED.contains(&module) {
+                continue;
+            }
+            let file = tree.0.join(format!("src/{module}.rs"));
+            let dir = tree.0.join(format!("src/{module}/mod.rs"));
+            assert!(
+                file.exists() || dir.exists(),
+                "{label}: src/lib.rs declares `mod {module};`, and neither the scaffold nor \
+                 rahti-build writes it"
+            );
+        }
+    }
+}
+
+/// The binary calls into the library by the name cargo gave it.
+#[test]
+fn the_binary_names_the_library_target() {
+    let tree = Tree::new("lib-name");
+    scaffold(&tree, false);
+
+    // Cargo turns a hyphen in a package name into an underscore in the crate
+    // name, and the manifest writes both out so neither is a guess.
+    let manifest = tree.read("Cargo.toml");
+    assert!(manifest.contains("[lib]"), "{manifest}");
+    assert!(manifest.contains("path = \"src/lib.rs\""), "{manifest}");
+    // Native packaging is opt-in, and this is what keeps it that way for a
+    // project that never asks: a web build cannot resolve a Tauri dependency
+    // it has excluded.
+    assert!(manifest.contains("exclude = [\"native\"]"), "{manifest}");
+
+    assert!(
+        tree.read("src/main.rs").contains("initialize_application"),
+        "the binary does not call into the library"
+    );
 }
 
 /// The feature is the one thing about a backend that is not interchangeable,
@@ -495,7 +606,11 @@ fn a_database_changes_only_what_it_must() {
 
     // The guide is one of them: a database project's `AGENTS.md` carries the
     // database rules and the `database.md` table row.
-    let differ = ["Cargo.toml", "src/main.rs", ".gitignore", "AGENTS.md"];
+    //
+    // `src/lib.rs` rather than `src/main.rs`, because that is where startup
+    // is: the binary only knows an address, and an address does not change
+    // when a database appears.
+    let differ = ["Cargo.toml", "src/lib.rs", ".gitignore", "AGENTS.md"];
     for path in a.keys().filter(|p| b.contains_key(*p)) {
         let same = a[path] == b[path];
         if differ.contains(&path.as_str()) {

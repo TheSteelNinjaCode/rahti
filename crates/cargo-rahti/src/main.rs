@@ -9,6 +9,7 @@
 //! are no negations to reconcile; a dependency that reads them would be
 //! larger than the code that acts on them.
 
+mod native;
 mod new;
 mod prompt;
 mod templates;
@@ -34,6 +35,10 @@ fn main() -> ExitCode {
     let result = match args.first().copied() {
         Some("new") => new::run(&args[1..]),
         Some("upgrade") => upgrade::run(&args[1..]),
+        // Handed to `cargo-rahti-native`, which is a separate install. Returns
+        // rather than falling through to the `Result` below, because what the
+        // helper exited with is what this should exit with.
+        Some("native") => return native::run(&args[1..]),
         _ => return other(&args),
     };
 
@@ -73,6 +78,7 @@ Create and maintain Rahti projects.
 USAGE:
     cargo rahti new <name> [options]
     cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws]
+    cargo rahti native <command> [options]
 
 NEW:
     A flag adds a feature. Leaving it out is how you say no.
@@ -113,6 +119,15 @@ UPGRADE:
     Cargo.toml and .env are never regenerated, because your dependencies and
     your credentials are yours — but they are amended when a feature needs
     it, by additions only, and never the same one twice.
+
+NATIVE:
+    Optional Windows and Android packaging, in a separate tool so that a web
+    project never resolves a native dependency:
+
+        cargo install cargo-rahti-native
+
+    Once it is installed, `cargo rahti native init`, `doctor`, `dev` and
+    `build` are forwarded to it. Run `cargo rahti native --help` for those.
 
     -h, --help         Print this message.
     -V, --version      Print the version.

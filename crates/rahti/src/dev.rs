@@ -443,6 +443,7 @@ async fn stream(
 ///
 /// `notify` hands events to a blocking `std` channel, and the loop below is
 /// what keeps the watcher alive — dropping it stops the watch.
+#[cfg(feature = "dev-watch")]
 fn watch_public(dir: PathBuf, tx: broadcast::Sender<Signal>) {
     std::thread::spawn(move || {
         use notify::{EventKind, RecursiveMode, Watcher};
@@ -488,8 +489,19 @@ fn watch_public(dir: PathBuf, tx: broadcast::Sender<Signal>) {
     });
 }
 
+#[cfg(feature = "dev-watch")]
 fn is_css(path: &PathBuf) -> bool {
     Path::new(path)
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("css"))
 }
+
+/// Without the watcher, the boot-id half of live reload is the whole of it.
+///
+/// A packaged native application is the case this exists for: its assets were
+/// staged into internal storage at install time and nothing is going to edit
+/// them, so there is nothing to watch and `notify` is a dependency it does not
+/// need to compile. The reload stream and the diagnostics endpoint are
+/// unaffected — only the filesystem push is gone.
+#[cfg(not(feature = "dev-watch"))]
+fn watch_public(_dir: PathBuf, _tx: broadcast::Sender<Signal>) {}

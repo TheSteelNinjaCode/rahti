@@ -9,7 +9,7 @@
 {
   "$schema": "./rahti.schema.json",
   "schema": 1,
-  "createdWith": "0.0.17",
+  "createdWith": "0.0.18",
   "app": {
     "dir": "src/app",
     "public": "public"
@@ -95,7 +95,11 @@ public/favicon.ico    -> /favicon.ico
 ```
 
 `RAHTI_PUBLIC_DIR` overrides the configured directory at runtime, the way
-`PORT` and `HOST` override the configured address.
+`PORT` and `HOST` override the configured address. A relative path resolves
+against the working directory, which is why it is the variable a native
+package sets: an installed application does not control where it was launched
+from, and its assets have been staged into application storage. See
+`native-packaging.md`.
 `DATABASE_URL` is read by `src/db.rs` at startup, from the environment or from
 an ignored `.env`; a real environment variable always wins over the file.
 `AUTH_SECRET`, `AUTH_COOKIE_NAME`, and `SESSION_LIFETIME_HOURS` are read the
@@ -169,6 +173,18 @@ Rahti injects a dev client into page HTML, watches public files, swaps changed
 stylesheets, reloads for other changes, and forwards browser warnings/errors
 to `.rahti/dev.log`. Dev event streams listen to the framework shutdown signal
 so Ctrl+C can complete graceful server shutdown.
+
+The filesystem watcher is behind `rahti`'s default `dev-watch` cargo feature.
+Every web project has it. It is a feature because a packaged native
+application has no `public/` on disk to watch — its assets are staged into
+internal storage once per version — and turning it off keeps `notify` out of
+that build entirely rather than compiling it and not calling it. Nothing else
+changes when it is off: the reload stream and the diagnostics endpoint are
+unaffected.
+
+A release native package additionally *sets* `RAHTI_DEV=0` rather than
+inheriting it, because an installed application inherits the environment of
+whoever launched it.
 
 That covers everything read at runtime. A Rust edit needs a rebuild and a
 restart, which nothing inside the running process can do, so the scaffold
@@ -268,6 +284,45 @@ with nowhere to ask takes the flags at their word.
 
 When changing scaffold behavior, update templates/assets, hash-ledger behavior,
 tests, and this document together.
+
+## Native Packaging CLI
+
+Optional, and a separate executable — which is what makes it optional. A
+project that never runs it compiles, downloads and depends on no part of it.
+
+```text
+cargo install cargo-rahti-native
+
+cargo rahti native init --identifier com.example.myapp --windows --android
+cargo rahti native doctor [--target windows|android] [--release]
+cargo rahti native dev   --target windows|android [--device <name>]
+cargo rahti native build --target windows
+cargo rahti native build --target android [--format apk|aab] [--debug]
+```
+
+`cargo rahti native …` is forwarded by `cargo-rahti` to the installed helper;
+`cargo rahti-native …` reaches it directly through cargo's own subcommand
+dispatch. When the helper is not installed, `cargo rahti native` prints the
+line that installs it and installs nothing.
+
+- `init` writes `rahti.native.json`, `rahti.native.schema.json` and the
+  application-owned Tauri shell under `native/`. It uses the same hash-ledger
+  rule as `upgrade`: a generated file whose hash still matches is regenerated,
+  an edited one is left alone and reported, and `--force` takes it back.
+  Editing the configuration and re-running is how the shell learns a new
+  window size, version or target. `--local <path>` writes path dependencies,
+  for framework development, and is recorded so a later run does not need it.
+- `doctor` checks only what the named target needs — every configured target
+  when none is named — and installs nothing. Each failure names what is
+  missing, why it is needed, and the command that supplies it.
+- `dev` and `build` run `doctor`'s checks first, then delegate to `cargo tauri`
+  from inside `native/`. Signing is read from `RAHTI_NATIVE_*` environment
+  variables and translated for each platform's tooling; nothing about it is in
+  a committed file. `build` prints the absolute path of every artifact.
+
+`native/` is excluded from the project workspace, so `cargo check --workspace`
+in a web project never resolves a Tauri dependency. Full rules, paths and
+security model: `native-packaging.md`.
 
 ## Generated Artifacts
 

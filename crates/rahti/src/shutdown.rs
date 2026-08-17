@@ -35,6 +35,24 @@ pub async fn signal() {
         .await
         .expect("failed to install Ctrl+C handler");
 
+    begin();
+}
+
+/// Start shutting down, without waiting for Ctrl+C.
+///
+/// [`signal`] is the terminal's answer to "when do we stop", and it is the
+/// only one a web deployment has. A packaged native application has a
+/// different one: the user closed the window, or Android is destroying the
+/// activity. Neither delivers `SIGINT`, and on Android nothing ever will — so
+/// the host says when instead of waiting to be told.
+///
+/// What it does is the second half of [`signal`]: every [`Shutdown`] fires, so
+/// the dev event stream and every open WebSocket end rather than holding a
+/// graceful shutdown open until something kills the process.
+///
+/// Idempotent. A second call sends a second message to receivers that have
+/// already stopped listening, which is nothing.
+pub fn begin() {
     // Fails only when nothing is subscribed, which is the common case and
     // not an error.
     let _ = channel().send(());

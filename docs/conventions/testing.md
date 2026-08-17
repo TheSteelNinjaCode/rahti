@@ -92,6 +92,23 @@ something is connected to it — so it disappears with the first test's runtime
 and the rest fail with `no such table`. The symptom is tests that pass alone
 and fail together. See `database.md`.
 
+### Native packaging change
+
+Native packaging is a separate package — `rahti-native` and
+`cargo-rahti-native` — with its own repository and its own tests. What is
+verified *here* is only the framework side it depends on:
+
+```text
+cargo test -p rahti --lib shutdown
+cargo test -p cargo-rahti native
+cargo test -p cargo-rahti
+```
+
+`begin_shutdown`, the `dev-watch` feature and the scaffold's
+`initialize_application` are a published package's API whether or not this
+workspace calls them. Renaming one compiles cleanly here and breaks something
+that is not in this repository to fail with it.
+
 ### Scaffold or upgrade change
 
 Run:

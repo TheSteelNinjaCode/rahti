@@ -131,6 +131,41 @@ or other secrets. Delete the log before sharing a workspace archive.
 - Migrations are never applied automatically. `db::migrate()` is called
   deliberately, so starting a server cannot change a schema.
 
+## Native Packages
+
+Everything above still applies — a packaged application is the same
+application. What changes is the consequence of getting it wrong, and three
+boundaries exist only here. Full rules in `native-packaging.md`.
+
+- **An XSS reaches further.** In a browser it is a stolen session; in a native
+  shell it is a stolen session and whatever the page can reach through the
+  native bridge. That is why the bridge is a five-entry allowlist, why nothing
+  on it runs a program or reads a path the page names, and why adding to it
+  means editing the Rust allowlist *and* the Tauri capability file.
+- **Loopback is not private.** `127.0.0.1` is unreachable from the network and
+  reachable by every process on the machine. The embedded server binds only the
+  loopback, on a port the operating system assigns, and — with
+  `security.loopbackToken`, which is on by default — refuses any request not
+  carrying this launch's cookie. That is neither authentication nor a
+  replacement for CSRF; Rahti's own layers still answer both of those.
+- **There is no `.env`.** The session signing key is generated on the device at
+  first launch and kept in application storage, per installation, DPAPI-encrypted
+  on Windows. Never bundle a `.env`, never ship an `AUTH_SECRET`, and never put
+  a signing password, a keystore or a certificate in `rahti.native.json` — it
+  has no field for one, and `native/.gitignore` refuses the files.
+
+A release package sets `RAHTI_DEV=0` rather than inheriting it, so the
+diagnostics endpoint and the reload stream cannot be turned on in a shipped
+application by an exported variable.
+
+The Content-Security-Policy a package serves comes from its own response
+headers, because that is the only policy a browser applies to a page on a
+loopback origin. The default permits no external source and does permit
+`'unsafe-eval'`: PulsePoint builds a render function with `new Function` when
+it compiles a reactive block, and without the directive every binding on an
+otherwise-correct page is dead. Narrowing `script-src` further is not a
+tightening, it is turning the browser runtime off.
+
 ## Supply Chain
 
 The optional Tailwind download can execute a fetched standalone binary.

@@ -170,49 +170,95 @@ fn resolve(
 /// this ran. The host target is the one being built for, and its packages are
 /// on disk already.
 fn metadata() -> Option<String> {
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    // The platform being built for, then the platform building. Both, because
+    // a cross-compile can make the first one unanswerable offline.
+    //
+    // Cross-compiling to Android is the case that found this. `TARGET` is then
+    // `aarch64-linux-android`, and resolving *this* workspace for that platform
+    // needs android-only packages — `android_system_properties`, by way of
+    // `chrono` — that a workspace only ever built for the host has never
+    // downloaded. Offline that is a hard error, and the whole
+    // dependency-component step was skipped with a warning: a component
+    // library's CSS would silently not be in the stylesheet a native package
+    // ships.
+    //
+    // The host answer is right for what this is actually asked: which
+    // dependencies declare `package.metadata.rahti`. A component library is an
+    // ordinary cross-platform crate, not something conditional on the target.
+    // So the target filter is tried first, being the more precise question, and
+    // the host filter is what the answer falls back to.
+    let target = env::var("TARGET").ok();
+    let host = env::var("HOST").ok();
 
-    let mut command = Command::new(&cargo);
-    command.args(["metadata", "--format-version", "1", "--offline"]);
-
-    // Set by cargo for a build script. Absent only if something else is
-    // running this, in which case cargo's own default target is right.
-    if let Ok(target) = env::var("TARGET") {
-        command.args(["--filter-platform", &target]);
-    }
-
-    let output = command.output();
-
-    let output = match output {
-        Ok(output) => output,
-        Err(e) => {
-            warn(&format!(
-                "cannot run `cargo metadata` ({e}), so no dependency's \
-                 components are being styled."
-            ));
-            return None;
-        }
+    let filters: Vec<Option<&str>> = if target.is_none() && host.is_none() {
+        // Nothing is running this as a build script; cargo's own default is
+        // the right platform.
+        vec![None]
+    } else {
+        [target.as_deref(), host.as_deref()]
+            .into_iter()
+            .flatten()
+            .map(Some)
+            .collect()
     };
 
-    if !output.status.success() {
+    let mut last: Option<(std::process::ExitStatus, String)> = None;
+    for filter in filters {
+        match run_metadata(filter) {
+            Ok(metadata) => return Some(metadata),
+            Err(Some(failure)) => last = Some(failure),
+            // The command could not be started; another filter will not help.
+            Err(None) => return None,
+        }
+    }
+
+    if let Some((status, stderr)) = last {
         // One line, deliberately: cargo prints the first line of a warning and
         // swallows the rest, so a message that explains itself on line two
         // arrives as a blank complaint — which is how this looked when
         // `--filter-platform` was still missing.
         warn(&format!(
-            "`cargo metadata` failed ({}), so no dependency's components are \
-             being styled — {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join(" ")
+            "`cargo metadata` failed ({status}), so no dependency's components              are being styled — {stderr}"
         ));
-        return None;
+    }
+    None
+}
+
+/// One `cargo metadata` run, for one platform or for cargo's default.
+///
+/// `Err(None)` means the command could not be started at all; `Err(Some(..))`
+/// means it ran and refused, and the caller may try another platform.
+fn run_metadata(
+    filter: Option<&str>,
+) -> Result<String, Option<(std::process::ExitStatus, String)>> {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+
+    let mut command = Command::new(&cargo);
+    command.args(["metadata", "--format-version", "1", "--offline"]);
+    if let Some(filter) = filter {
+        command.args(["--filter-platform", filter]);
     }
 
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(e) => {
+            warn(&format!(
+                "cannot run `cargo metadata` ({e}), so no dependency's                  components are being styled."
+            ));
+            return Err(None);
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Err(Some((output.status, stderr)));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// The `packages` array, one JSON object per element, still as text.

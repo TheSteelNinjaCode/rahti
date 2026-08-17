@@ -67,7 +67,9 @@ pub use rpc::{
     RpcBody, RpcCall, RpcResponse, RpcSender, RpcStream, csrf, rpc_failed, rpc_name, rpc_ok,
     rpc_panic_response, rpc_stream, rpc_unknown,
 };
-pub use shutdown::{Shutdown, signal as shutdown_signal, watch as watch_shutdown};
+pub use shutdown::{
+    Shutdown, begin as begin_shutdown, signal as shutdown_signal, watch as watch_shutdown,
+};
 pub use statics::{PUBLIC_DIR_ENV, public_dir};
 pub use upload::{
     DEFAULT_MAX_FILE, DEFAULT_MAX_UPLOAD, DEFAULT_SPILL_THRESHOLD, MAX_FILE_ENV, MAX_UPLOAD_ENV,

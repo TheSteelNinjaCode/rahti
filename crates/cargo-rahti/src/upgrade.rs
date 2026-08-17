@@ -58,15 +58,20 @@ const NEVER_REWRITTEN: [&str; 1] = ["Cargo.toml"];
 ///
 /// The rule is the project's own shape. Everything under `src/` is the
 /// application — pages, layouts, entities, migrations, the connection — and
-/// `src/main.rs` is the single exception, the startup the framework
-/// prescribes and the file a stale copy actually breaks. So a bulk force
-/// sweeps the framework's own files and stops at the door of `src/`.
+/// the two startup files are the exception: `src/lib.rs` and `src/main.rs` are
+/// the startup the framework prescribes, and the files a stale copy actually
+/// breaks. So a bulk force sweeps the framework's own files and stops at the
+/// door of `src/`.
+///
+/// `src/lib.rs` is on the list because it is what a native package calls into:
+/// a project whose `initialize_application` is missing or old cannot be
+/// packaged, and `cargo rahti native doctor` sends people here to fix it.
 ///
 /// Taking an application file back is still possible, but it has to be asked
 /// for by name: `--force src/app/page.rs` is a sentence somebody meant to
 /// write, and a bare `--force` that quietly deleted a homepage is not.
 fn authored(path: &str) -> bool {
-    path.starts_with("src/") && path != "src/main.rs"
+    path.starts_with("src/") && !matches!(path, "src/main.rs" | "src/lib.rs")
 }
 
 pub fn run(args: &[&str]) -> Result<(), String> {
