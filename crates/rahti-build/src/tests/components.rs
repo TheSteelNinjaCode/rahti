@@ -197,7 +197,9 @@ fn page(file: &str, rpcs: &[&str]) -> Entry {
         component: None,
         methods: Vec::new(),
         rpcs: rpcs.iter().map(|r| (*r).to_string()).collect(),
+        auth_rpcs: Vec::new(),
         sockets: Vec::new(),
+        auth_sockets: Vec::new(),
         root: false,
     }
 }
@@ -216,6 +218,7 @@ fn an_rpc_is_found_with_the_module_that_holds_it() {
     assert_eq!(scan.rpcs.len(), 1, "{:?}", scan.rpcs);
     assert_eq!(scan.rpcs[0].name, "like");
     assert_eq!(scan.rpcs[0].module, "like_button");
+    assert!(!scan.rpcs[0].auth);
     assert!(
         scan.rpcs[0].file.ends_with("like_button.rs"),
         "{:?}",
@@ -242,6 +245,18 @@ fn a_component_without_an_rpc_contributes_none() {
     assert!(scan(tree.path()).rpcs.is_empty());
 }
 
+#[test]
+fn an_authenticated_component_rpc_is_marked_for_tooling() {
+    let tree = Tree::new("rpcsauth");
+    tree.file(
+        "account.rs",
+        "#[rpc(auth)]\npub async fn rename(name: String) -> String { name }\n",
+    );
+
+    let scan = scan(tree.path());
+    assert!(scan.rpcs[0].auth, "{:?}", scan.rpcs);
+}
+
 /// A `#[socket]` in a component file is collected the way an rpc is: name,
 /// module, file — the three facts the manifest and the collision check need.
 #[test]
@@ -256,6 +271,7 @@ fn a_socket_is_found_with_the_module_that_holds_it() {
     assert_eq!(scan.sockets.len(), 1, "{:?}", scan.sockets);
     assert_eq!(scan.sockets[0].name, "feed");
     assert_eq!(scan.sockets[0].module, "ticker");
+    assert!(!scan.sockets[0].auth);
     assert!(scan.rpcs.is_empty(), "{:?}", scan.rpcs);
 }
 
@@ -269,11 +285,13 @@ fn two_sockets_cannot_share_a_name() {
             name: "feed".to_string(),
             module: "ticker".to_string(),
             file: "src/components/ticker.rs".to_string(),
+            auth: false,
         },
         Rpc {
             name: "feed".to_string(),
             module: "p_dashboard".to_string(),
             file: "src/app/dashboard/page.rs".to_string(),
+            auth: false,
         },
     ];
     check_socket_names(&sockets);
@@ -286,11 +304,13 @@ fn distinct_socket_names_pass() {
             name: "feed".to_string(),
             module: "ticker".to_string(),
             file: "src/components/ticker.rs".to_string(),
+            auth: false,
         },
         Rpc {
             name: "chat".to_string(),
             module: "p_dashboard".to_string(),
             file: "src/app/dashboard/page.rs".to_string(),
+            auth: false,
         },
     ];
     check_socket_names(&sockets);
@@ -307,11 +327,13 @@ fn two_components_cannot_share_a_name() {
             name: "like".to_string(),
             module: "like_button".to_string(),
             file: "src/components/like_button.rs".to_string(),
+            auth: false,
         },
         Rpc {
             name: "like".to_string(),
             module: "star".to_string(),
             file: "src/components/star.rs".to_string(),
+            auth: false,
         },
     ];
     check_rpc_names(&rpcs, &[]);
@@ -326,6 +348,7 @@ fn a_component_cannot_take_a_name_a_page_has() {
         name: "like".to_string(),
         module: "like_button".to_string(),
         file: "src/components/like_button.rs".to_string(),
+        auth: false,
     }];
     check_rpc_names(&rpcs, &[page("src/app/widgets/page.rs", &["like"])]);
 }

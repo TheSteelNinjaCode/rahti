@@ -195,6 +195,8 @@ preserve them, and documentation or scaffold changes must teach them.
   bundle). `cargo rahti native` is forwarded from here to a separately
   installed `cargo-rahti-native`; the forwarding is a `Command` spawn and adds
   no dependency.
+- `crates/rahti-mcp/` - read-only stdio MCP server for generated project
+  metadata, conventions, database artifacts, and development diagnostics.
 - `crates/rahti-ui/` - example installable component library and CSS.
 - `docs/conventions/` - the canonical convention documentation.
 - `rahti.schema.json` - the JSON schema for `rahti.config.json`.

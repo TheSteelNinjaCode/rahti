@@ -133,6 +133,10 @@ Install the new bundle at
 
 ## Workspace Gate
 
+For MCP changes, run `cargo test -p rahti-mcp` first. Its tests use an
+isolated temporary Rahti project and cover the stdio server's advertised
+capabilities, bounded diagnostics, and generated RPC authentication metadata.
+
 Before completing a framework-wide change:
 
 ```text

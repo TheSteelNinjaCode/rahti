@@ -142,6 +142,10 @@ listing a page in `private_routes` decides who may load the page, and the
 attribute decides who may open the socket. Mark every socket that touches
 something private.
 
+The generated manifest records `auth: true` on that socket. This lets local
+tooling describe the handshake requirement; it does not authenticate a tool
+or replace the runtime session check.
+
 ## Broadcast: One Message, Every Browser
 
 A handler's `Socket` speaks to the one browser that connected, so an echo

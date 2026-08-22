@@ -721,8 +721,14 @@ pub fn manifest_json(
             .map(|name| format!("\"{name}\""))
             .collect::<Vec<_>>()
             .join(", ");
+        let auth_rpcs = entry
+            .auth_rpcs
+            .iter()
+            .map(|name| format!("\"{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
         out.push_str(&format!(
-            "    {{ \"url\": \"{url}\", \"kind\": \"{}\", \"methods\": [{methods}], \"component\": {component}, \"rpcs\": [{rpcs}], \"file\": \"{}\" }}{comma}\n",
+            "    {{ \"url\": \"{url}\", \"kind\": \"{}\", \"methods\": [{methods}], \"component\": {component}, \"rpcs\": [{rpcs}], \"authRpcs\": [{auth_rpcs}], \"file\": \"{}\" }}{comma}\n",
             entry.kind.label(),
             entry.file
         ));
@@ -815,8 +821,8 @@ pub fn manifest_json(
             .filter(|r| &r.file == file)
             .map(|r| {
                 format!(
-                    "{{ \"name\": \"{}\", \"module\": \"{}\" }}",
-                    r.name, r.module
+                    "{{ \"name\": \"{}\", \"module\": \"{}\", \"auth\": {} }}",
+                    r.name, r.module, r.auth
                 )
             })
             .collect::<Vec<_>>()
@@ -835,8 +841,8 @@ pub fn manifest_json(
     for (i, socket) in sockets.iter().enumerate() {
         let comma = if i + 1 == sockets.len() { "" } else { "," };
         out.push_str(&format!(
-            "    {{ \"name\": \"{}\", \"file\": \"{}\" }}{comma}\n",
-            socket.name, socket.file
+            "    {{ \"name\": \"{}\", \"file\": \"{}\", \"auth\": {} }}{comma}\n",
+            socket.name, socket.file, socket.auth
         ));
     }
     out.push_str("  ],\n");

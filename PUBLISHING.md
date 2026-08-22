@@ -42,6 +42,13 @@ cargo publish -p rahti
 cargo publish -p cargo-rahti
 ```
 
+`rahti-mcp` has no dependency on another Rahti crate, but shares the release
+version and is published with the same release:
+
+```bash
+cargo publish -p rahti-mcp
+```
+
 `rahti-ui` last, if it is being published at all.
 
 Wait for each to appear on the index before the next — crates.io takes a
@@ -64,7 +71,8 @@ verify cleanly today, which is as far as this can be checked before release.
 each intra-framework dependency to that same number. This is deliberate:
 `html!` expands to paths in `rahti`, and `rahti-build` writes code calling
 functions in it, so a project that mixed versions would fail to compile with
-an error naming neither crate. Release them together, always.
+an error naming neither crate. `rahti-mcp` is standalone but follows the same
+workspace release number. Release them together, always.
 
 ## After publishing
 

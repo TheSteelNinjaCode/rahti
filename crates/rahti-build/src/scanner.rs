@@ -18,6 +18,14 @@ pub const METHODS: [&str; 7] = ["get", "post", "put", "patch", "delete", "head",
 /// Written on a line of its own, which is where rustfmt puts it.
 pub const ROOT_MARKER: &str = "pub const ROOT_LAYOUT: bool = true;";
 
+/// One browser-callable function found beneath a Rahti attribute.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Callable {
+    pub name: String,
+    /// `true` for `#[rpc(auth)]` or `#[socket(auth)]`.
+    pub auth: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub kind: Kind,
@@ -38,12 +46,17 @@ pub struct Entry {
     /// order they are written. Each one gets an arm in the dispatcher this
     /// page's URL is given.
     pub rpcs: Vec<String>,
+    /// The subset of [`Self::rpcs`] that refuse a call without a session.
+    pub auth_rpcs: Vec<String>,
     /// For `page.rs`: the `#[socket]` functions the browser may connect to,
     /// in the order they are written. Unlike an rpc these get no per-page
     /// dispatcher — every connection arrives on the one socket endpoint and
     /// is dispatched by name from the link-time registry — so what the scan
     /// contributes is the merge of that endpoint, and the collision check.
     pub sockets: Vec<String>,
+    /// The subset of [`Self::sockets`] that refuse the handshake without a
+    /// session.
+    pub auth_sockets: Vec<String>,
     /// For `layout.rs`: this layout owns a document of its own, so no layout
     /// above it wraps the pages below it. Declared with [`ROOT_MARKER`], and
     /// implicit for `app/layout.rs`. Always `false` for every other kind.
@@ -92,8 +105,20 @@ pub fn scan(app_dir: &Path) -> Scan {
         } else {
             Vec::new()
         };
-        let rpcs = rpc_functions(&file, kind);
-        let sockets = socket_functions(&file, kind);
+        let rpcs = page_rpc_functions(&file, kind);
+        let auth_rpcs = rpcs
+            .iter()
+            .filter(|rpc| rpc.auth)
+            .map(|rpc| rpc.name.clone())
+            .collect();
+        let rpcs = rpcs.into_iter().map(|rpc| rpc.name).collect();
+        let sockets = page_socket_functions(&file, kind);
+        let auth_sockets = sockets
+            .iter()
+            .filter(|socket| socket.auth)
+            .map(|socket| socket.name.clone())
+            .collect();
+        let sockets = sockets.into_iter().map(|socket| socket.name).collect();
         match kind {
             Kind::Layout => check_exports(
                 &file,
@@ -136,7 +161,9 @@ pub fn scan(app_dir: &Path) -> Scan {
             methods,
             component,
             rpcs,
+            auth_rpcs,
             sockets,
+            auth_sockets,
             root,
         });
     }
@@ -211,17 +238,15 @@ fn exported_methods(file: &str) -> Vec<String> {
 
 /// Whether a line is the attribute, in either of the two forms it takes.
 ///
-/// `#[rpc]` and `#[rpc(auth)]` register the same way — what `auth` changes is
-/// a check inside the shim the macro writes, not whether the dispatcher has to
-/// know the name. The arguments are not read here for that reason: the macro
-/// is what validates them, against real tokens with a real span.
+/// `#[rpc]` and `#[rpc(auth)]` register the same way. The scanner also keeps
+/// the valid `auth` spelling so the tooling manifest can describe the runtime
+/// check the macro places in the shim. The macro remains the authority that
+/// validates arguments against real tokens with a real span.
 fn is_rpc_attribute(line: &str) -> bool {
     is_attribute(line, "#[rpc")
 }
 
-/// The same rule for `#[socket]` and `#[socket(auth)]` — the registration is
-/// the macro's; what the scan needs is only that the name exists, so the
-/// endpoint gets merged and the collision check has something to check.
+/// The same rule for `#[socket]` and `#[socket(auth)]`.
 fn is_socket_attribute(line: &str) -> bool {
     is_attribute(line, "#[socket")
 }
@@ -243,36 +268,40 @@ fn is_attribute(line: &str, prefix: &str) -> bool {
 ///
 /// Shared with `components.rs`: an rpc reads the same on either side of the
 /// tree, and only what it is reachable from differs.
-pub fn rpc_names(file: &str) -> Vec<String> {
-    attribute_names(file, "rpc", is_rpc_attribute)
+pub fn rpc_callables(file: &str) -> Vec<Callable> {
+    attribute_functions(file, "rpc", is_rpc_attribute)
 }
 
 /// The `#[socket]` functions in a file, in source order — the socket half of
-/// [`rpc_names`], shared with `components.rs` for the same reason.
-pub fn socket_names(file: &str) -> Vec<String> {
-    attribute_names(file, "socket", is_socket_attribute)
+/// [`rpc_callables`], shared with `components.rs` for the same reason.
+pub fn socket_callables(file: &str) -> Vec<Callable> {
+    attribute_functions(file, "socket", is_socket_attribute)
 }
 
-fn attribute_names(file: &str, what: &str, is_attr: fn(&str) -> bool) -> Vec<String> {
+fn attribute_functions(file: &str, what: &str, is_attr: fn(&str) -> bool) -> Vec<Callable> {
     let src = fs::read_to_string(file).unwrap_or_default();
-    let mut found: Vec<String> = Vec::new();
+    let mut found: Vec<Callable> = Vec::new();
     let lines: Vec<&str> = src.lines().collect();
 
-    for (at, _) in lines.iter().enumerate().filter(|(_, l)| is_attr(l.trim())) {
+    for (at, attribute) in lines.iter().enumerate().filter(|(_, l)| is_attr(l.trim())) {
         let Some(name) = lines[at + 1..].iter().find_map(|line| function_in(line)) else {
             panic!(
                 "rahti: {file} has an `#[{what}]` with no function under it.\n  \
                  The attribute goes on the `fn` the browser calls."
             );
         };
-        if found.contains(&name) {
+        if found.iter().any(|callable| callable.name == name) {
             panic!(
                 "rahti: {file} declares two {what}s named `{name}`.\n  \
                  The browser picks one by name, so the names in one file have to \
                  differ."
             );
         }
-        found.push(name);
+        let compact: String = attribute.chars().filter(|c| !c.is_whitespace()).collect();
+        found.push(Callable {
+            name,
+            auth: compact == format!("#[{what}(auth)]"),
+        });
     }
 
     found
@@ -285,8 +314,8 @@ fn attribute_names(file: &str, what: &str, is_attr: fn(&str) -> bool) -> Vec<Str
 /// written there would never be reached — worth stopping rather than leaving
 /// to be discovered. A component is the other case that works, and it is
 /// scanned by `components.rs`.
-fn rpc_functions(file: &str, kind: Kind) -> Vec<String> {
-    let found = rpc_names(file);
+fn page_rpc_functions(file: &str, kind: Kind) -> Vec<Callable> {
+    let found = rpc_callables(file);
 
     if !found.is_empty() && kind != Kind::Page {
         panic!(
@@ -310,8 +339,8 @@ fn rpc_functions(file: &str, kind: Kind) -> Vec<String> {
 /// URL, so a socket written in a layout would in fact be *reachable* — but a
 /// layout renders on many pages, and behaviour that belongs to all of them
 /// belongs in a component, where the rpc rule already sends it.
-fn socket_functions(file: &str, kind: Kind) -> Vec<String> {
-    let found = socket_names(file);
+fn page_socket_functions(file: &str, kind: Kind) -> Vec<Callable> {
+    let found = socket_callables(file);
 
     if !found.is_empty() && kind != Kind::Page {
         panic!(

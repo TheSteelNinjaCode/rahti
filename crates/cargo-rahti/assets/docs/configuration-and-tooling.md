@@ -207,6 +207,29 @@ The `.rahti` directory is gitignored by both the repository and new-project
 scaffold. It contains generated manifests, CSS scratch files, and the current
 development diagnostic log; none are application input or shipped assets.
 
+## Model Context Protocol
+
+`rahti-mcp` is the read-only MCP server for a Rahti project. Install it once
+and point the client's stdio configuration at the project root:
+
+```text
+cargo install rahti-mcp
+rahti-mcp --project /path/to/project
+```
+
+It exposes project summaries, routes, components, RPCs, sockets, database
+artifacts, bounded recent diagnostics, the generated manifest, public
+configuration, and these convention documents. It validates generated file
+references but never writes source or generated output.
+
+The stdio process is local tooling, not an application request. It never reads
+`.env`, never receives or reuses the browser's signed session cookie, and
+cannot call an authenticated RPC or open an authenticated socket as the user.
+It is authentication-aware only in the useful sense: it reports the generated
+`#[rpc(auth)]` and `#[socket(auth)]` requirements. Private route policy remains
+unknown to build tooling because the application installs that ordinary Rust
+policy at runtime.
+
 ## Scaffold CLI
 
 ```text
@@ -331,9 +354,10 @@ security model: `native-packaging.md`.
 - `src/models/mod.rs` - checked-in generated entity module declarations.
 - `src/migrations/mod.rs` - checked-in generated migration modules and the
   `Migrator`, ordered by filename.
-- `.rahti/manifest.json` - generated tooling description, including a
-  `sockets` list naming every `#[socket]` and its file, and a `db` section
-  naming the backend, the entities, and the migrations.
+- `.rahti/manifest.json` - generated tooling description. Route entries keep
+  RPC names in `rpcs` and authenticated ones in `authRpcs`; component RPC and
+  socket entries carry an `auth` boolean. The `db` section names the backend,
+  entities, and migrations.
 - `public/css/styles.css` - generated/copied but intentionally checked in.
 
 Run a Cargo build after changing route/component/configuration inputs and

@@ -280,6 +280,7 @@ fn socket_list(entries: &[scanner::Entry], components: &[components::Rpc]) -> Ve
                 name: name.clone(),
                 module: entry.module.clone(),
                 file: entry.file.clone(),
+                auth: entry.auth_sockets.contains(name),
             })
         })
         .chain(components.iter().cloned())

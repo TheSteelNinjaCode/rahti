@@ -151,6 +151,15 @@ On every relevant Cargo build it:
   and binds the configured address. The split is what lets an optional native
   package start the same application without a second copy of the sequence.
 
+### `rahti-mcp`
+
+The standalone read-only MCP server uses the official Rust MCP SDK and stdio
+transport. It reads `rahti.config.json`, generated `.rahti/manifest.json`,
+convention documents, and a bounded tail of `.rahti/dev.log`; it does not link
+into the application server, read `.env`, mutate the project, or inherit a
+browser session. Generated RPC and socket auth metadata is visible to tools,
+while private route policy remains runtime-owned application code.
+
 ## Implemented Feature Inventory
 
 The current implementation covers:

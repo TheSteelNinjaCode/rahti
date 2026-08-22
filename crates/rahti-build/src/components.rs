@@ -36,6 +36,8 @@ pub struct Rpc {
     pub module: String,
     /// The file it is written in, for messages and the manifest.
     pub file: String,
+    /// Whether the generated shim refuses a caller without a session.
+    pub auth: bool,
 }
 
 /// The generated module files, plus what the manifest and cargo need.
@@ -107,18 +109,20 @@ fn walk(dir: &Path, parents: &mut Vec<String>, scan: &mut Scan) {
 
             let file = normalize(&path);
             let module = module_path(parents, stem);
-            for name in scanner::rpc_names(&file) {
+            for callable in scanner::rpc_callables(&file) {
                 scan.rpcs.push(Rpc {
-                    name,
+                    name: callable.name,
                     module: module.clone(),
                     file: file.clone(),
+                    auth: callable.auth,
                 });
             }
-            for name in scanner::socket_names(&file) {
+            for callable in scanner::socket_callables(&file) {
                 scan.sockets.push(Rpc {
-                    name,
+                    name: callable.name,
                     module: module.clone(),
                     file: file.clone(),
+                    auth: callable.auth,
                 });
             }
             scan.files.push(file.clone());

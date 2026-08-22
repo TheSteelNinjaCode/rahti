@@ -284,8 +284,10 @@ pub async fn rename(name: String) -> Result<user::Public> {
 }
 ```
 
-`#[rpc(auth)]` registers under the same name and is dispatched identically; the
-build's scan, the manifest, and the generated router see no difference.
+`#[rpc(auth)]` registers under the same name and is dispatched identically.
+The generated manifest marks the name in the route's `authRpcs` list (or sets
+`auth: true` on a component RPC) so development tooling can report the
+requirement. The generated router still enforces it at request time.
 
 ## Redirect safety
 

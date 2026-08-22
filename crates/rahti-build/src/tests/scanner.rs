@@ -418,6 +418,7 @@ fn a_guarded_rpc_is_recorded_like_any_other() {
 
     let scanned = walk_tree(&tree);
     assert_eq!(scanned.entry("page.rs").rpcs, vec!["read", "write"]);
+    assert_eq!(scanned.entry("page.rs").auth_rpcs, vec!["write"]);
 }
 
 /// The arguments are the macro's to validate, against real tokens — but a line
@@ -515,6 +516,7 @@ fn a_page_records_its_socket_functions() {
 
     let scanned = walk_tree(&tree);
     assert_eq!(scanned.entry("page.rs").sockets, vec!["chat", "feed"]);
+    assert_eq!(scanned.entry("page.rs").auth_sockets, vec!["feed"]);
     assert!(scanned.entry("page.rs").rpcs.is_empty());
 }
 

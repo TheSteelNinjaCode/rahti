@@ -8,6 +8,7 @@ members = [
     "crates/cargo-rahti",
     "crates/rahti",
     "crates/rahti-build",
+    "crates/rahti-mcp",
     "crates/rahti-macros",
     "crates/rahti-ui",
 ]
@@ -23,11 +24,10 @@ version = "0.0.20"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jeffersonabraham/rahti"
-# `edition = "2024"` would put the floor at 1.85, but `rahti-macros` reads
-# `proc_macro::Span::file()` to locate a route file, and that was stabilized
-# in 1.88 — so 1.88 is the real floor. Naming it means cargo says so rather
-# than rustc failing halfway through a dependency.
-rust-version = "1.88"
+# Keep this release line on the Rust version required by the Rahti crates.
+# Naming the minimum explicitly makes Cargo reject an older compiler before
+# it starts compiling the framework or one of its dependencies.
+rust-version = "1.97"
 
 # One place to bump when the framework releases. `version` alongside `path`
 # is what makes these publishable: cargo uses the path locally and the

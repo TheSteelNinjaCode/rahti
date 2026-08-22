@@ -61,7 +61,9 @@ fn entries(files: &[(Kind, &str, &[&str])]) -> Vec<Entry> {
                 component: (*kind != Kind::Route).then(|| route::component_id(*kind, &relative)),
                 methods: methods.iter().map(|m| (*m).to_string()).collect(),
                 rpcs: Vec::new(),
+                auth_rpcs: Vec::new(),
                 sockets: Vec::new(),
+                auth_sockets: Vec::new(),
                 // What the scan derives: `app/layout.rs` is a document root
                 // because nothing sits above it. A layout that declares
                 // itself one is built with `as_root`.
@@ -117,6 +119,7 @@ fn sockets(names: &[(&str, &str)]) -> Vec<Rpc> {
             name: (*name).to_string(),
             module: "socket_module".to_string(),
             file: (*file).to_string(),
+            auth: false,
         })
         .collect()
 }
@@ -682,6 +685,23 @@ fn the_manifest_lists_every_url() {
     assert!(out.contains("\"url\": \"/customers/{id}\""), "{out}");
     assert!(out.contains("\"methods\": [\"GET\", \"POST\"]"), "{out}");
     assert!(out.contains("\"appDir\": \"src/app\""), "{out}");
+    assert!(out.contains("\"authRpcs\": []"), "{out}");
+}
+
+#[test]
+fn the_manifest_marks_authenticated_page_rpcs() {
+    let mut entries = with_rpcs(app(), "src/app/users/page.rs", &["read", "write"]);
+    entries
+        .iter_mut()
+        .find(|entry| entry.file == "src/app/users/page.rs")
+        .unwrap()
+        .auth_rpcs = vec!["write".to_string()];
+
+    let out = gen_manifest(&entries, &[], &[], None, &config());
+    assert!(
+        out.contains("\"rpcs\": [\"read\", \"write\"], \"authRpcs\": [\"write\"]"),
+        "{out}"
+    );
 }
 
 /// The manifest describes the markup that ships, so the name it reports is
@@ -959,6 +979,7 @@ fn component_rpcs(rpcs: &[(&str, &str)]) -> Vec<Rpc> {
             name: (*name).to_string(),
             module: (*module).to_string(),
             file: format!("src/components/{}.rs", module.replace("::", "/")),
+            auth: false,
         })
         .collect()
 }
@@ -1141,7 +1162,7 @@ fn the_manifest_lists_the_rpcs_of_a_component() {
 
     assert!(
         out.contains(
-            "{ \"file\": \"src/components/like_button.rs\", \"rpcs\": [{ \"name\": \"like\", \"module\": \"like_button\" }] }"
+            "{ \"file\": \"src/components/like_button.rs\", \"rpcs\": [{ \"name\": \"like\", \"module\": \"like_button\", \"auth\": false }] }"
         ),
         "{out}"
     );
@@ -1192,11 +1213,26 @@ fn the_manifest_lists_the_sockets() {
         &config(),
     );
     assert!(
-        out.contains("{ \"name\": \"chat\", \"file\": \"src/app/page.rs\" },"),
+        out.contains("{ \"name\": \"chat\", \"file\": \"src/app/page.rs\", \"auth\": false },"),
         "{out}"
     );
     assert!(
-        out.contains("{ \"name\": \"feed\", \"file\": \"src/components/ticker.rs\" }"),
+        out.contains(
+            "{ \"name\": \"feed\", \"file\": \"src/components/ticker.rs\", \"auth\": false }"
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_manifest_marks_authenticated_sockets() {
+    let mut guarded = sockets(&[("private_feed", "src/app/account/page.rs")]);
+    guarded[0].auth = true;
+    let out = manifest_json(&app(), &[], &[], &guarded, None, &config());
+    assert!(
+        out.contains(
+            "{ \"name\": \"private_feed\", \"file\": \"src/app/account/page.rs\", \"auth\": true }"
+        ),
         "{out}"
     );
 }
