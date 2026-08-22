@@ -104,6 +104,10 @@
       "type": "boolean",
       "description": "The project uses WebSockets: its Cargo.toml carries the `ws` feature on the `rahti` dependency, which is what compiles `rahti::ws` and the `#[socket]` attribute. Absent means no — the same reading as an absent `db`. The build itself never needs this key (a `#[socket]` in the tree is what wires the endpoint); it exists so `cargo rahti upgrade` knows the manifest is expected to carry the feature, and can say precisely what to add when it does not."
     },
+    "mcp": {
+      "type": "boolean",
+      "description": "The project opts into Rahti's MCP developer tooling. When true, the scaffold owns .mcp.json, which launches the separately installed `rahti-mcp` server against this project. It does not add an application dependency or expose an HTTP route. Absent means no."
+    },
     "db": {
       "type": ["object", "null"],
       "description": "The database wiring. Absent — or null — means the project has no database: no directories are created, no modules are generated, and nothing in the build mentions SeaORM. Note what is *not* here: the connection string. It carries credentials and this file is committed, so the URL is read from DATABASE_URL at runtime and lives in an ignored .env.",

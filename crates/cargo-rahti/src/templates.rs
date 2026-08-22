@@ -91,6 +91,20 @@ pub const CARGO_CONFIG: &str = r#"[alias]
 #     cargo install cargo-watch
 dev = "watch -w src -w rahti.config.json -x run"
 "#;
+/// MCP client configuration, written only when the project opts in.
+///
+/// The server is a separate installed developer tool rather than an
+/// application dependency. Keeping the project path relative makes the
+/// committed file work in every clone and from every project root.
+pub const MCP_CONFIG: &str = r#"{
+  "mcpServers": {
+    "rahti": {
+      "command": "rahti-mcp",
+      "args": ["--project", "."]
+    }
+  }
+}
+"#;
 /// Tailwind's class-merging helper. Written only for a Tailwind project;
 /// 100 KB is a strange thing to serve an app that has no utility classes.
 pub const TAILWIND_MERGE: &[u8] = include_bytes!("../assets/js/tailwind-merge.mjs");

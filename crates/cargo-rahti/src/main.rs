@@ -77,7 +77,7 @@ Create and maintain Rahti projects.
 
 USAGE:
     cargo rahti new <name> [options]
-    cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws]
+    cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
     cargo rahti native <command> [options]
 
 NEW:
@@ -91,6 +91,8 @@ NEW:
     --ws               Add WebSockets: the `ws` feature on the rahti
                        dependency, which compiles `rahti::ws` and the
                        `#[socket]` attribute.
+    --mcp              Add Rahti's MCP developer tooling configuration.
+                       Requires `cargo install rahti-mcp` once per machine.
     --local <path>     Depend on a Rahti checkout by path rather than by
                        version. For working on the framework itself.
 
@@ -110,6 +112,8 @@ UPGRADE:
                        Cargo.toml and DATABASE_URL to .env.
     --ws               Add WebSockets to a project without them, feature and
                        all.
+    --mcp              Add MCP tooling to a project without it, including
+                       the recorded .mcp.json client configuration.
 
     Rewrites the scaffolded files you have not edited, and leaves the ones
     you have. Which is which is decided by the hashes in rahti.config.json,

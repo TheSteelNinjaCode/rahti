@@ -18,8 +18,8 @@
 //! the wrong answer.
 //!
 //! The scaffold's questions do not end at `new`: a project that started
-//! without a database or WebSockets can gain either here. A flag — `--db`,
-//! `--ws`, the same spellings `new` takes — says yes outright; an interactive
+//! without a database, WebSockets or MCP can gain them here. A flag — `--db`,
+//! `--ws`, `--mcp`, the same spellings `new` takes — says yes outright; an interactive
 //! run is asked about whatever the project does not have, defaulting to no; a
 //! dry run changes nothing and so asks nothing. The feature's files are
 //! written, the choice is recorded in `rahti.config.json`, and the two files
@@ -101,6 +101,11 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     if added_ws {
         config.ws = true;
     }
+    let added_mcp =
+        !config.mcp && (options.mcp || (!options.dry_run && confirm("Add MCP tooling?")));
+    if added_mcp {
+        config.mcp = true;
+    }
 
     let dry_run = options.dry_run;
 
@@ -109,6 +114,7 @@ pub fn run(args: &[&str]) -> Result<(), String> {
         config.tailwind,
         config.db,
         config.ws,
+        config.mcp,
         config.local.as_deref(),
     );
     // A named path is checked against the scaffold before anything is
@@ -177,6 +183,7 @@ pub fn run(args: &[&str]) -> Result<(), String> {
             true,
             added_db,
             added_ws,
+            added_mcp,
             options.force.as_deref(),
         );
         return Ok(());
@@ -214,7 +221,7 @@ pub fn run(args: &[&str]) -> Result<(), String> {
 
     // Written even when nothing else was, because `createdWith` moves with
     // the tool that last touched the project.
-    rewrite_config(&root, &ledger, added_db, added_ws)?;
+    rewrite_config(&root, &ledger, added_db, added_ws, added_mcp)?;
 
     report(
         &plan,
@@ -223,6 +230,7 @@ pub fn run(args: &[&str]) -> Result<(), String> {
         false,
         added_db,
         added_ws,
+        added_mcp,
         options.force.as_deref(),
     );
     Ok(())
@@ -375,6 +383,8 @@ struct Options {
     db: Option<Backend>,
     /// `--ws`: add WebSockets, if the project does not have them.
     ws: bool,
+    /// `--mcp`: add the project-level MCP client configuration.
+    mcp: bool,
     /// `--force`, and the paths that followed it. `None` is the ordinary
     /// upgrade, which never takes an edited file. `Some([])` is the bulk
     /// form, which takes the framework's files and leaves the application's;
@@ -387,6 +397,7 @@ impl Options {
         let mut dry_run = false;
         let mut db: Option<Backend> = None;
         let mut ws = false;
+        let mut mcp = false;
         let mut force: Option<Vec<String>> = None;
 
         let mut rest = args.iter();
@@ -394,6 +405,7 @@ impl Options {
             match *arg {
                 "--dry-run" | "-n" => dry_run = true,
                 "--ws" => ws = true,
+                "--mcp" => mcp = true,
                 // Every following argument that is not itself an option is a
                 // path, so `--force a b --dry-run` names two files.
                 "--force" | "-f" => {
@@ -425,6 +437,7 @@ impl Options {
             dry_run,
             db,
             ws,
+            mcp,
             force,
         })
     }
@@ -491,6 +504,7 @@ fn rewrite_config(
     ledger: &Ledger,
     added_db: Option<Backend>,
     added_ws: bool,
+    added_mcp: bool,
 ) -> Result<(), String> {
     let path = root.join("rahti.config.json");
     let raw =
@@ -499,7 +513,7 @@ fn rewrite_config(
     // A config that never had the key — hand-written, most likely — is left
     // without one rather than having a key invented into someone else's file.
     let raw = replace_string_value(&raw, "createdWith", VERSION).unwrap_or(raw);
-    let raw = record_features(raw, added_db, added_ws);
+    let raw = record_features(raw, added_db, added_ws, added_mcp);
     let raw = replace_scaffold(&raw, ledger)?;
 
     fs::write(&path, raw).map_err(|e| format!("cannot write rahti.config.json: {e}"))
@@ -512,10 +526,18 @@ fn rewrite_config(
 /// there, since `Config::read` refused the project without it — so the rest
 /// of the file stays the author's, byte for byte. JSON does not care about
 /// the order, and a reader finds the keys beside the ledger that ships them.
-fn record_features(raw: String, added_db: Option<Backend>, added_ws: bool) -> String {
+fn record_features(
+    raw: String,
+    added_db: Option<Backend>,
+    added_ws: bool,
+    added_mcp: bool,
+) -> String {
     let mut block = String::new();
     if added_ws {
         block.push_str("\"ws\": true,\n\n  ");
+    }
+    if added_mcp {
+        block.push_str("\"mcp\": true,\n\n  ");
     }
     if let Some(backend) = added_db {
         block.push_str(&format!(
@@ -624,6 +646,7 @@ fn report(
     dry_run: bool,
     added_db: Option<Backend>,
     added_ws: bool,
+    added_mcp: bool,
     force: Option<&[String]>,
 ) {
     fn verb<'a>(dry_run: bool, past: &'a str, future: &'a str) -> &'a str {
@@ -716,6 +739,9 @@ fn report(
         if added_ws {
             apply.push_str(" --ws");
         }
+        if added_mcp {
+            apply.push_str(" --mcp");
+        }
         if let Some(paths) = force {
             apply.push_str(" --force");
             for path in paths {
@@ -775,6 +801,11 @@ fn report(
         );
     }
 
+    if added_mcp {
+        println!("  MCP is configured in .mcp.json. Install its server once:\n");
+        println!("    cargo install rahti-mcp\n");
+    }
+
     // A backend that needs a server has to be pointed at one. The line the
     // wiring wrote is an example, and for anything but SQLite it is a wrong
     // one until somebody edits it.
@@ -812,6 +843,8 @@ struct Config {
     db: Option<Backend>,
     /// `"ws": true` in the config: this project uses WebSockets.
     ws: bool,
+    /// `"mcp": true` in the config: this project ships MCP client config.
+    mcp: bool,
     /// A `path` dependency on a Rahti checkout, recovered from `Cargo.toml`
     /// so a project made with `--local` stays that way.
     local: Option<String>,
@@ -903,6 +936,7 @@ impl Config {
             tailwind,
             db,
             ws: value.get("ws").and_then(|v| v.as_bool()).unwrap_or(false),
+            mcp: value.get("mcp").and_then(|v| v.as_bool()).unwrap_or(false),
             local: local_checkout(&manifest),
             ledger,
             from: value

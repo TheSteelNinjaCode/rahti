@@ -18,6 +18,7 @@
     "host": "0.0.0.0",
     "port": 3000
   },
+  "mcp": true,
   "css": {
     "engine": "tailwind",
     "entry": "src/app/globals.css",
@@ -38,6 +39,8 @@
 - `db` is absent unless the project has a database, and carries no connection
   string: that is a credential and this file is committed. See
   `database.md`.
+- `mcp` is absent unless the project opted into the local MCP tooling. It adds
+  no application dependency or HTTP route.
 - The active Rahti version comes from `Cargo.toml`.
 
 All operational keys default, but keep the file valid JSON and update the
@@ -209,8 +212,23 @@ development diagnostic log; none are application input or shipped assets.
 
 ## Model Context Protocol
 
-`rahti-mcp` is the read-only MCP server for a Rahti project. Install it once
-and point the client's stdio configuration at the project root:
+`rahti-mcp` is the read-only MCP server for a Rahti project. Choose it when
+`cargo rahti new` asks, or pass `--mcp`; the scaffold records `"mcp": true`
+and writes this ledger-owned `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rahti": {
+      "command": "rahti-mcp",
+      "args": ["--project", "."]
+    }
+  }
+}
+```
+
+The application does not depend on or compile the server. Install the tool
+once per machine, then let an MCP client start it from the project root:
 
 ```text
 cargo install rahti-mcp
@@ -233,8 +251,8 @@ policy at runtime.
 ## Scaffold CLI
 
 ```text
-cargo rahti new <name> [--tailwind] [--db [backend]] [--ws] [--local <path>]
-cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws]
+cargo rahti new <name> [--tailwind] [--db [backend]] [--ws] [--mcp] [--local <path>]
+cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
 ```
 
 Every feature flag adds something, and leaving it out is how you say no. One
@@ -250,14 +268,17 @@ with nowhere to ask takes the flags at their word.
 - `--ws` puts `features = ["ws"]` on the `rahti` dependency — which is what
   compiles `rahti::ws` and the `#[socket]` attribute — and records
   `"ws": true` in `rahti.config.json`. See `websockets.md`.
+- `--mcp` writes `.mcp.json`, records `"mcp": true`, and otherwise leaves the
+  application unchanged. The separate `rahti-mcp` executable is installed
+  once per machine rather than added to every application's dependencies.
 - Every project is written with its own documentation: `AGENTS.md` — the
   project guide `CLAUDE.md` points at — and the convention documents under
   `docs/conventions/`, with `database.md` and `websockets.md` only where the
   feature was chosen. They are ledgered scaffold files, so `upgrade`
   refreshes unedited copies as the framework evolves and leaves edited ones
   alone.
-- `upgrade` can add a database or WebSockets to a project that started
-  without them: `--db`/`--ws` say yes outright, and an interactive run asks
+- `upgrade` can add a database, WebSockets, or MCP to a project that started
+  without them: `--db`/`--ws`/`--mcp` say yes outright, and an interactive run asks
   about whichever the project lacks, defaulting to no. A dry run never asks —
   name the feature to preview adding it. The feature's files are written and
   the choice is recorded in `rahti.config.json`. The CSS engine is not

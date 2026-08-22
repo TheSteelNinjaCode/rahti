@@ -60,12 +60,13 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     // while the manifest is being written — turning it on later is one line
     // in Cargo.toml, but the scaffold should not make anyone learn which.
     let ws = options.ws || confirm("Use WebSockets?");
+    let mcp = options.mcp || confirm("Use MCP developer tooling?");
 
     let mut ledger = Ledger::new();
-    write_project(&root, &options, tailwind, db, ws, &mut ledger)?;
-    write_config(&root, tailwind, db, ws, &ledger)?;
+    write_project(&root, &options, tailwind, db, ws, mcp, &mut ledger)?;
+    write_config(&root, tailwind, db, ws, mcp, &ledger)?;
 
-    report(&options.name, tailwind, db, ws);
+    report(&options.name, tailwind, db, ws, mcp);
     Ok(())
 }
 
@@ -93,6 +94,7 @@ pub fn project_files(
     tailwind: bool,
     db: Option<Backend>,
     ws: bool,
+    mcp: bool,
     local: Option<&str>,
 ) -> Vec<(String, Vec<u8>)> {
     let rahti = match local {
@@ -168,6 +170,10 @@ pub fn project_files(
         ));
     }
 
+    if mcp {
+        files.push((".mcp.json".into(), t::MCP_CONFIG.into()));
+    }
+
     if tailwind {
         files.push((
             "public/js/tailwind-merge.mjs".into(),
@@ -222,10 +228,17 @@ fn write_project(
     tailwind: bool,
     db: Option<Backend>,
     ws: bool,
+    mcp: bool,
     ledger: &mut Ledger,
 ) -> Result<(), String> {
-    for (path, contents) in project_files(&options.name, tailwind, db, ws, options.local.as_deref())
-    {
+    for (path, contents) in project_files(
+        &options.name,
+        tailwind,
+        db,
+        ws,
+        mcp,
+        options.local.as_deref(),
+    ) {
         binary(root, &path, &contents, ledger)?;
     }
 
@@ -268,6 +281,7 @@ pub fn write_config(
     tailwind: bool,
     db: Option<Backend>,
     ws: bool,
+    mcp: bool,
     ledger: &Ledger,
 ) -> Result<(), String> {
     let engine = if tailwind { "tailwind" } else { "plain" };
@@ -300,6 +314,9 @@ pub fn write_config(
     // what wires the endpoint.
     if ws {
         out.push_str("  \"ws\": true,\n\n");
+    }
+    if mcp {
+        out.push_str("  \"mcp\": true,\n\n");
     }
 
     out.push_str("  \"css\": {\n");
@@ -379,6 +396,8 @@ struct Options {
     /// `--ws` was given: the project gets rahti's `ws` feature and the
     /// `#[socket]` attribute with it.
     ws: bool,
+    /// `--mcp` was given: write the client configuration for `rahti-mcp`.
+    mcp: bool,
     /// A Rahti checkout to depend on by path, for framework development.
     local: Option<String>,
 }
@@ -389,6 +408,7 @@ impl Options {
         let mut tailwind = false;
         let mut db: Option<Backend> = None;
         let mut ws = false;
+        let mut mcp = false;
         let mut local: Option<String> = None;
 
         let mut rest = args.iter();
@@ -396,6 +416,7 @@ impl Options {
             match *arg {
                 "--tailwind" => tailwind = true,
                 "--ws" => ws = true,
+                "--mcp" => mcp = true,
                 // A bare `--db` is SQLite: it is the backend that needs no
                 // server running, so it is the one worth having as the short
                 // form.
@@ -432,6 +453,7 @@ impl Options {
             tailwind,
             db,
             ws,
+            mcp,
             local,
         })
     }
@@ -463,7 +485,7 @@ fn check_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn report(name: &str, tailwind: bool, db: Option<Backend>, ws: bool) {
+fn report(name: &str, tailwind: bool, db: Option<Backend>, ws: bool, mcp: bool) {
     let engine = if tailwind {
         "Tailwind CSS"
     } else {
@@ -512,5 +534,9 @@ fn report(name: &str, tailwind: bool, db: Option<Backend>, ws: bool) {
         println!("  migrations that create them in src/migrations/. Both are wired up");
         println!("  from their contents, so adding a file is the whole of adding a");
         println!("  table. See docs/conventions/database.md.\n");
+    }
+    if mcp {
+        println!("  MCP is configured in .mcp.json. Install its server once:");
+        println!("    cargo install rahti-mcp\n");
     }
 }

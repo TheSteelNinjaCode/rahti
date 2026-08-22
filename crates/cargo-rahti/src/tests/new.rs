@@ -34,16 +34,28 @@ fn scaffold_with(tree: &Tree, tailwind: bool, db: Option<Backend>) -> Ledger {
 }
 
 fn scaffold_full(tree: &Tree, tailwind: bool, db: Option<Backend>, ws: bool) -> Ledger {
+    scaffold_features(tree, tailwind, db, ws, false)
+}
+
+fn scaffold_features(
+    tree: &Tree,
+    tailwind: bool,
+    db: Option<Backend>,
+    ws: bool,
+    mcp: bool,
+) -> Ledger {
     let options = Options {
         name: "demo".to_string(),
         tailwind,
         db,
         ws,
+        mcp,
         local: None,
     };
     let mut ledger = Ledger::new();
-    write_project(&tree.0, &options, tailwind, db, ws, &mut ledger).expect("a written project");
-    write_config(&tree.0, tailwind, db, ws, &ledger).expect("a written config");
+    write_project(&tree.0, &options, tailwind, db, ws, mcp, &mut ledger)
+        .expect("a written project");
+    write_config(&tree.0, tailwind, db, ws, mcp, &ledger).expect("a written config");
     ledger
 }
 
@@ -88,8 +100,15 @@ fn the_engine_flag_is_read() {
 /// point. An interactive run still asks; nothing else does.
 #[test]
 fn no_flag_is_the_way_to_say_no() {
-    assert!(!Options::parse(&["app"]).unwrap().tailwind);
-    assert!(Options::parse(&["app"]).unwrap().db.is_none());
+    let options = Options::parse(&["app"]).unwrap();
+    assert!(!options.tailwind);
+    assert!(options.db.is_none());
+    assert!(!options.mcp);
+}
+
+#[test]
+fn the_mcp_flag_is_read() {
+    assert!(Options::parse(&["app", "--mcp"]).unwrap().mcp);
 }
 
 #[test]
@@ -160,6 +179,30 @@ fn the_config_records_the_ledger_and_the_choice() {
         config.contains("\"src/app/page.rs\""),
         "the ledger is written:\n{config}"
     );
+}
+
+// ---------------------------------------------------------------------- MCP
+
+#[test]
+fn mcp_is_absent_until_the_project_opts_in() {
+    let tree = Tree::new("no-mcp");
+    let ledger = scaffold(&tree, false);
+
+    assert!(!ledger.contains_key(".mcp.json"));
+    assert!(!tree.0.join(".mcp.json").exists());
+    assert!(!tree.read("rahti.config.json").contains("\"mcp\""));
+}
+
+#[test]
+fn an_mcp_project_gets_a_recorded_client_configuration() {
+    let tree = Tree::new("mcp");
+    let ledger = scaffold_features(&tree, false, None, false, true);
+
+    assert!(ledger.contains_key(".mcp.json"));
+    let client = tree.read(".mcp.json");
+    assert!(client.contains("\"command\": \"rahti-mcp\""), "{client}");
+    assert!(client.contains("\"--project\", \".\""), "{client}");
+    assert!(tree.read("rahti.config.json").contains("\"mcp\": true"));
 }
 
 // ------------------------------------------------------------------ engines

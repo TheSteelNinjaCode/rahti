@@ -136,6 +136,9 @@ Install the new bundle at
 For MCP changes, run `cargo test -p rahti-mcp` first. Its tests use an
 isolated temporary Rahti project and cover the stdio server's advertised
 capabilities, bounded diagnostics, and generated RPC authentication metadata.
+Scaffold integration belongs to `cargo-rahti` tests as well: they verify that
+`--mcp` writes and ledgers `.mcp.json`, records the feature, and leaves it
+entirely absent when not selected.
 
 Before completing a framework-wide change:
 

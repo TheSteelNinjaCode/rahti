@@ -241,7 +241,7 @@ fn config_dir(ledger: &Ledger) -> PathBuf {
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("a temporary directory");
-    crate::new::write_config(&root, true, None, false, ledger).expect("a written config");
+    crate::new::write_config(&root, true, None, false, false, ledger).expect("a written config");
     root
 }
 
@@ -270,7 +270,7 @@ fn an_edited_config_survives_the_rewrite() {
     fs::write(&path, &edited).expect("an edited config");
 
     ledger.insert("build.rs".to_string(), sha256::hex(b"new"));
-    rewrite_config(&root, &ledger, None, false).expect("a rewritten config");
+    rewrite_config(&root, &ledger, None, false, false).expect("a rewritten config");
 
     let raw = fs::read_to_string(&path).expect("the rewritten config");
     let _ = fs::remove_dir_all(&root);
@@ -303,7 +303,7 @@ fn an_untouched_config_round_trips_byte_identically() {
     let path = root.join("rahti.config.json");
     let before = fs::read_to_string(&path).expect("the written config");
 
-    rewrite_config(&root, &ledger, None, false).expect("a rewritten config");
+    rewrite_config(&root, &ledger, None, false, false).expect("a rewritten config");
 
     let after = fs::read_to_string(&path).expect("the rewritten config");
     let _ = fs::remove_dir_all(&root);
@@ -342,9 +342,10 @@ fn a_reformatted_scaffold_block_is_still_found() {
 /// ignored into a silent no.
 #[test]
 fn the_upgrade_flags_parse_the_way_new_parses_them() {
-    let options = Options::parse(&["--dry-run", "--ws"]).expect("parsed options");
+    let options = Options::parse(&["--dry-run", "--ws", "--mcp"]).expect("parsed options");
     assert!(options.dry_run);
     assert!(options.ws);
+    assert!(options.mcp);
     assert_eq!(options.db, None);
 
     assert_eq!(
@@ -359,9 +360,10 @@ fn the_upgrade_flags_parse_the_way_new_parses_them() {
     );
     // `--db` followed by another flag is the bare form, and the flag is
     // still read as itself.
-    let both = Options::parse(&["--db", "--ws"]).expect("parsed options");
+    let both = Options::parse(&["--db", "--ws", "--mcp"]).expect("parsed options");
     assert_eq!(both.db, Some(Backend::Sqlite));
     assert!(both.ws);
+    assert!(both.mcp);
 
     assert!(Options::parse(&["--tailwind"]).is_err());
 }
@@ -379,7 +381,7 @@ fn an_added_feature_is_recorded_in_the_config() {
     let path = root.join("rahti.config.json");
     let before = fs::read_to_string(&path).expect("the written config");
 
-    let raw = record_features(before.clone(), Some(Backend::Postgres), true);
+    let raw = record_features(before.clone(), Some(Backend::Postgres), true, true);
     let _ = fs::remove_dir_all(&root);
 
     let value: serde_json::Value = serde_json::from_str(&raw).expect("still valid JSON");
@@ -388,10 +390,11 @@ fn an_added_feature_is_recorded_in_the_config() {
         Some(&serde_json::Value::String("postgres".into()))
     );
     assert_eq!(value.get("ws"), Some(&serde_json::Value::Bool(true)));
+    assert_eq!(value.get("mcp"), Some(&serde_json::Value::Bool(true)));
     assert!(raw.contains("\"migrations\": \"src/migrations\""), "{raw}");
 
     // Nothing added, nothing touched: the round trip is the identity.
-    assert_eq!(record_features(before.clone(), None, false), before);
+    assert_eq!(record_features(before.clone(), None, false, false), before);
 }
 
 // ------------------------------------------------------------------ database
@@ -399,7 +402,7 @@ fn an_added_feature_is_recorded_in_the_config() {
 /// The scaffold's own config, read back the way an upgrade reads it. Written
 /// as a file rather than parsed from a literal because that is the round trip
 /// that actually has to hold: what `new` writes, `upgrade` must understand.
-fn config_of(db: Option<Backend>) -> Result<Config, String> {
+fn config_of(db: Option<Backend>, mcp: bool) -> Result<Config, String> {
     // Uniqueness from a counter, not from the arguments: two tests may ask
     // about the same backend at the same time, and sharing a directory means
     // one of them deletes it out from under the other.
@@ -414,7 +417,7 @@ fn config_of(db: Option<Backend>) -> Result<Config, String> {
 
     let mut ledger = Ledger::new();
     ledger.insert("build.rs".to_string(), sha256::hex(b""));
-    crate::new::write_config(&root, true, db, false, &ledger).expect("a written config");
+    crate::new::write_config(&root, true, db, false, mcp, &ledger).expect("a written config");
 
     let manifest = match db {
         Some(_) => "[package]\nname = \"demo\"\n\n[dependencies]\nsea-orm = \"1\"\n",
@@ -439,7 +442,7 @@ fn the_manifest_and_env_are_wired_to_the_config() {
 
     let mut ledger = Ledger::new();
     ledger.insert("build.rs".to_string(), sha256::hex(b""));
-    crate::new::write_config(&root, true, Some(Backend::Sqlite), true, &ledger)
+    crate::new::write_config(&root, true, Some(Backend::Sqlite), true, false, &ledger)
         .expect("a written config");
     fs::write(
         root.join("Cargo.toml"),
@@ -498,11 +501,17 @@ fn the_manifest_and_env_are_wired_to_the_config() {
 #[test]
 fn the_backend_survives_the_round_trip() {
     for backend in [Backend::Sqlite, Backend::Postgres, Backend::MySql] {
-        let config = config_of(Some(backend)).expect("a readable project");
+        let config = config_of(Some(backend), false).expect("a readable project");
         assert_eq!(config.db, Some(backend));
     }
 
-    assert_eq!(config_of(None).expect("a readable project").db, None);
+    assert_eq!(config_of(None, false).expect("a readable project").db, None);
+}
+
+#[test]
+fn the_mcp_choice_survives_the_round_trip() {
+    assert!(config_of(None, true).expect("a readable project").mcp);
+    assert!(!config_of(None, false).expect("a readable project").mcp);
 }
 
 /// The same reading the build makes: a `db` object that names no backend is
@@ -518,7 +527,7 @@ fn an_unnamed_backend_reads_as_sqlite() {
 /// config being read as "no".
 #[test]
 fn a_project_without_a_database_is_not_wired_for_one() {
-    let config = config_of(None).expect("a readable project");
+    let config = config_of(None, false).expect("a readable project");
     assert_eq!(config.db, None);
     assert!(!config.ws);
 }

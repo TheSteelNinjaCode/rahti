@@ -114,7 +114,7 @@ On every relevant Cargo build it:
 ### `cargo-rahti`
 
 - `cargo rahti new <name>` scaffolds a project and records hashes of owned
-  scaffold files. `--tailwind`, `--db [backend]`, and `--ws` answer its
+  scaffold files. `--tailwind`, `--db [backend]`, `--ws`, and `--mcp` answer its
   questions from the command line; each flag only ever says yes.
 - Every scaffolded project carries its own documentation: `AGENTS.md`,
   `CLAUDE.md`, and the applicable convention documents under
@@ -133,7 +133,7 @@ On every relevant Cargo build it:
   the running tool's version — forward only, never onto a `--local` path
   dependency or a floating requirement — because the framework ships in
   lockstep and a stale pin runs the new files against an older runtime.
-- `cargo rahti upgrade --db`/`--ws` add a feature to a project that started
+- `cargo rahti upgrade --db`/`--ws`/`--mcp` add a feature to a project that started
   without it. `Cargo.toml` and `.env` are never regenerated from a template,
   but `crates/cargo-rahti/src/wiring.rs` amends them — the version pins, the
   SeaORM dependencies, the `ws` feature on `rahti`, `DATABASE_URL` — so the
@@ -159,6 +159,10 @@ convention documents, and a bounded tail of `.rahti/dev.log`; it does not link
 into the application server, read `.env`, mutate the project, or inherit a
 browser session. Generated RPC and socket auth metadata is visible to tools,
 while private route policy remains runtime-owned application code.
+It is a first-class optional scaffold feature: choosing MCP writes a
+ledger-owned `.mcp.json` and records `"mcp": true`, while the executable stays
+a separately installed developer tool and never becomes an application
+dependency.
 
 ## Implemented Feature Inventory
 
@@ -210,6 +214,9 @@ The current implementation covers:
   and no role system;
 - generated manifest metadata for routes, layouts, errors, loading regions,
   components, RPCs, sockets, and the database;
+- optional read-only MCP project inspection over stdio, selected with
+  `cargo rahti new --mcp`, configured by `.mcp.json`, and absent from an
+  application that did not ask;
 - scaffold creation — including each project's own `AGENTS.md`, `CLAUDE.md`,
   and convention documentation — and non-destructive upgrades;
 - the framework side of optional native packaging: shared application startup,
