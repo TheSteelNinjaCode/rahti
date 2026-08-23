@@ -10,7 +10,6 @@ members = [
     "crates/rahti-build",
     "crates/rahti-mcp",
     "crates/rahti-macros",
-    "crates/rahti-ui",
 ]
 
 # Inherited by every publishable crate with `field.workspace = true`.

@@ -366,7 +366,7 @@ Keep state, functions, bindings, and the script that declares them in the same
 block. A reusable interactive child should be its own `#[component]` or carry
 its own script inside its own root.
 
-## Component Modules and Libraries
+## Component Modules
 
 Application component files live under `src/components/`. Nested directories
 are supported. File and directory names must be valid, non-keyword Rust module
@@ -381,7 +381,6 @@ crate::components::<file>::<Component>
 One file may export several components. A nested file is reached through its
 full generated module path.
 
-External component libraries depend on `rahti`, use the same macros, and may
-ship a package-root `ui.css`. The build detects them through dependency
-metadata, includes their Rust sources in Tailwind scanning, appends their CSS,
-and registers component RPCs through the link-time registry.
+Components live in `src/components/`. That is the only directory the build
+scans for them, and it is the only directory Tailwind is pointed at besides
+the app directory — a component written anywhere else is styled by nothing.

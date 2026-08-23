@@ -39,8 +39,8 @@
 //! One endpoint rather than one per page because an upgrade is a GET, and the
 //! page already owns GET on its own URL. The names are therefore
 //! application-wide, like component rpc names, and checked for collisions the
-//! same way: at build time for this project's own, and at startup for
-//! whatever a library linked in.
+//! same way: at build time from the scan, and again at startup over
+//! everything the linker actually assembled.
 //!
 //! ## Who may connect
 //!
@@ -106,9 +106,9 @@ pub type SocketHandler = fn(Map<String, Value>, Socket) -> Pin<Box<dyn Future<Ou
 
 /// One `#[socket]`, submitted by the macro at the point it is written.
 ///
-/// Found at link time, like an `RpcEntry`: the build scans this project's own
-/// files, but a component library's source is never seen here, so the linker
-/// is the only place every socket in the binary is present at once.
+/// Found at link time, like an `RpcEntry`: the linker is the one place every
+/// socket in the binary is present at once, whichever file each was written
+/// in.
 pub struct SocketEntry {
     /// The name the browser connects with, which is the function's own.
     pub name: &'static str,
@@ -130,15 +130,14 @@ fn entries() -> impl Iterator<Item = &'static SocketEntry> {
 ///
 /// The same rule, and the same reason, as `check_rpc_names`: the client sends
 /// a name and nothing else, so the names have to differ across everything
-/// linked in — component libraries included.
+/// linked into the binary.
 pub fn check_socket_names() {
     let all: Vec<&SocketEntry> = entries().collect();
     if let Some((first, second)) = duplicate(&all) {
         panic!(
             "rahti: two sockets are named `{}`.\n  {}\n  {}\n  \
              The client connects with a name and nothing else, so the names \
-             have to differ across everything linked into this binary — \
-             including the component libraries it depends on.",
+             have to differ across everything linked into this binary.",
             first.name, first.source, second.source
         );
     }

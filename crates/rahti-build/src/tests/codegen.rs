@@ -16,9 +16,6 @@ fn config() -> Config {
         public_dir: "public".to_string(),
         host: "0.0.0.0".to_string(),
         port: 3000,
-        // No component libraries unless a test says otherwise, so the
-        // registry fallback is generated only where it is the subject.
-        has_libraries: false,
         // The router is the same with a database and without one — the
         // connection is reached from a page, not routed to.
         db: None,
@@ -986,8 +983,7 @@ fn component_rpcs(rpcs: &[(&str, &str)]) -> Vec<Rpc> {
 
 /// A component has no URL of its own, so every page falls through to one
 /// dispatcher — which asks the link-time registry rather than a generated
-/// `match`, because a component library's rpcs are never scanned by this
-/// build and could not appear in one.
+/// `match`, because there is no single page for such a `match` to sit on.
 #[test]
 fn a_component_rpc_gets_a_dispatcher_of_its_own() {
     let out = gen_routes(
@@ -1040,19 +1036,6 @@ fn the_router_checks_the_rpc_names_at_startup() {
         &config(),
     );
     assert!(out.contains("::rahti::check_rpc_names();"), "{out}");
-}
-
-/// A library's rpcs are invisible to the scan, so its mere presence is reason
-/// enough to generate the fallback — otherwise the page never answers POST
-/// and the rpc is unreachable however correctly the library declared it.
-#[test]
-fn a_library_alone_generates_the_fallback() {
-    let mut config = config();
-    config.has_libraries = true;
-
-    let out = gen_routes(&app(), &[], &config);
-    assert!(out.contains("async fn component_rpc("), "{out}");
-    assert!(out.contains("::rahti::dispatch_registered("), "{out}");
 }
 
 /// The client posts to the page it is on, and the page cannot know which

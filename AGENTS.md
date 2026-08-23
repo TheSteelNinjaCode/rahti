@@ -189,7 +189,7 @@ preserve them, and documentation or scaffold changes must teach them.
   streaming, uploads, auth, sockets, statics, live reload, shutdown.
 - `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[socket]`.
 - `crates/rahti-build/` - configuration, filesystem scan, router/component
-  generation, manifest, dependency components, and CSS.
+  generation, manifest, and CSS.
 - `crates/cargo-rahti/` - `cargo rahti new` and `cargo rahti upgrade`, plus
   the scaffold assets under `assets/` (documents, templates, the PulsePoint
   bundle). `cargo rahti native` is forwarded from here to a separately
@@ -197,7 +197,6 @@ preserve them, and documentation or scaffold changes must teach them.
   no dependency.
 - `crates/rahti-mcp/` - read-only stdio MCP server for generated project
   metadata, conventions, database artifacts, and development diagnostics.
-- `crates/rahti-ui/` - example installable component library and CSS.
 - `docs/conventions/` - the canonical convention documentation.
 - `rahti.schema.json` - the JSON schema for `rahti.config.json`.
 

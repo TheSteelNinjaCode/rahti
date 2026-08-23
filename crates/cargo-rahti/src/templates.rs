@@ -1082,8 +1082,7 @@ body {
 /// whose first impression is an unstyled page teaches the wrong thing about
 /// what choosing it costs.
 pub const GLOBALS_PLAIN: &str = r#"/* Your stylesheet. `css.engine` is "plain", so this file is published to the
- * browser as it stands, with any stylesheets your component libraries ship
- * appended after it. Nothing is downloaded and nothing is compiled. */
+ * browser as it stands. Nothing is downloaded and nothing is compiled. */
 
 :root {
   --background: #ffffff;

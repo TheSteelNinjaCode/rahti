@@ -63,9 +63,9 @@ layouts, errors, or `route.rs`.
 
 Unlike page rpcs, **socket names are application-wide** wherever they are
 written. Every connection arrives on one endpoint and is dispatched by name
-alone, so a page's socket, a component's, and a library's all share one
-namespace. Two files claiming one name is a build error; a library colliding
-with anything is caught at startup, the way component rpc names are.
+alone, so a page's socket and a component's share one namespace. Two files
+claiming one name is a build error, and the whole linked set is checked again
+at startup, the way component rpc names are.
 
 ## The Socket
 

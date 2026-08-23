@@ -13,7 +13,6 @@ mod codegen;
 mod components;
 mod css;
 mod db;
-mod deps;
 mod route;
 mod scanner;
 pub mod sha256;
@@ -42,14 +41,6 @@ pub struct Config {
     /// `None` is the ordinary case and costs nothing: no directories, no
     /// generated modules, no mention of SeaORM anywhere in the build.
     pub db: Option<Db>,
-    /// Whether any dependency ships Rahti components.
-    ///
-    /// Not configuration — read from the dependency graph, and carried here
-    /// because the codegen needs it: a library's `#[rpc]` is reachable only
-    /// through the registry fallback, and a page has to answer POST for that
-    /// fallback to be reached at all. Nothing in this project's own files
-    /// says whether such a library is present.
-    pub has_libraries: bool,
 }
 
 /// How `entry` becomes `output`.
@@ -63,8 +54,7 @@ pub struct Config {
 pub enum Engine {
     /// Compile `entry` with the Tailwind standalone CLI.
     Tailwind,
-    /// Copy `entry` to `output` as it is, with any library stylesheets
-    /// appended. No CLI, no download, no network.
+    /// Copy `entry` to `output` as it is. No CLI, no download, no network.
     Plain,
     /// Leave `output` alone. The app manages its public directory itself.
     None,
@@ -184,7 +174,7 @@ pub fn run() {
     // already treats as a reason to rerun it.
     println!("cargo:rerun-if-changed={CONFIG_PATH}");
 
-    let mut config = load_config();
+    let config = load_config();
 
     // `html!` reads this during expansion to work out which part of a file
     // path is the route, so `pp-component` names survive a moved app dir.
@@ -221,26 +211,9 @@ pub fn run() {
         println!("cargo:rerun-if-changed={path}");
     }
 
-    // Component libraries from the dependency graph. Nothing else in this
-    // build ever looks outside the crate — see `deps.rs`.
-    //
-    // Read whatever the stylesheet is doing, because the CSS step is no
-    // longer the only thing that cares: a library's `#[rpc]` needs the
-    // registry fallback generated, and whether to generate it is a question
-    // only the graph can answer. An app with no libraries pays one
-    // `cargo metadata` and gets an empty list.
-    let libraries = deps::scan();
-    config.has_libraries = !libraries.is_empty();
-
-    // A library edited in place — a `path` dependency, most often the one
-    // being written — has to reach the stylesheet without a `cargo clean`.
-    for path in deps::watched(&libraries) {
-        println!("cargo:rerun-if-changed={path}");
-    }
-
     // After the scan, because a stylesheet is compiled against the classes
     // written in the files the scan just walked.
-    css::build(&config.css, &libraries);
+    css::build(&config.css);
 
     let db_modules = database.as_ref().map(|d| &d.modules);
     for (path, contents) in components
@@ -371,7 +344,6 @@ fn parse_config(raw: &str) -> Config {
     Config {
         // Filled in by `run` once the graph has been read; a parsed file says
         // nothing about it.
-        has_libraries: false,
         db: db_at(&value),
         app_dir: string_at("app", "dir", "src/app"),
         // Deliberately not watched: assets are read at runtime, so editing

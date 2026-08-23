@@ -58,9 +58,9 @@ fn the_shim_is_named_after_the_function() {
     // The request, not a finished call: how much of the body to read is the
     // shim's own decision.
     //
-    // Reached through `::rahti::`, not as a bare `axum::`: a component library
+    // Reached through `::rahti::`, not as a bare `axum::`: an application
     // depends on `rahti` alone, and an attribute this crate provides must not
-    // force axum into that library's manifest.
+    // force axum into its manifest.
     assert!(
         out.contains("__req : :: rahti :: axum :: extract :: Request"),
         "{out}"

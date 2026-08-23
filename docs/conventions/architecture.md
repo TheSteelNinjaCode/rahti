@@ -103,12 +103,11 @@ On every relevant Cargo build it:
 - reads `rahti.config.json`;
 - scans route convention files and `src/components/*.rs`;
 - validates route, RPC, and socket-name conflicts;
-- detects component-library dependencies through Cargo metadata;
 - generates routes, modules, and `.rahti/manifest.json`;
 - when `db` is configured, generates `src/models/mod.rs` and
   `src/migrations/mod.rs` — including the `Migrator` — without depending on
   SeaORM or reading any of its code;
-- compiles/copies CSS and includes component-library styles;
+- compiles or copies CSS;
 - emits Cargo watch directives for every relevant path.
 
 ### `cargo-rahti`

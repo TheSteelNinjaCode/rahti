@@ -32,11 +32,11 @@
 //! the attribute and writes a dispatcher that calls the right shim, so a
 //! page's rpcs cost a `match` the compiler checked.
 //!
-//! That scan can only see this project. A component library is compiled
-//! separately and its source is never read here, so `#[rpc]` also submits an
-//! entry to the link-time registry in `rahti::registry`, which the linker
-//! fills from every crate in the binary. A name a page does not own is looked
-//! up there. The shim is the same either way — only what reaches it differs,
+//! A component's rpc belongs to no URL of its own, so there is no one page
+//! for the codegen to write its `match` arm on. `#[rpc]` therefore also
+//! submits an entry to the link-time registry in `rahti::registry`, which the
+//! linker fills from every crate in the binary. A name a page does not own is
+//! looked up there. The shim is the same either way — only what reaches it differs,
 //! since a page's rpcs answer on its own URL and a component's answer on
 //! whichever page rendered it.
 
@@ -216,13 +216,13 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, Error
         None => quote! { ::rahti::RpcCall::from_request(__req).await },
     };
 
-    // The registry entry, so an rpc written in a *library* is reachable at
-    // all. A page's rpcs are dispatched by a `match` the build writes, which
-    // needs to have seen the file; a dependency's source is never scanned, so
-    // without this a component library could ship a button whose server half
-    // could never be called. See `registry.rs` in the runtime.
+    // The registry entry, so an rpc written beside a *component* is reachable
+    // at all. A page's rpcs are dispatched by a `match` the build writes on
+    // that page's URL; a component is rendered by whoever calls it and owns no
+    // URL, so without this its server half could never be called. See
+    // `registry.rs` in the runtime.
     //
-    // Submitted for every `#[rpc]`, not only a library's: the macro cannot
+    // Submitted for every `#[rpc]`, not only a component's: the macro cannot
     // tell where it is, and the codegen excludes the app's own page rpcs from
     // the fallback by name.
     let wire = name.to_string();

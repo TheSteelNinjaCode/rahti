@@ -13,7 +13,6 @@ through to the global component RPC registry.
 
 - Page-owned RPC: place `#[rpc]` in the calling `page.rs`.
 - Application component RPC: place it in `src/components/<component>.rs`.
-- Library component RPC: place it beside the library component.
 - Do not place `#[rpc]` in layouts, errors, `not-found.rs`, or `route.rs`.
   Expose an ordinary HTTP method from `route.rs` instead.
 

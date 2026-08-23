@@ -110,7 +110,6 @@ Lines in `.rahti/dev.log`, a file an agent can read.
 | `rahti-build` | The build step: scans conventions, generates the router and modules, compiles CSS. |
 | `cargo-rahti` | `cargo rahti new` and `cargo rahti upgrade`. |
 | `rahti-mcp` | Optional read-only stdio project inspection for MCP clients. |
-| `rahti-ui` | An example installable component library. |
 
 This repository is the framework workspace: the crates above, and the
 documents under [`docs/conventions/`](docs/conventions/) — the canonical

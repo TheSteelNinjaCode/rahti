@@ -60,7 +60,7 @@
         "engine": {
           "enum": ["tailwind", "plain", "none"],
           "default": "tailwind",
-          "description": "How `entry` becomes `output`. \"tailwind\" compiles it with the Tailwind standalone CLI. \"plain\" copies it as it is, appending any stylesheets your component libraries ship — no CLI, no download, no network. \"none\" leaves `output` alone so you manage the public directory yourself. Under every engine you edit `entry` and the browser is served `output`, so switching is one word, not a migration."
+          "description": "How `entry` becomes `output`. \"tailwind\" compiles it with the Tailwind standalone CLI. \"plain\" copies it as it is — no CLI, no download, no network. \"none\" leaves `output` alone so you manage the public directory yourself. Under every engine you edit `entry` and the browser is served `output`, so switching is one word, not a migration."
         },
         "entry": {
           "type": "string",

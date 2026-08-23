@@ -19,7 +19,6 @@ use std::{env, fs};
 #[path = "tests/css.rs"]
 mod tests;
 
-use crate::deps::Dep;
 use crate::{Css, Engine, sha256, write_if_changed};
 
 /// Where a downloaded CLI is cached. Under `.rahti/`, which is gitignored,
@@ -49,7 +48,7 @@ fn tmp_output() -> PathBuf {
 const RELEASES: &str = "https://github.com/tailwindlabs/tailwindcss/releases/download";
 
 /// Turn `css.entry` into `css.output`, or explain why it did not.
-pub fn build(css: &Css, deps: &[Dep]) {
+pub fn build(css: &Css) {
     if css.engine == Engine::None {
         return;
     }
@@ -72,18 +71,8 @@ pub fn build(css: &Css, deps: &[Dep]) {
     // loop, because `write_if_changed` leaves an up-to-date file untouched.
     println!("cargo:rerun-if-changed={}", css.output);
 
-    check_libraries(css, deps);
-
-    // A wrapper left by a build that had libraries and Tailwind would sit
-    // there looking authoritative while nothing read it — the next person
-    // debugging a missing class would read it and be misled. Cleared here
-    // rather than in `entry`, which only the Tailwind path reaches.
-    if css.engine != Engine::Tailwind || deps.is_empty() {
-        let _ = fs::remove_file(format!("{TMP_DIR}/entry.css"));
-    }
-
     if css.engine == Engine::Plain {
-        copy(css, deps);
+        copy(css);
         return;
     }
 
@@ -97,45 +86,17 @@ pub fn build(css: &Css, deps: &[Dep]) {
         return;
     };
 
-    compile(&binary, css, &entry(css, deps));
+    compile(&binary, css);
 }
 
-/// Refuse a library this app cannot style.
-///
-/// A crate that declares only `components` writes Tailwind class names and
-/// nothing else. Under the plain engine nothing compiles them, so it renders
-/// with correct markup and no CSS behind it — the page looks broken and every
-/// file involved looks fine. That is worth failing a build over: the app
-/// author can switch engines or drop the dependency, but only if told.
-fn check_libraries(css: &Css, deps: &[Dep]) {
-    if css.engine != Engine::Plain {
-        return;
-    }
-
-    for dep in deps {
-        if dep.stylesheet.is_none() && dep.components.is_some() {
-            panic!(
-                "rahti: `{}` is a Tailwind component library, and css.engine is \
-                 \"plain\".\n  \
-                 Its class names would need Tailwind to compile them, so its \
-                 components would render unstyled.\n  \
-                 Set css.engine to \"tailwind\" in {}, or drop the dependency.",
-                dep.name,
-                crate::CONFIG_PATH
-            );
-        }
-    }
-}
-
-/// The plain engine: publish `entry` as it stands, plus what the libraries
-/// ship.
+/// The plain engine: publish `entry` as it stands.
 ///
 /// No CLI, no download, no network — the whole point of the engine. It still
 /// goes through `write_if_changed` and the same emptiness guard as a compile,
 /// because the ways a stylesheet can be destroyed do not depend on what
 /// produced it.
-fn copy(css: &Css, deps: &[Dep]) {
-    let mut out = fs::read_to_string(&css.entry)
+fn copy(css: &Css) {
+    let out = fs::read_to_string(&css.entry)
         .unwrap_or_else(|e| panic!("rahti: cannot read {}: {e}", css.entry));
 
     // A Tailwind entry copied verbatim is not a stylesheet, it is a request
@@ -155,20 +116,6 @@ fn copy(css: &Css, deps: &[Dep]) {
         );
     }
 
-    for dep in deps {
-        let Some(sheet) = &dep.stylesheet else {
-            continue;
-        };
-        let contents = fs::read_to_string(sheet).unwrap_or_else(|e| {
-            panic!("rahti: cannot read {sheet}, shipped by `{}`: {e}", dep.name)
-        });
-
-        // The app's own sheet first, libraries after, so an app rule wins a
-        // tie on specificity the way the later rule does in any stylesheet.
-        out.push_str(&format!("\n/* {} */\n", dep.name));
-        out.push_str(&contents);
-    }
-
     let existing = fs::read_to_string(&css.output).unwrap_or_default();
     if would_erase(&out, &existing) {
         panic!(
@@ -178,68 +125,6 @@ fn copy(css: &Css, deps: &[Dep]) {
     }
 
     write_if_changed(&css.output, &out);
-}
-
-/// The file actually handed to the CLI.
-///
-/// With no component libraries in the graph this is `css.entry` itself, and
-/// nothing about the build changes. With them, it is a generated sheet that
-/// imports `css.entry` and adds one `@source` per library.
-///
-/// The indirection is what keeps registry paths out of the repository.
-/// Writing those `@source` lines into `css.entry` would work exactly once:
-/// the path holds a version number and a machine's home directory, so the
-/// next `cargo update` or the next teammate gets a stylesheet compiled
-/// against a directory that is not there. Here they land in `.rahti/`, which
-/// is gitignored and rewritten every build, and `css.entry` stays a file the
-/// app owns.
-fn entry(css: &Css, deps: &[Dep]) -> String {
-    if deps.is_empty() {
-        return css.entry.clone();
-    }
-
-    let path = format!("{TMP_DIR}/entry.css");
-    fs::create_dir_all(TMP_DIR).ok();
-
-    let mut out = String::new();
-    out.push_str("/* @generated by rahti-build — do not edit, do not commit. */\n");
-    out.push_str("/* The app's stylesheet, plus the component libraries it depends on. */\n\n");
-
-    // First: `@import` has to precede other rules, and this one is the whole
-    // sheet the app wrote — `@import "tailwindcss"` included.
-    //
-    // Relative, unlike the `@source` lines below, because both files are
-    // inside the project: `.rahti/css/` is two levels down from the crate
-    // root, which is what `css.entry` is relative to.
-    out.push_str(&format!("@import \"../../{}\";\n\n", css.entry));
-
-    // Absolute paths throughout: a dependency lives in the cargo registry,
-    // which is nowhere near this project.
-    //
-    // Every `@import` first and the `@source` lines after, rather than both
-    // per library: `@import` has to precede other rules, so interleaving them
-    // would be valid with one library and invalid with two.
-    for dep in deps {
-        // Plain CSS a library ships works under either engine, so a Tailwind
-        // app pulls it in too rather than making the library pick a side.
-        if let Some(sheet) = &dep.stylesheet {
-            out.push_str(&format!("/* {} */\n@import \"{sheet}\";\n", dep.name));
-        }
-    }
-
-    out.push('\n');
-
-    for dep in deps {
-        if let Some(dir) = &dep.components {
-            out.push_str(&format!("/* {} */\n@source \"{}\";\n", dep.name, dir));
-        }
-    }
-
-    // Not `write_if_changed`: this file is an input to the CLI on the next
-    // line, not something cargo watches, and it is regenerated whole.
-    fs::write(&path, &out).unwrap_or_else(|e| panic!("rahti: cannot write {path}: {e}"));
-
-    path
 }
 
 /// Find a usable CLI, cheapest source first.
@@ -436,12 +321,15 @@ fn make_executable(path: &Path) {
 fn make_executable(_path: &Path) {}
 
 /// Run the CLI, then publish what it produced.
-fn compile(binary: &Path, css: &Css, entry: &str) {
+fn compile(binary: &Path, css: &Css) {
     fs::create_dir_all(TMP_DIR).ok();
     let tmp = tmp_output();
 
     let mut command = Command::new(binary);
-    command.args(["--input", entry]).arg("--output").arg(&tmp);
+    command
+        .args(["--input", &css.entry])
+        .arg("--output")
+        .arg(&tmp);
     if minify(css) {
         command.arg("--minify");
     }

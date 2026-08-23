@@ -144,7 +144,7 @@ fn a_missing_entry_compiles_nothing() {
     css.entry = "src/app/does-not-exist.css".into();
     // No CLI is resolved and no output is written, so reaching the end is
     // the whole assertion.
-    build(&css, &[]);
+    build(&css);
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn the_none_engine_builds_nothing() {
     let mut css = css();
     css.engine = Engine::None;
     css.entry = file!().into(); // exists, and would otherwise be compiled
-    build(&css, &[]);
+    build(&css);
 }
 
 // ------------------------------------------------------------- plain engine
@@ -171,66 +171,8 @@ fn the_plain_engine_publishes_the_entry_as_it_is() {
     css.entry = entry.to_string_lossy().into();
     css.output = output.to_string_lossy().into();
 
-    build(&css, &[]);
+    build(&css);
     assert_eq!(tree.read("styles.css"), ".card { color: red }\n");
-}
-
-/// A library's shipped stylesheet lands after the app's, so an app rule wins
-/// a tie the way the later rule does in any stylesheet.
-#[test]
-fn the_plain_engine_appends_library_stylesheets() {
-    let tree = Tree::new("plain-deps");
-    let entry = tree.path().join("globals.css");
-    let output = tree.path().join("styles.css");
-    let shipped = tree.path().join("ui.css");
-    std::fs::write(&entry, ".app { color: red }\n").unwrap();
-    std::fs::write(&shipped, ".ui { color: blue }\n").unwrap();
-
-    let mut css = css();
-    css.engine = Engine::Plain;
-    css.entry = entry.to_string_lossy().into();
-    css.output = output.to_string_lossy().into();
-
-    let dep = Dep {
-        name: "rahti-ui".into(),
-        manifest: "/somewhere/Cargo.toml".into(),
-        components: None,
-        stylesheet: Some(shipped.to_string_lossy().into()),
-    };
-
-    build(&css, &[dep]);
-    let out = tree.read("styles.css");
-    assert!(out.contains(".app { color: red }"), "{out}");
-    assert!(out.contains(".ui { color: blue }"), "{out}");
-    assert!(
-        out.find(".app").unwrap() < out.find(".ui").unwrap(),
-        "the app's own rules must come first:\n{out}"
-    );
-}
-
-/// The silent failure this exists to prevent: a Tailwind-only library in a
-/// plain app renders correct markup with no CSS behind it, and every file
-/// involved looks fine.
-#[test]
-#[should_panic(expected = "is a Tailwind component library")]
-fn a_tailwind_only_library_is_refused_by_the_plain_engine() {
-    let tree = Tree::new("plain-refuse");
-    let entry = tree.path().join("globals.css");
-    std::fs::write(&entry, ".app { color: red }\n").unwrap();
-
-    let mut css = css();
-    css.engine = Engine::Plain;
-    css.entry = entry.to_string_lossy().into();
-    css.output = tree.path().join("styles.css").to_string_lossy().into();
-
-    let dep = Dep {
-        name: "rahti-ui".into(),
-        manifest: "/somewhere/Cargo.toml".into(),
-        components: Some("/somewhere/src".into()),
-        stylesheet: None,
-    };
-
-    build(&css, &[dep]);
 }
 
 // ------------------------------------------------- tailwind in a plain sheet
@@ -286,31 +228,5 @@ fn the_plain_engine_refuses_a_tailwind_entry() {
     css.entry = entry.to_string_lossy().into();
     css.output = tree.path().join("styles.css").to_string_lossy().into();
 
-    build(&css, &[]);
-}
-
-/// A library that ships CSS as well is styled either way, so it is not the
-/// engine's business to refuse it.
-#[test]
-fn a_library_shipping_css_is_accepted_by_the_plain_engine() {
-    let tree = Tree::new("plain-both");
-    let entry = tree.path().join("globals.css");
-    let shipped = tree.path().join("ui.css");
-    std::fs::write(&entry, ".app { color: red }\n").unwrap();
-    std::fs::write(&shipped, ".ui { color: blue }\n").unwrap();
-
-    let mut css = css();
-    css.engine = Engine::Plain;
-    css.entry = entry.to_string_lossy().into();
-    css.output = tree.path().join("styles.css").to_string_lossy().into();
-
-    let dep = Dep {
-        name: "rahti-ui".into(),
-        manifest: "/somewhere/Cargo.toml".into(),
-        components: Some("/somewhere/src".into()),
-        stylesheet: Some(shipped.to_string_lossy().into()),
-    };
-
-    build(&css, &[dep]);
-    assert!(tree.read("styles.css").contains(".ui { color: blue }"));
+    build(&css);
 }

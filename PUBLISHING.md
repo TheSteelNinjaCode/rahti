@@ -13,11 +13,6 @@ removed, and the name is taken permanently.
       publishable crate carries its own.
 - [ ] **Set the real repository URL** in `[workspace.package]` of the root
       `Cargo.toml`. The current value is a placeholder.
-- [ ] **Decide whether `rahti-ui` should ship at all.** It is the example
-      component library this repository tests against — a fuchsia button and a
-      counter. Publishing it claims the name; not publishing it leaves the
-      name free for the real thing. Set `publish = false` if it is only a
-      fixture.
 - [ ] `cargo test --workspace` clean.
 - [ ] Commit everything. `cargo publish` records the git revision.
 
@@ -48,8 +43,6 @@ version and is published with the same release:
 ```bash
 cargo publish -p rahti-mcp
 ```
-
-`rahti-ui` last, if it is being published at all.
 
 Wait for each to appear on the index before the next — crates.io takes a
 moment, and the following publish resolves against it.

@@ -146,7 +146,7 @@ hand-edit it. Generated applications have no JavaScript build step.
 The `css.engine` modes are:
 
 - `tailwind` - compile the entry with the pinned standalone Tailwind CLI;
-- `plain` - copy the entry and append component-library styles;
+- `plain` - copy the entry as it stands;
 - `none` - leave the output untouched.
 
 The editable `entry` and served `output` keep the same roles in all modes.
@@ -162,9 +162,9 @@ Tailwind configuration:
 Binary lookup includes `.rahti/bin`, `RAHTI_TAILWIND`, and `tailwindcss` on
 `PATH`. A configured hash mismatch is fatal.
 
-Component libraries are scanned for Tailwind classes and may ship `ui.css`.
-Path-dependency changes are watched so their classes/styles rebuild without a
-manual clean.
+Tailwind scans this project's own sources. Class names are authored in
+`src/app/` and `src/components/`, which the build already watches, so a
+changed class rebuilds the stylesheet.
 
 ## Development Runtime
 

@@ -2,16 +2,15 @@
 //!
 //! A page's rpcs are known when `rahti-build` walks `src/app/`, so they are
 //! dispatched by a `match` the codegen writes — the fastest possible answer,
-//! checked by the compiler. A *library's* rpcs are not: the crate is compiled
-//! separately, its source sits in the cargo registry, and no scan of this
-//! project will ever see it. A component library could therefore ship a
-//! button that renders and a `#[rpc]` that could never be called.
+//! checked by the compiler. A *component's* are not tied to a URL: a
+//! component is rendered by whoever calls it, so its rpc arrives as a POST to
+//! whichever page that was, and the generated code has no one page to write
+//! the `match` arm on.
 //!
 //! So `#[rpc]` also submits an entry here. The linker gathers them from every
-//! crate in the binary, this one included, and the fallback dispatcher looks
-//! the name up at runtime. What is lost is the compiler's exhaustiveness
-//! check over rpc names; what is gained is that a component library can ship
-//! behaviour instead of only markup.
+//! crate in the binary, and the fallback dispatcher looks the name up at
+//! runtime. What is lost is the compiler's exhaustiveness check over rpc
+//! names; what is gained is one dispatcher every page can fall through to.
 //!
 //! Page rpcs are deliberately *not* reachable this way — see [`dispatch`].
 
@@ -66,9 +65,10 @@ pub async fn dispatch(name: &str, reserved: &[&str], req: Request) -> Response {
 /// Refuse a binary in which two rpcs answer to one name.
 ///
 /// The names are a flat namespace because the wire is: the client posts a
-/// name and nothing else. Two crates can each declare `submit` without either
-/// author doing anything wrong, and whichever the linker happened to place
-/// first would answer for both — silently, and differently between builds.
+/// name and nothing else. Two `#[rpc]`s can be written as `submit` without
+/// either author doing anything wrong, and whichever the linker happened to
+/// place first would answer for both — silently, and differently between
+/// builds.
 ///
 /// Checked once at startup rather than on every call, and fatal rather than
 /// logged: the alternative is an app that works on the machine it was built
@@ -79,8 +79,7 @@ pub fn check_rpc_names() {
         panic!(
             "rahti: two rpcs are named `{}`.\n  {}\n  {}\n  \
              The client posts a name and nothing else, so the names have to \
-             differ across everything linked into this binary — including the \
-             component libraries it depends on.",
+             differ across everything linked into this binary.",
             first.name, first.source, second.source
         );
     }

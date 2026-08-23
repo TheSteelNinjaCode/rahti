@@ -5,10 +5,8 @@
 //! calls.
 //!
 //! The `html!` macro expands to `::rahti::` paths — absolute, naming this
-//! crate itself rather than a path inside whoever is compiling. Any crate
-//! that depends on `rahti` can therefore write components, which is what
-//! makes a component library on crates.io possible: a dependency has no
-//! `crate::rahti` to offer.
+//! crate itself rather than a path inside whoever is compiling — so the
+//! expansion compiles the same wherever it is written.
 
 // Framework surface: exported for apps to use, so "nothing in this crate
 // calls it yet" is not a defect.
@@ -90,7 +88,7 @@ pub use serde_json;
 pub use inventory;
 
 /// Re-exported for the same reason as the macros: `#[rpc]` writes a shim
-/// whose parameter is an axum request, and a component library that only
-/// depends on `rahti` must not have to add axum to its own manifest to use
-/// an attribute this crate provides.
+/// whose parameter is an axum request, and an application that only depends
+/// on `rahti` must not have to add axum to its own manifest to use an
+/// attribute this crate provides.
 pub use axum;

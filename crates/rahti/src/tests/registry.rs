@@ -12,19 +12,19 @@ fn entry(name: &'static str, source: &'static str) -> RpcEntry {
 
 // ---------------------------------------------------------------- duplicates
 
-/// Two crates can each declare `submit` without either author doing anything
+/// Two files can each declare `submit` without either author doing anything
 /// wrong. Whichever the linker placed first would answer for both, silently,
 /// and possibly differently in the next build.
 #[test]
 fn two_rpcs_of_one_name_are_found() {
-    let a = entry("submit", "rahti-ui/src/form.rs:12");
+    let a = entry("submit", "src/components/form.rs:12");
     let b = entry("submit", "src/components/contact.rs:30");
-    let c = entry("bump", "rahti-ui/src/counter.rs:51");
+    let c = entry("bump", "src/components/counter.rs:51");
 
     let found = duplicate(&[&a, &c, &b]).expect("the clash");
     assert_eq!(found.0.name, "submit");
     assert_eq!(found.1.name, "submit");
-    assert_eq!(found.0.source, "rahti-ui/src/form.rs:12");
+    assert_eq!(found.0.source, "src/components/form.rs:12");
     assert_eq!(found.1.source, "src/components/contact.rs:30");
 }
 
