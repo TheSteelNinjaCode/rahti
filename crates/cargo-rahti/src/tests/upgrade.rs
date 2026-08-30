@@ -453,9 +453,11 @@ fn the_manifest_and_env_are_wired_to_the_config() {
 
     let config = Config::read(&root).expect("a readable project");
 
-    // A dry run computes the same answer and writes none of it.
+    // A dry run computes the same answer and writes none of it. Four lines:
+    // the sea-orm pair for the database, and the test suite's two
+    // dev-dependencies, which every project is brought up to.
     let previewed = wire(&root, &config, true).expect("a preview");
-    assert_eq!(previewed.dependencies.len(), 2);
+    assert_eq!(previewed.dependencies.len(), 4);
     assert!(previewed.ws_feature);
     assert_eq!(previewed.env, vec![".env".to_string()]);
     assert!(
@@ -478,6 +480,9 @@ fn the_manifest_and_env_are_wired_to_the_config() {
     assert!(manifest.contains("sea-orm ="), "{manifest}");
     assert!(manifest.contains("sea-orm-migration ="), "{manifest}");
     assert!(manifest.contains("features = [\"ws\"]"), "{manifest}");
+    assert!(manifest.contains("[dev-dependencies]"), "{manifest}");
+    assert!(manifest.contains("tower ="), "{manifest}");
+    assert!(manifest.contains("http-body-util ="), "{manifest}");
     assert!(env.contains("DATABASE_URL=\"sqlite://"), "{env}");
     assert!(env.contains("AUTH_SECRET=\"abc\""), "{env}");
 

@@ -31,6 +31,20 @@ PulsePoint v2 mounts reactive blocks
 The generated router is ordinary Rust compiled into the application. Rahti
 does not discover routes at runtime.
 
+An application's startup lives in its `src/lib.rs`, behind
+`initialize_application`: the database, the migrations it chooses to run, the
+auth policy, and the generated router. `src/main.rs` calls it and binds the
+public listener. A native package calls the same function and binds a loopback
+one — see `native-packaging.md` — which is why the sequence is in a library
+rather than in a `main` Android would have no way to reach.
+
+```text
+src/lib.rs::initialize_application
+        |
+        +--> src/main.rs        binds HOST:PORT, the web deployment
+        +--> native/src/lib.rs  binds 127.0.0.1:0, the packaged application
+```
+
 ## Workspace Crates
 
 ### `rahti`
@@ -59,12 +73,13 @@ The server runtime exports:
   bind address as `localhost` because `0.0.0.0` is not a destination;
 - development reload routes and graceful-shutdown coordination — `signal` for
   Ctrl+C, and `begin_shutdown` for a host that says when instead of waiting to
-  be told, which is what an installed application without a terminal needs;
+  be told, which is every native package;
 - behind the default `dev-watch` cargo feature: the `public/` filesystem
-  watcher. On for every web project; a build that turns it off keeps the reload
-  stream and the diagnostics endpoint and drops `notify` entirely, which is
-  what a packaged application wants — its assets are written to internal
-  storage once per version and nothing edits them;
+  watcher. A Windows native debug run serves the checkout and uses the same
+  fast asset reload as the web host. Android cannot read the host directory,
+  so `cargo-rahti-native` watches it on the development machine and rebuilds,
+  reinstalls and restarts with a new embedded tree. A release host forces
+  development mode off, leaving the reload routes and watcher inert;
 - the macros re-exported from `rahti-macros` — `#[socket]` only when `ws` is
   enabled, so the error for a socket without the feature names the feature
   rather than generated code.
@@ -123,6 +138,12 @@ On every relevant Cargo build it:
 - Every scaffolded project also carries a `.cargo/config.toml` whose `dev`
   alias makes `cargo dev` rebuild and restart the server on Rust edits via
   cargo-watch — the half of live reload the running server cannot do itself.
+- Every scaffolded project starts with a passing test suite:
+  `src/tests/app.rs` drives the generated router in-process, included from
+  `src/lib.rs` and run by `cargo test`. A database project's suite connects
+  a file SQLite database and runs the migrations; the dev-dependencies the
+  harness needs are written into the manifest. `testing.md` is the shipped
+  document for it.
 - `cargo rahti upgrade` replaces only scaffold files whose recorded hashes
   still match, preserving user-edited files.
 - `cargo rahti upgrade --force` takes edited files back: bare, the framework's
@@ -135,8 +156,9 @@ On every relevant Cargo build it:
 - `cargo rahti upgrade --db`/`--ws`/`--mcp` add a feature to a project that started
   without it. `Cargo.toml` and `.env` are never regenerated from a template,
   but `crates/cargo-rahti/src/wiring.rs` amends them — the version pins, the
-  SeaORM dependencies, the `ws` feature on `rahti`, `DATABASE_URL` — so the
-  files the upgrade just wrote compile and run. Additive and idempotent, driven by
+  SeaORM dependencies, the test suite's dev-dependencies, the `ws` feature on
+  `rahti`, `DATABASE_URL` — so the files the upgrade just wrote compile and
+  run. Additive and idempotent, driven by
   `rahti.config.json` so a half-wired project is repaired by running it
   again.
 - `--dry-run` previews an upgrade.
@@ -144,11 +166,6 @@ On every relevant Cargo build it:
   separately installed executable. The forwarding is a `Command` spawn and adds
   no dependency; a missing helper prints the line that installs it. Nothing
   else in `cargo-rahti` knows native packaging exists.
-- A scaffolded project is a library plus a thin binary: `src/lib.rs` holds
-  `initialize_application` — the database, the migrations the project chooses
-  to run, the auth policy, the generated router — and `src/main.rs` calls it
-  and binds the configured address. The split is what lets an optional native
-  package start the same application without a second copy of the sequence.
 
 ### `rahti-mcp`
 
@@ -162,6 +179,41 @@ It is a first-class optional scaffold feature: choosing MCP writes a
 ledger-owned `.mcp.json` and records `"mcp": true`, while the executable stays
 a separately installed developer tool and never becomes an application
 dependency.
+
+### `rahti-native`
+
+Optional, and Tauri-free so that it compiles and tests in an ordinary
+workspace run:
+
+- `AppPaths`: where an installed application's data, config, cache, database,
+  uploads, spill directory, logs and staged assets are, per platform — and the
+  rule that none of them is inside the installation directory;
+- `EmbeddedServer`: a `127.0.0.1` listener on an OS-assigned port, with no API
+  to bind anything else, and `RunningServer` with a bounded graceful shutdown
+  that also fires Rahti's shutdown broadcast;
+- the per-installation session key: generated on the device at first launch,
+  DPAPI-encrypted on Windows, restored into `AUTH_SECRET` before the auth
+  policy is built;
+- `NativeConfig`: `rahti.native.json`, and the validation that refuses an
+  identifier Android would reject before a build starts;
+- the loopback gate, the security headers, and the `window.rahtiNative` bridge script —
+  which attaches to the PulsePoint runtime without the bundle being touched.
+
+### `cargo-rahti-native`
+
+- `init` writes the application-owned Tauri shell under `native/` and
+  `rahti.native.json` beside it. Additive, idempotent, and non-destructive:
+  an edited file is left alone and reported, `--force` takes it back.
+- `doctor` checks only what the selected target needs, installs nothing, and
+  says what is missing, why, and which command supplies it.
+- `dev` and `build` delegate to `cargo tauri`, having checked the
+  prerequisites first, and print the absolute path of every artifact. `dev`
+  adds the application outside `native/` to Tauri's watch set: Rust edits
+  rebuild and restart both targets, while Android asset edits also rebuild and
+  redeploy the content-fingerprinted embedded tree.
+
+Neither crate is reachable from a web-only project: `native/` is excluded from
+the project workspace, and `cargo-rahti-native` is a separate install.
 
 ## Implemented Feature Inventory
 
@@ -217,12 +269,17 @@ The current implementation covers:
   `cargo rahti new --mcp`, configured by `.mcp.json`, and absent from an
   application that did not ask;
 - scaffold creation — including each project's own `AGENTS.md`, `CLAUDE.md`,
-  and convention documentation — and non-destructive upgrades;
-- the framework side of optional native packaging: shared application startup,
-  a shutdown a host can begin itself, and a `dev-watch` feature a mobile build
-  turns off. The packaging itself is a separate install and a separate
-  package — see `native-packaging.md` — so a project that never asks for one
-  compiles, downloads and resolves none of it.
+  convention documentation, and a passing test suite in `src/tests/` — and
+  non-destructive upgrades;
+- optional native packaging for Windows and Android: the existing application's
+  Rust backend compiled for the platform, serving the existing generated router
+  on a loopback socket to a system WebView, with packaged application paths, a
+  per-installation session key, a launch-scoped loopback gate, and a five-entry
+  native command allowlist, and development reload for application Rust and
+  assets — opt-in through a separate `cargo-rahti-native` install and an
+  application-owned `native/` shell, and absent from a project that did not
+  ask. Not a translation of HTML into platform widgets: see
+  `native-packaging.md`.
 
 ## Source-of-Truth Order
 
@@ -230,9 +287,9 @@ Use this order when behavior is unclear:
 
 1. executable tests;
 2. implementation in `crates/`;
-3. generated output in an application (`src/routes.rs`,
-   `.rahti/manifest.json`);
-4. these convention documents.
+3. generated output (`src/routes.rs`, `.rahti/manifest.json`);
+4. examples in `src/app/` and `src/components/`;
+5. these convention documents.
 
 Generated output is evidence, not an editing surface.
 
@@ -241,13 +298,12 @@ Generated output is evidence, not an editing surface.
 PulsePoint ships as a prebuilt bundle. Nothing in this workspace compiles or
 bundles JavaScript, and a checkout is complete as it stands.
 
-The canonical copy of the runtime asset is:
+The runtime asset must exist in both:
 
 ```text
+public/js/pp-reactive-v2.min.js
 crates/cargo-rahti/assets/js/pp-reactive-v2.min.js
 ```
 
-`cargo rahti new` installs it into every project as
-`public/js/pp-reactive-v2.min.js`, where `public/js/main.js` imports the
-minified runtime, installs `twMerge`, and calls `pp.mount()` once the DOM is
-ready. Never hand-edit the bundle; replace it wholesale.
+`public/js/main.js` imports the minified runtime, installs `twMerge`, and calls
+`pp.mount()` once the DOM is ready.

@@ -242,7 +242,8 @@ pub fn run(args: &[&str]) -> Result<(), String> {
 /// not be done.
 #[derive(Default)]
 struct Wiring {
-    /// Dependency lines added to `[dependencies]`, as written.
+    /// Dependency lines added to `[dependencies]` or `[dev-dependencies]`,
+    /// as written.
     dependencies: Vec<String>,
     /// The `ws` feature folded into the `rahti` dependency.
     ws_feature: bool,
@@ -317,6 +318,18 @@ fn wire(root: &Path, config: &Config, dry_run: bool) -> Result<Wiring, String> {
                 manifest = amended;
                 wiring.dependencies.push(line);
             }
+        }
+    }
+
+    // The test suite's dev-dependencies, unconditional like the version pins:
+    // every project has a `src/tests/` (this run may just have written it),
+    // and the harness in it drives the router through these two. A manifest
+    // the author edited before there was a suite gains them here, so the
+    // suite compiles rather than arriving with instructions.
+    for (name, line) in t::DEV_DEPENDENCIES {
+        if let Some(amended) = wiring::with_dev_dependency(&manifest, name, line) {
+            manifest = amended;
+            wiring.dependencies.push(line.to_string());
         }
     }
 

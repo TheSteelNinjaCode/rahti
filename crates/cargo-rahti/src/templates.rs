@@ -20,7 +20,7 @@ pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js
 /// does — a published crate cannot read a file outside its own directory —
 /// and a test holds each one byte-identical to its canonical original.
 ///
-/// These nine are unconditional. The two that depend on a scaffold choice —
+/// These ten are unconditional. The two that depend on a scaffold choice —
 /// `database.md` and `websockets.md` — are below, written only when the
 /// choice was made: a guide that documents a feature the project does not
 /// have teaches an agent to reach for it.
@@ -30,7 +30,7 @@ pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js
 /// by installing a separate tool, and the document is what tells the reader
 /// that the option exists and what it costs. Withholding it would leave
 /// somebody reaching for a Tauri tutorial and wiring the framework up by hand.
-pub const CORE_DOCS: [(&str, &str); 9] = [
+pub const CORE_DOCS: [(&str, &str); 10] = [
     ("routing.md", include_str!("../assets/docs/routing.md")),
     (
         "rendering-and-components.md",
@@ -61,6 +61,7 @@ pub const CORE_DOCS: [(&str, &str); 9] = [
         "native-packaging.md",
         include_str!("../assets/docs/native-packaging.md"),
     ),
+    ("testing.md", include_str!("../assets/docs/testing.md")),
 ];
 
 /// Shipped only when the project chose a database.
@@ -175,6 +176,10 @@ serde = {{ version = "1", features = ["derive"] }}
 tokio = {{ version = "1", features = ["full"] }}
 tower-http = {{ version = "0.7", features = ["catch-panic", "fs"] }}
 {database}
+# What `src/tests/app.rs` needs to drive the generated router in-process:
+# a request in, a response out, no port bound. See docs/conventions/testing.md.
+[dev-dependencies]
+{dev}
 [build-dependencies]
 rahti-build = {build}
 "#,
@@ -183,9 +188,27 @@ rahti-build = {build}
         // identifier. Written out rather than left implicit so that
         // `native/src/main.rs` can name it and be right.
         lib = name.replace('-', "_"),
+        dev = DEV_DEPENDENCIES
+            .iter()
+            .map(|(_, line)| format!("{line}\n"))
+            .collect::<String>(),
         build = rahti.replace("crates/rahti\"", "crates/rahti-build\"")
     )
 }
+
+/// The two dev-dependencies `src/tests/app.rs` drives the router with.
+///
+/// One list for both writers: the scaffold's manifest template above, and
+/// `upgrade`'s wiring — which appends the same lines to a manifest the author
+/// has edited, so a project scaffolded before there was a test suite still
+/// compiles the one an upgrade just gave it.
+pub const DEV_DEPENDENCIES: [(&str, &str); 2] = [
+    ("http-body-util", "http-body-util = \"0.1\""),
+    (
+        "tower",
+        "tower = { version = \"0.5\", features = [\"util\"] }",
+    ),
+];
 
 /// The two lines a database costs the manifest, each with the name cargo
 /// knows it by.
@@ -559,6 +582,14 @@ pub mod routes;
     out.push_str(modules);
     out.push_str(
         r#"
+/// This application's tests — `src/tests/app.rs`, driven through the
+/// generated router. `#[path]` because `src/tests/` is not a module tree:
+/// it is a directory of test files, each included here by name. See
+/// docs/conventions/testing.md.
+#[cfg(test)]
+#[path = "tests/app.rs"]
+mod app_tests;
+
 /// A started application: the router, and the address a web deployment binds
 /// it on.
 pub struct ApplicationRuntime {
@@ -1018,6 +1049,233 @@ pub async fn hello() -> String {{
     )
 }
 
+/// `src/tests/app.rs` — the application's test suite, born passing.
+///
+/// A scaffold with no tests teaches that tests are someone else's problem:
+/// the next coding agent opened inside the project sees no suite, no harness,
+/// and no place to put one, and ships features accordingly. So the scaffold
+/// writes the harness — the router driven in-process, the browser's RPC flow
+/// with its CSRF pair, the setup hook where the auth policy and the test
+/// database go — and the first tests, green on the first `cargo test`.
+///
+/// Concatenated rather than one `format!`, like `lib_rs` and for the same
+/// reason: the body is Rust that uses `format!` and braces of its own.
+pub fn tests_rs(name: &str, db: bool) -> String {
+    let mut out = String::from(
+        r#"//! This application, driven through its generated router.
+//!
+//! `rahti-build` scanned `src/app/` and wrote `src/routes.rs`; every test
+//! here sends a request into that router and reads the finished response.
+//! No server starts and no port binds — `oneshot` drives the same
+//! `axum::Router` the binary serves.
+//!
+//! Grow this file with the application: a new page gets a rendering test, a
+//! new `#[rpc]` gets a success and a malformed-payload test, anything
+//! private gets a no-session test. See docs/conventions/testing.md.
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use tower::ServiceExt;
+
+/// Everything the suite installs once, before the first request.
+///
+/// Called from the request helpers rather than from each test, so a test
+/// cannot forget it — and guarded, so the first request performs it and the
+/// rest wait.
+///
+/// Once this project has private routes, install the auth policy here the
+/// way `initialize_application` does — the guard the generated router
+/// installs reads that policy on every request, and a suite that skips the
+/// line exercises private routes that nothing protects:
+///
+/// ```ignore
+/// rahti::auth::configure(crate::auth::settings());
+/// ```
+async fn setup() {
+    static READY: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+
+    READY
+        .get_or_init(|| async {
+"#,
+    );
+
+    if db {
+        out.push_str(&format!(
+            r#"            // A real database for the whole test binary: SQLite in a
+            // file, with this application's own migrations run against it.
+            // A file rather than `:memory:`, deleted on the way in —
+            // docs/conventions/testing.md explains why both halves matter.
+            let path = std::env::temp_dir().join("{name}-tests.db");
+            let _ = std::fs::remove_file(&path);
+
+            let url = format!(
+                "sqlite://{{}}?mode=rwc",
+                path.display().to_string().replace('\\', "/")
+            );
+            crate::db::connect_to(&url).await.expect("a test database");
+            crate::db::migrate().await.expect("the migrations");
+"#
+        ));
+    } else {
+        out.push_str(
+            r#"            // Nothing to install yet. The auth policy described above is
+            // the first thing that will land here.
+"#,
+        );
+    }
+
+    out.push_str(
+        r#"        })
+        .await;
+}
+
+/// GET a URL through the real router.
+async fn get(url: &str) -> (StatusCode, String) {
+    setup().await;
+
+    let res = crate::routes::router()
+        .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+        .await
+        .expect("the router answered");
+
+    let status = res.status();
+    let bytes = res.into_body().collect().await.expect("a body").to_bytes();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Call an `#[rpc]` the way the browser does: load its page, keep the CSRF
+/// cookie the response hands out, then POST back to the same URL with the
+/// function's name in `x-pp-function` and the token sent both ways.
+async fn rpc(url: &str, name: &str, payload: &str) -> (StatusCode, String) {
+    setup().await;
+
+    let router = crate::routes::router();
+
+    let visit = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(url)
+                .header("host", "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("the page answered");
+
+    let cookie = visit
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("the page hands out a csrf token")
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let res = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(url)
+                .header("host", "127.0.0.1:3000")
+                .header("x-pp-function", name)
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .header("x-csrf-token", cookie.split_once('=').unwrap().1)
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .expect("the rpc answered");
+
+    let status = res.status();
+    let bytes = res.into_body().collect().await.expect("a body").to_bytes();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+"#,
+    );
+
+    out.push_str(&format!(
+        r#"/// The scaffolded home page, inside the root layout's document.
+#[tokio::test]
+async fn the_home_page_renders() {{
+    let (status, body) = get("/").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<!DOCTYPE html>"), "{{body}}");
+    assert!(body.contains("{name}"), "{{body}}");
+}}
+"#
+    ));
+
+    out.push_str(
+        r#"
+/// A URL no `page.rs` claims: the 404 page, not a panic.
+#[tokio::test]
+async fn an_unknown_url_is_a_404() {
+    let (status, _) = get("/this-page-does-not-exist").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// `pp.rpc("hello", {})` from the scaffolded page, end to end: the CSRF
+/// pair accepted, the function found, the return value serialized.
+#[tokio::test]
+async fn the_hello_rpc_answers() {
+    let (status, body) = rpc("/", "hello", "{}").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Hello from Rust."), "{body}");
+}
+
+/// A name the page does not declare is refused by name.
+#[tokio::test]
+async fn an_unknown_rpc_name_is_refused() {
+    let (status, _) = rpc("/", "no_such_function", "{}").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+"#,
+    );
+
+    if db {
+        out.push_str(
+            r#"
+/// The migrations that ran in `setup` created a real schema: a row goes in
+/// through the entity and comes back. A disagreement between the entity and
+/// its migration fails here, on the first query.
+#[tokio::test]
+async fn the_todo_table_round_trips() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+
+    setup().await;
+
+    let saved = crate::models::todo::ActiveModel {
+        text: Set("write a test".to_string()),
+        done: Set(false),
+        ..Default::default()
+    }
+    .insert(crate::db::db())
+    .await
+    .expect("the insert");
+
+    let found = crate::models::todo::Entity::find_by_id(saved.id)
+        .one(crate::db::db())
+        .await
+        .expect("the query")
+        .expect("the row");
+
+    assert_eq!(found.text, "write a test");
+}
+"#,
+        );
+    }
+
+    out
+}
+
 /// `main.js`, with the Tailwind helper only where there is Tailwind.
 pub fn main_js(tailwind: bool) -> String {
     let mut out = String::from("import \"/js/pp-reactive-v2.min.js\";\n");
@@ -1217,6 +1475,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/configuration-and-tooling.md` |\n",
     );
     out.push_str(
+        "| Where tests live, driving the router, RPC/auth/database tests | \
+         `docs/conventions/testing.md` |\n",
+    );
+    out.push_str(
         "| Optional Windows/Android packaging, packaged paths, the loopback server | \
          `docs/conventions/native-packaging.md` |\n",
     );
@@ -1326,6 +1588,16 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          diagnosing frontend behavior; never commit it."
             .to_string(),
     );
+    rules.push(
+        "Tests live in `src/tests/`, included from `src/lib.rs`, and run\n\
+         with `cargo test`. They drive the generated router in-process — no\n\
+         server, no port. A feature lands with its tests: a page renders, an\n\
+         `#[rpc]` answers and refuses a malformed payload, a private route\n\
+         redirects without a session. Before testing private routes, install\n\
+         the auth policy in `setup()` exactly as `initialize_application`\n\
+         does. See `docs/conventions/testing.md`."
+            .to_string(),
+    );
     if db {
         rules.push(
             "The database is SeaORM and belongs to this application.\n\
@@ -1341,6 +1613,14 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             "A connection string is a credential. It lives in `DATABASE_URL`\n\
              via the ignored `.env`, never in `rahti.config.json`, which\n\
              records only which backend the project is on."
+                .to_string(),
+        );
+        rules.push(
+            "Tests reach the database the way `setup()` in `src/tests/app.rs`\n\
+             shows: a *file* SQLite database, never `:memory:`, deleted on\n\
+             the way in, with `db::migrate()` run against it. An in-memory\n\
+             database vanishes between `#[tokio::test]` runtimes, and the\n\
+             symptom is tests that pass alone and fail together."
                 .to_string(),
         );
     }

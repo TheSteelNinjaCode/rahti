@@ -126,6 +126,13 @@ pub fn project_files(
         (".gitignore".into(), t::gitignore(db.is_some()).into_bytes()),
         ("src/lib.rs".into(), t::lib_rs(db.is_some()).into_bytes()),
         ("src/main.rs".into(), t::main_rs(name).into_bytes()),
+        // Born passing: the harness, and the first tests against the routes
+        // the scaffold just wrote. A project that starts with a suite hands
+        // the next coding agent a place to put the second test.
+        (
+            "src/tests/app.rs".into(),
+            t::tests_rs(name, db.is_some()).into_bytes(),
+        ),
         ("src/app/layout.rs".into(), t::layout_rs(name).into_bytes()),
         (
             "src/app/page.rs".into(),

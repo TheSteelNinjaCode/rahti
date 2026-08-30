@@ -196,6 +196,47 @@ fn a_manifest_without_the_table_gains_one() {
     assert!(out.contains("[dependencies]\nsea-orm = \"2\""), "{out}");
 }
 
+// --------------------------------------------------------- dev-dependencies
+
+/// A project scaffolded before there was a test suite gains the suite's two
+/// dev-dependencies on upgrade, in their own table — not in `[dependencies]`,
+/// where they would be compiled into the application.
+#[test]
+fn a_dev_dependency_lands_in_its_own_table() {
+    let [(name, line), _] = t::DEV_DEPENDENCIES;
+    let out = with_dev_dependency(MANIFEST, name, line).expect("an amended manifest");
+
+    assert!(
+        out.contains(&format!("[dev-dependencies]\n{line}")),
+        "{out}"
+    );
+    // The tables the author had are untouched.
+    assert!(out.contains("[dependencies]\naxum = \"0.8.9\""), "{out}");
+    assert!(out.contains("[build-dependencies]\nrahti-build"), "{out}");
+}
+
+/// Twice is once, in either spelling: the bare key, or a
+/// `[dev-dependencies.name]` table of the author's own.
+#[test]
+fn a_dev_dependency_that_is_there_is_not_added_again() {
+    let [(name, line), _] = t::DEV_DEPENDENCIES;
+    let once = with_dev_dependency(MANIFEST, name, line).expect("an amended manifest");
+    assert_eq!(with_dev_dependency(&once, name, line), None);
+
+    let table = format!("{MANIFEST}\n[dev-dependencies.{name}]\nversion = \"0.1\"\n");
+    assert_eq!(with_dev_dependency(&table, name, line), None);
+}
+
+/// A crate the author already depends on outright is available to the tests
+/// without a second declaration — and their version choice is theirs.
+#[test]
+fn an_ordinary_dependency_satisfies_the_dev_dependency() {
+    let manifest = "[dependencies]\ntower = { version = \"0.5\", features = [\"full\"] }\n";
+    let [_, (name, line)] = t::DEV_DEPENDENCIES;
+    assert_eq!(name, "tower");
+    assert_eq!(with_dev_dependency(manifest, name, line), None);
+}
+
 // -------------------------------------------------------------- ws feature
 
 #[test]

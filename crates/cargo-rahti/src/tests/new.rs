@@ -402,17 +402,32 @@ fn the_library_only_names_modules_it_declares() {
         scaffold_with(&tree, false, db);
         let lib = tree.read("src/lib.rs");
 
-        // What it declares.
-        let declared: Vec<&str> = lib
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim();
-                let rest = line
-                    .strip_prefix("pub mod ")
-                    .or_else(|| line.strip_prefix("mod "))?;
-                rest.strip_suffix(';')
-            })
-            .collect();
+        // What it declares — and where a `#[path]` attribute says a module
+        // actually lives, because `mod app_tests;` is `src/tests/app.rs`.
+        let mut declared: Vec<&str> = Vec::new();
+        let mut redirected: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        let mut pending_path: Option<&str> = None;
+        for line in lib.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("#[path = \"") {
+                pending_path = rest.strip_suffix("\"]");
+                continue;
+            }
+            if line.starts_with("#[") {
+                continue;
+            }
+            if let Some(name) = line
+                .strip_prefix("pub mod ")
+                .or_else(|| line.strip_prefix("mod "))
+                .and_then(|rest| rest.strip_suffix(';'))
+            {
+                declared.push(name);
+                if let Some(path) = pending_path.take() {
+                    redirected.insert(name, path);
+                }
+            }
+        }
 
         // What it calls. A path at the start of a statement is either a module
         // of this crate or a dependency, and the dependencies are known.
@@ -456,10 +471,17 @@ fn the_library_only_names_modules_it_declares() {
             if GENERATED.contains(&module) {
                 continue;
             }
-            let file = tree.0.join(format!("src/{module}.rs"));
-            let dir = tree.0.join(format!("src/{module}/mod.rs"));
+            let candidates = match redirected.get(module) {
+                // `#[path]` is relative to the file that carries it, and the
+                // carrier is `src/lib.rs`.
+                Some(path) => vec![tree.0.join("src").join(path)],
+                None => vec![
+                    tree.0.join(format!("src/{module}.rs")),
+                    tree.0.join(format!("src/{module}/mod.rs")),
+                ],
+            };
             assert!(
-                file.exists() || dir.exists(),
+                candidates.iter().any(|p| p.exists()),
                 "{label}: src/lib.rs declares `mod {module};`, and neither the scaffold nor \
                  rahti-build writes it"
             );
@@ -653,7 +675,17 @@ fn a_database_changes_only_what_it_must() {
     // `src/lib.rs` rather than `src/main.rs`, because that is where startup
     // is: the binary only knows an address, and an address does not change
     // when a database appears.
-    let differ = ["Cargo.toml", "src/lib.rs", ".gitignore", "AGENTS.md"];
+    //
+    // The test suite differs too: a database project's `setup()` connects a
+    // real SQLite file and runs the migrations, and the suite gains the
+    // entity round-trip test.
+    let differ = [
+        "Cargo.toml",
+        "src/lib.rs",
+        "src/tests/app.rs",
+        ".gitignore",
+        "AGENTS.md",
+    ];
     for path in a.keys().filter(|p| b.contains_key(*p)) {
         let same = a[path] == b[path];
         if differ.contains(&path.as_str()) {
@@ -662,6 +694,62 @@ fn a_database_changes_only_what_it_must() {
             assert!(same, "{path} should be identical either way");
         }
     }
+}
+
+// ------------------------------------------------------------------ testing
+
+/// Every project is born with a passing suite: the harness, the first tests,
+/// the module wiring that includes them, and the dev-dependencies that drive
+/// the router in-process. A scaffold with no tests teaches that tests are
+/// someone else's problem.
+#[test]
+fn every_project_starts_with_a_test_suite() {
+    let tree = Tree::new("suite");
+    let ledger = scaffold(&tree, false);
+
+    assert!(ledger.contains_key("src/tests/app.rs"));
+
+    let tests = tree.read("src/tests/app.rs");
+    assert!(tests.contains("oneshot"), "{tests}");
+    assert!(
+        tests.contains("x-pp-function"),
+        "the browser's rpc flow: {tests}"
+    );
+    assert!(
+        tests.contains("rahti::auth::configure"),
+        "the setup hook names where the policy goes: {tests}"
+    );
+
+    let lib = tree.read("src/lib.rs");
+    assert!(lib.contains("#[path = \"tests/app.rs\"]"), "{lib}");
+    assert!(lib.contains("mod app_tests;"), "{lib}");
+
+    let manifest = tree.read("Cargo.toml");
+    assert!(manifest.contains("[dev-dependencies]"), "{manifest}");
+    assert!(manifest.contains("http-body-util"), "{manifest}");
+    assert!(
+        manifest.contains("tower = { version = \"0.5\", features = [\"util\"] }"),
+        "{manifest}"
+    );
+}
+
+/// The suite follows the database: a project that chose one tests against a
+/// real SQLite file with its migrations run, and one that did not carries no
+/// trace of a database in its tests.
+#[test]
+fn the_suite_tests_against_the_database_only_when_there_is_one() {
+    let with = Tree::new("suite-db");
+    scaffold_with(&with, false, Some(Backend::Sqlite));
+    let tests = with.read("src/tests/app.rs");
+    assert!(tests.contains("crate::db::connect_to"), "{tests}");
+    assert!(tests.contains("crate::db::migrate"), "{tests}");
+    assert!(tests.contains("mode=rwc"), "a file, not :memory:: {tests}");
+
+    let without = Tree::new("suite-no-db");
+    scaffold_with(&without, false, None);
+    let tests = without.read("src/tests/app.rs");
+    assert!(!tests.contains("crate::db"), "{tests}");
+    assert!(!tests.contains("crate::models"), "{tests}");
 }
 
 // ------------------------------------------------------------ documentation

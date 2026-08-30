@@ -37,7 +37,19 @@ pub fn with_dependency(manifest: &str, name: &str, line: &str) -> Option<String>
     if declares(manifest, name) {
         return None;
     }
-    Some(append_to_dependencies(manifest, line))
+    Some(append_to_table(manifest, "[dependencies]", line))
+}
+
+/// The manifest with `line` added to `[dev-dependencies]`, or `None` if a
+/// dependency called `name` is already declared — in any table, because a
+/// crate the author already depends on outright is available to the tests
+/// without a second declaration.
+pub fn with_dev_dependency(manifest: &str, name: &str, line: &str) -> Option<String> {
+    let table = format!("[dev-dependencies.{name}]");
+    if declares(manifest, name) || manifest.lines().any(|l| l.trim() == table) {
+        return None;
+    }
+    Some(append_to_table(manifest, "[dev-dependencies]", line))
 }
 
 /// Whether `[dependencies]` names `name`, in either form cargo accepts.
@@ -56,7 +68,7 @@ pub fn declares(manifest: &str, name: &str) -> bool {
     })
 }
 
-/// `line` written at the end of the `[dependencies]` table.
+/// `line` written at the end of the named table.
 ///
 /// The end of the table is the next table header, whatever it is — including
 /// a `[dependencies.something]` sub-table, because a bare key written after
@@ -64,14 +76,15 @@ pub fn declares(manifest: &str, name: &str) -> bool {
 /// Blank lines before that header are left where they are, so the addition
 /// joins the list rather than the gap after it.
 ///
-/// A manifest with no `[dependencies]` at all gets one. Cargo allows it —
-/// a package with no dependencies needs no table — and appending is the only
-/// answer that does not depend on where anything else sits.
-fn append_to_dependencies(manifest: &str, line: &str) -> String {
+/// A manifest without the table at all gets one, at the end. Cargo allows
+/// both — a package that lacks the table needs no entries in it, and table
+/// order carries no meaning — and appending is the only answer that does not
+/// depend on where anything else sits.
+fn append_to_table(manifest: &str, header: &str, line: &str) -> String {
     let ends_with_newline = manifest.ends_with('\n');
     let mut lines: Vec<String> = manifest.lines().map(str::to_string).collect();
 
-    match lines.iter().position(|l| l.trim() == "[dependencies]") {
+    match lines.iter().position(|l| l.trim() == header) {
         Some(header) => {
             let end = lines[header + 1..]
                 .iter()
@@ -89,7 +102,7 @@ fn append_to_dependencies(manifest: &str, line: &str) -> String {
             if lines.last().is_some_and(|l| !l.trim().is_empty()) {
                 lines.push(String::new());
             }
-            lines.push("[dependencies]".to_string());
+            lines.push(header.to_string());
             lines.push(line.to_string());
         }
     }

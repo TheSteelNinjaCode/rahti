@@ -38,7 +38,8 @@ application, which is the perspective every rule below serves.
 | SeaORM entities, migrations, the connection, database tests | `docs/conventions/database.md` |
 | Escaping, CSRF, redirects, upload trust, development exposure | `docs/conventions/security.md` |
 | `rahti.config.json`, CSS, static files, CLI, environment variables | `docs/conventions/configuration-and-tooling.md` |
-| Test placement and verification | `docs/conventions/testing.md` |
+| Workspace test placement and verification | `docs/conventions/workspace-testing.md` |
+| Application test suites (shipped to new projects) | `docs/conventions/testing.md` |
 | Optional Windows/Android packaging, packaged paths, the loopback server | `docs/conventions/native-packaging.md` |
 
 When documentation and code disagree, verify the behavior in source and tests,
@@ -232,10 +233,14 @@ and failure modes. Prefer a small verified example over a broad promise.
 
 Write every convention document for a reader inside a **scaffolded
 application**, not inside this repository. Teach each feature with an inline
-example the reader can paste. `architecture.md` and `testing.md` are the two
-exceptions — they describe this workspace and say so.
+example the reader can paste. `architecture.md` and `workspace-testing.md`
+are the two exceptions — they describe this workspace and say so.
+`testing.md` is the shipped counterpart of `workspace-testing.md`: it
+teaches a scaffolded application's suite, and follows the same
+no-workspace-references rule as every other shipped document.
 
-Every convention document except `architecture.md` and `testing.md` ships
+Every convention document except `architecture.md` and
+`workspace-testing.md` ships
 into new applications through `cargo rahti new`, embedded from copies in
 `crates/cargo-rahti/assets/docs/`. A cargo-rahti test holds each copy
 byte-identical to its canonical file here, so after editing a shipped

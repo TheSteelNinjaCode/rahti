@@ -23,10 +23,10 @@ Essential rules:
 - The browser runtime is a prebuilt asset whose canonical copy is
   `crates/cargo-rahti/assets/js/pp-reactive-v2.min.js`. There is no
   JavaScript build step; never hand-edit the bundle.
-- Convention documents (except `architecture.md` and `testing.md`) ship into
-  new projects from `crates/cargo-rahti/assets/docs/`; a test holds each copy
-  byte-identical to its canonical file under `docs/conventions/`. Edit both
-  together.
+- Convention documents (except `architecture.md` and `workspace-testing.md`)
+  ship into new projects from `crates/cargo-rahti/assets/docs/`; a test holds
+  each copy byte-identical to its canonical file under `docs/conventions/`.
+  Edit both together.
 
 Canonical details:
 
@@ -37,4 +37,4 @@ Canonical details:
 - `docs/conventions/rpc-and-uploads.md`
 - `docs/conventions/security.md`
 - `docs/conventions/configuration-and-tooling.md`
-- `docs/conventions/testing.md`
+- `docs/conventions/workspace-testing.md`

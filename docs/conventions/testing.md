@@ -1,161 +1,205 @@
 # Testing Conventions
 
-## Test Locations
+Every Rahti application starts with a working test suite: `cargo rahti new`
+writes `src/tests/app.rs` with a request harness and the first passing
+tests. Grow that suite with the application — a feature is not finished
+until a test drives it the way a browser would.
 
-- `crates/<crate>/src/tests/*.rs` - unit and module-level behavior, included
-  from the crate/module using `#[path = "tests/..."]`.
-- `crates/rahti/tests/router.rs` - the framework end to end, through a
-  router built by hand the way codegen builds one, using only the public
-  API.
-
-The workspace has no JavaScript test suite; the browser runtime is a prebuilt
-asset and is exercised through the browser, not through `cargo test`.
-
-Follow the existing placement instead of creating ad hoc test binaries.
-
-Behavior that only shows up in a full application — the generated router, the
-auth guard in front of real routes, database RPCs — is verified by
-scaffolding a throwaway project against this checkout and driving it:
+Run it with:
 
 ```text
-cargo run -p cargo-rahti -- new smoke --local <path-to-this-checkout>
+cargo test
 ```
 
-A suite that drives a generated router must install the auth policy the way
-an application's `main` does — `rahti::auth::configure(...)` — or it
-exercises private routes that nothing protects.
+## Where Tests Live
 
-## Verification by Change Type
+- `src/tests/` holds the application's tests, one file per area, starting
+  with `app.rs`. Each file is included from `src/lib.rs`:
 
-### Rendering or macro change
+  ```rust
+  #[cfg(test)]
+  #[path = "tests/app.rs"]
+  mod app_tests;
+  ```
 
-Run:
+  Adding a second file is one more pair of lines there, with its own module
+  name.
 
-```text
-cargo test -p rahti-macros
-cargo test -p rahti
+- A small unit test may sit beside the code it tests in an ordinary
+  `#[cfg(test)] mod tests` block, as anywhere in Rust.
+
+`src/tests/` rather than a root `tests/` directory, on purpose. The
+application's startup lives in `src/lib.rs` so an optional native package
+can call it, and its tests need crate-internal access — `crate::db`,
+`crate::auth::settings()`, modules the library does not export. A root
+`tests/` directory sees only public API, and every file there is a separate
+test binary that links the application again. One module inside the library
+sees everything and builds once.
+
+`src/tests/` is not a route segment: it sits outside `src/app/`, so the
+router never sees it.
+
+## Driving the Router
+
+No server starts and no port binds. `crate::routes::router()` is the same
+`axum::Router` the binary serves, and `oneshot` sends one request through
+it — a request in, the finished page out:
+
+```rust
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use tower::ServiceExt;
+
+async fn get(url: &str) -> (StatusCode, String) {
+    setup().await;
+
+    let res = crate::routes::router()
+        .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+        .await
+        .expect("the router answered");
+
+    let status = res.status();
+    let bytes = res.into_body().collect().await.expect("a body").to_bytes();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
 ```
 
-Add parser/emitter tests for syntax and runtime HTML tests for escaping/value
-semantics.
+The scaffolded `src/tests/app.rs` carries this helper, and the
+dev-dependencies it needs — `tower` with the `util` feature, and
+`http-body-util` — are already in the scaffolded `Cargo.toml`.
 
-### Routing, generated code, configuration, or CSS change
+`setup()` is the suite's one-time installation, guarded by a
+`tokio::sync::OnceCell` so the first request performs it and the rest wait.
+Call it from the request helpers rather than from each test: a page is
+often reached by tests that are not about what the setup installs, and a
+handler that panicked for want of it would fail them for the wrong reason.
 
-Run:
+## Testing a Page
 
-```text
-cargo test -p rahti-build
+Assert the status and a fragment the page must render, not the whole
+document — a test that snapshots every byte fails on every unrelated edit:
+
+```rust
+#[tokio::test]
+async fn the_dashboard_renders() {
+    let (status, body) = get("/dashboard").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<h1"), "{body}");
+}
 ```
 
-Scaffold a local project and inspect its regenerated `src/routes.rs` and
-`.rahti/manifest.json`.
+A URL no `page.rs` claims answers with the 404 page and
+`StatusCode::NOT_FOUND`; that is worth one test so a routing mistake is
+caught as a wrong status rather than a missing page.
 
-### Authentication change
+## Testing an RPC
 
-Run:
+An `#[rpc]` is called on the URL of the page that declares it, and the call
+is CSRF-protected: the page's response hands out a token cookie, and the
+POST must send it back twice — as the cookie, and as the `x-csrf-token`
+header. The scaffolded `rpc` helper performs the browser's flow exactly:
+GET the page, keep the cookie, POST to the same URL with the function's
+name in `x-pp-function`.
 
-```text
-cargo test -p rahti --lib auth
-cargo test -p rahti-macros
+```rust
+#[tokio::test]
+async fn the_rename_rpc_answers() {
+    let (status, body) = rpc("/settings", "rename", r#"{"name":"Ada"}"#).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Ada"), "{body}");
+}
 ```
 
-Cookie encoding and route matching are unit-tested in
-`crates/rahti/src/tests/auth.rs`; the guard, the redirects, and
-`#[rpc(auth)]` are driven through a scaffolded application's router.
+Every RPC deserves at least two tests: the success, and a malformed
+payload — a missing field, a wrong type — asserting the call is refused
+rather than answered. A function the page does not declare answers
+`StatusCode::NOT_FOUND`, and a POST that carries no token pair answers
+`StatusCode::FORBIDDEN`; both are framework behavior, so one test of each
+per suite is plenty.
 
-### RPC, streaming, upload, CSRF, or errors
+## Testing Auth
 
-Run:
+The guard the generated router installs reads the policy installed by
+`rahti::auth::configure(...)`. `initialize_application` installs it in the
+running application; the test suite must install it too, once, from
+`setup()`:
 
-```text
-cargo test -p rahti
+```rust
+rahti::auth::configure(crate::auth::settings());
 ```
 
-Test success, malformed payloads, missing values, wrong types, limits,
-serialization failures where possible, and boundary isolation.
+A suite that skips this line exercises private routes that nothing
+protects — every test passes, and the protection was never tested. The
+scaffolded `setup()` marks where the line goes.
 
-### Database change
+With the policy installed, a private route with no session answers
+`StatusCode::SEE_OTHER` with a `location` header pointing at the sign-in
+page and carrying the original destination:
 
-Run:
+```rust
+#[tokio::test]
+async fn a_private_route_redirects_a_signed_out_visitor() {
+    let (status, body) = get("/account").await;
 
-```text
-cargo test -p rahti-build
-cargo test -p cargo-rahti
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+}
 ```
 
-Cover generated module wiring, migration ordering in the `Migrator`, and
-config parsing and its refusals.
+An `#[rpc(auth)]` with no session is refused with
+`StatusCode::UNAUTHORIZED`. Test both halves for anything private: the
+guard decides who may load the page, the attribute decides who may make
+the call, and neither substitutes for the other.
 
-Use a *file* database in tests, not `:memory:`. Every `#[tokio::test]` builds
-and drops its own runtime, and an in-memory database exists only while
-something is connected to it — so it disappears with the first test's runtime
-and the rest fail with `no such table`. The symptom is tests that pass alone
-and fail together. See `database.md`.
+## Testing Against the Database
 
-### Native packaging change
+A project with a database tests against a real one: SQLite in a file, with
+the application's own migrations run against it, connected once for the
+whole test binary from `setup()`:
 
-Native packaging is a separate package — `rahti-native` and
-`cargo-rahti-native` — with its own repository and its own tests. What is
-verified *here* is only the framework side it depends on:
+```rust
+let path = std::env::temp_dir().join("my-app-tests.db");
+let _ = std::fs::remove_file(&path);
 
-```text
-cargo test -p rahti --lib shutdown
-cargo test -p cargo-rahti native
-cargo test -p cargo-rahti
+let url = format!(
+    "sqlite://{}?mode=rwc",
+    path.display().to_string().replace('\\', "/")
+);
+crate::db::connect_to(&url).await.expect("a test database");
+crate::db::migrate().await.expect("the migrations");
 ```
 
-`begin_shutdown`, the `dev-watch` feature and the scaffold's
-`initialize_application` are a published package's API whether or not this
-workspace calls them. Renaming one compiles cleanly here and breaks something
-that is not in this repository to fail with it.
+Two rules here are load-bearing; `database.md` explains both in full:
 
-### Scaffold or upgrade change
+- **A file, not `:memory:`.** The connection is a process-wide static, but
+  every `#[tokio::test]` builds its own runtime and drops it when the test
+  ends. An in-memory database exists only while something is connected to
+  it, so it vanishes with the first test's runtime and every later test
+  fails with `no such table`. The symptom is tests that pass alone and
+  fail together.
+- **Delete the file on the way in, not on the way out.** A test binary has
+  no reliable teardown, and starting from nothing is what makes a run
+  repeatable.
 
-Run:
+Because the migrations run in `setup()`, any test that touches an entity
+also proves the migration creates what the entity expects — a disagreement
+between the two fails on the first query.
 
-```text
-cargo test -p cargo-rahti
-```
+## What a Feature's Tests Cover
 
-Cover fresh generation, local/version dependencies, dry run, unchanged owned
-files, edited files, retired files, asset copying, and each database backend's
-cargo feature.
+Adding a feature means adding its tests in the same change:
 
-### PulsePoint runtime change
+- a new page: it renders, and what it renders reflects its data;
+- a new `#[rpc]`: the success, and a malformed payload refused;
+- anything private: the route redirects without a session, and the
+  `#[rpc(auth)]` refuses without one;
+- a new table: an insert and a query through the entity, which exercises
+  the migration for free;
+- a bug fix: a test that fails on the old behavior.
 
-Install the new bundle at
-`crates/cargo-rahti/assets/js/pp-reactive-v2.min.js`, then verify:
-
-- a freshly scaffolded project's pages retain their bindings/scripts;
-- `public/js/main.js` in that project still mounts the exposed global runtime;
-- a deliberate browser warning/error reaches its `.rahti/dev.log`;
-- Rust workspace tests remain green.
-
-## Workspace Gate
-
-For MCP changes, run `cargo test -p rahti-mcp` first. Its tests use an
-isolated temporary Rahti project and cover the stdio server's advertised
-capabilities, bounded diagnostics, and generated RPC authentication metadata.
-Scaffold integration belongs to `cargo-rahti` tests as well: they verify that
-`--mcp` writes and ledgers `.mcp.json`, records the feature, and leaves it
-entirely absent when not selected.
-
-Before completing a framework-wide change:
-
-```text
-cargo fmt --all -- --check
-cargo check --workspace
-cargo test --workspace
-```
-
-Do not “fix” unrelated user changes or generated diffs without tracing their
-inputs. Document intentionally unrun checks and the reason.
-
-## Documentation Coverage Gate
-
-When a new feature changes an author-facing convention, update:
-
-1. the relevant document in `docs/conventions/`;
-2. the inventory in `architecture.md`;
-3. `AGENTS.md` if the rule is non-negotiable or changes document routing;
-4. `rahti.schema.json` if configuration changed.
+What the suite cannot reach is browser behavior — PulsePoint state,
+bindings, and events run in the page, not in `cargo test`. Verify those in
+a browser, and read `.rahti/dev.log` when something misbehaves; see
+`diagnostics.md`.
