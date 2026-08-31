@@ -404,3 +404,107 @@ fn fragment_rooted_children_are_stamped() {
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
     assert!(out.contains(&format!("<!--pp:{expected}-->")), "{out}");
 }
+
+// --------------------------------------------------------- owned children
+
+/// Children that read the page's state ship as an owned template: the client
+/// runtime renders `<template pp-owner="…">` content in the owner's scope
+/// and re-renders it when that owner's state changes — React's children
+/// semantics. A bare `{count}` child was previously inlined into the
+/// component's own boundary, where it rendered once and never updated.
+#[test]
+fn binding_children_are_wrapped_for_their_owner() {
+    let out = markup("<main><Badge>{count}</Badge></main>", "src/app/page.rs");
+    let expected = component::identifier("src/app/page.rs").expect("a convention file");
+    assert!(
+        out.contains(&format!("<template pp-owner=\"{expected}\">{{count}}</template>")),
+        "{out}"
+    );
+}
+
+/// A single-rooted child with a binding is the owner's content, not a block
+/// of its own — the owner wrap replaces the `pp-component` stamp.
+#[test]
+fn a_single_rooted_binding_child_is_owned_not_stamped() {
+    let out = markup(
+        "<main><Card><p>{seen}</p></Card></main>",
+        "src/app/page.rs",
+    );
+    let expected = component::identifier("src/app/page.rs").expect("a convention file");
+    assert!(
+        out.contains(&format!(
+            "<template pp-owner=\"{expected}\"><p>{{seen}}</p></template>"
+        )),
+        "{out}"
+    );
+    // Only the page root carries a stamp; the child fragment does not.
+    assert_eq!(out.matches("pp-component").count(), 1, "{out}");
+}
+
+/// An element attribute binding counts the same as a text binding.
+#[test]
+fn an_attribute_binding_child_is_owned() {
+    let out = markup(
+        "<main><Card><p hidden={done}>x</p></Card></main>",
+        "src/app/page.rs",
+    );
+    assert!(out.contains("<template pp-owner="), "{out}");
+}
+
+/// Children with their own `<script>` are self-contained blocks — their
+/// bindings read state they declare themselves, so they keep their own
+/// stamp and take no owner wrap.
+#[test]
+fn scripted_children_stay_their_own_block() {
+    let out = markup(
+        "<main><Card><div><p>{n}</p><script>const [n, setN] = pp.state(0);</script></div></Card></main>",
+        "src/app/page.rs",
+    );
+    let expected = component::identifier("src/app/page.rs").expect("a convention file");
+    assert!(!out.contains("pp-owner"), "{out}");
+    assert!(
+        out.contains(&format!("<div pp-component=\"{expected}\">")),
+        "{out}"
+    );
+}
+
+/// Static children are served inline, visible without JavaScript — no
+/// template hides them, and the old stamping stands.
+#[test]
+fn static_children_take_no_owner_wrap() {
+    let out = markup(
+        "<main><Card><p>hi</p></Card></main>",
+        "src/app/page.rs",
+    );
+    assert!(!out.contains("pp-owner"), "{out}");
+}
+
+/// In a `#[component]` function, the children's owner is that function's
+/// block — the forced name — not the file the function happens to live in.
+#[test]
+fn a_forced_name_owns_the_children_written_in_its_block() {
+    let out = markup(
+        "@component \"shell_12345678\" <div><Card>{open}</Card></div>",
+        "src/components/shell.rs",
+    );
+    assert!(
+        out.contains("<template pp-owner=\"shell_12345678\">{open}</template>"),
+        "{out}"
+    );
+}
+
+/// A binding inside a deeper component tag belongs to that deeper child
+/// block — the outer children stay inline, and only the inner block is
+/// wrapped, so the wrap sits as close to the content as it can.
+#[test]
+fn only_the_block_that_holds_the_binding_is_wrapped() {
+    let out = markup(
+        "<main><Card><div><Panel><p>{x}</p></Panel></div></Card></main>",
+        "src/app/page.rs",
+    );
+    assert_eq!(out.matches("pp-owner").count(), 1, "{out}");
+    assert!(
+        out.contains("<template pp-owner=") && out.contains("<p>{x}</p></template>"),
+        "{out}"
+    );
+}

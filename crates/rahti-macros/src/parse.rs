@@ -53,6 +53,13 @@ mod tests;
 /// The attribute that names a block for the client runtime.
 pub const COMPONENT_ATTR: &str = "pp-component";
 
+/// The attribute that hands a `<template>` of slot content to the block that
+/// wrote it. The client runtime renders the template's content in the named
+/// owner's scope and re-renders it whenever that owner's state changes —
+/// which is what lets `<Card>{count}</Card>` read the page's `count` the way
+/// React children read the scope they were written in.
+pub const OWNER_ATTR: &str = "pp-owner";
+
 /// The markers a `<>…</>` fragment ships between.
 ///
 /// A fragment is a run of siblings framed by a comment pair — the open
@@ -282,6 +289,20 @@ pub struct ChildBlock {
     /// The author wrote a `pp-component` inside the children, so nothing is
     /// injected there.
     pub declares_component: bool,
+    /// The block's own markup carries a client `{…}` binding — in text or as
+    /// an element attribute value. Bindings inside a deeper component tag's
+    /// children belong to that deeper block and are not counted here.
+    ///
+    /// This is what decides owner-scoped serialization: children that read
+    /// the writing block's state ship inside `<template pp-owner="…">`, the
+    /// shape the client runtime re-renders whenever the owner's state
+    /// changes. See `stamp_component_children` in `lib.rs`.
+    pub has_bindings: bool,
+    /// The block carries its own `<script>`, so it is a self-contained
+    /// reactive block: its bindings resolve against state it declares
+    /// itself, and it keeps its own `pp-component` identity instead of an
+    /// owner wrap.
+    pub has_script: bool,
 }
 
 /// Where a block's name lands, which decides how it is written there.
@@ -343,6 +364,8 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         component_slot: None,
         declares_component: false,
         slot_at: None,
+        client_bindings: 0,
+        scripts: 0,
     };
     let forced_component = parser.component_directive();
     let mut ops = Vec::new();
@@ -469,6 +492,13 @@ struct Parser {
     component_slot: Option<(usize, usize, SlotKind)>,
     declares_component: bool,
     slot_at: Option<usize>,
+    /// Client `{…}` bindings seen in the block being parsed — text mustaches
+    /// and element attribute values. Saved and reset around a component
+    /// tag's children, so each [`ChildBlock`] reports only its own.
+    client_bindings: usize,
+    /// `<script>` elements seen in the block being parsed. Same save/reset
+    /// discipline as `client_bindings`.
+    scripts: usize,
 }
 
 impl Parser {
@@ -548,6 +578,7 @@ impl Parser {
                     let span = g.span();
                     self.next();
                     self.mark_root(Root::Loose(span, "`{expr}`"));
+                    self.client_bindings += 1;
                     ops.push(Op::Static(escape_text(&source)));
                 }
                 // A run that is exactly one string literal keeps its contents
@@ -809,6 +840,9 @@ impl Parser {
     /// `Group{ Parenthesis }` token wrapping the `@` and the brace, so the
     /// top-level scan never sees the `@` directly. See [`scan_script_tokens`].
     fn raw_text(&mut self, name: &str, ops: &mut Vec<Op>) -> Result<(), Error> {
+        if name == "script" {
+            self.scripts += 1;
+        }
         let first = self.pos;
         while !self.closes_raw_text(name) {
             if self.next().is_none() {
@@ -988,12 +1022,19 @@ impl Parser {
         let outer_declares = std::mem::replace(&mut self.declares_component, false);
         let outer_slot_at = self.slot_at.take();
         let outer_depth = std::mem::replace(&mut self.depth, 0);
+        let outer_bindings = std::mem::replace(&mut self.client_bindings, 0);
+        let outer_scripts = std::mem::replace(&mut self.scripts, 0);
 
         let mut child_ops = Vec::new();
         let children = self.nodes(&mut child_ops);
 
         let child_slot = self.component_slot;
         let child_declares = self.declares_component;
+        // A deeper component tag inside these children saved and reset the
+        // counters around its own child block, so what is left here counts
+        // this block's markup alone.
+        let child_bindings = self.client_bindings;
+        let child_scripts = self.scripts;
         let single_root = matches!(
             self.roots.as_slice(),
             [Root::Element(..)] | [Root::Fragment(..)]
@@ -1004,6 +1045,8 @@ impl Parser {
         self.declares_component = outer_declares;
         self.slot_at = outer_slot_at;
         self.depth = outer_depth;
+        self.client_bindings = outer_bindings;
+        self.scripts = outer_scripts;
         children?;
 
         if !(self.is_punct(0, '<') && self.is_punct(1, '/')) {
@@ -1034,6 +1077,8 @@ impl Parser {
                 ops: child_ops,
                 component_slot: if single_root { child_slot } else { None },
                 declares_component: child_declares,
+                has_bindings: child_bindings > 0,
+                has_script: child_scripts > 0,
             }),
         }));
         Ok(())
@@ -1238,6 +1283,7 @@ impl Parser {
                 // `{expr}` — the client runtime binds this attribute.
                 Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {
                     self.next();
+                    self.client_bindings += 1;
                     attrs.push(TagAttr::Literal {
                         name,
                         value: Some(binding_source(&g)),

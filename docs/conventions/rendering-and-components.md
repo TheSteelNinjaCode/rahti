@@ -354,17 +354,37 @@ the next component's tags instead of writing `<slot />`.
 
 ## Reactive Boundary Rule
 
-Each stamped `html!`/component block is a PulsePoint scope. Children between
-component tags are a block of their own when they have a single root element
-— the same block a separate `html! { … }` child argument is — so a client
-binding written there cannot read state declared by the parent page's script.
-This fails silently as literal/unbound client text. A child fragment with
-several roots, or none, is not stamped, matching the concatenated and
-escaped-text shapes.
+Each stamped `html!`/component block is a PulsePoint scope — and children
+written between component tags read the scope of the block that wrote them,
+the way React children close over the component that rendered them. Which
+serialization the children take is decided per child block:
 
-Keep state, functions, bindings, and the script that declares them in the same
-block. A reusable interactive child should be its own `#[component]` or carry
-its own script inside its own root.
+- **Children carrying a client `{…}` binding** — in text, or as an element
+  attribute value — and no `<script>` of their own ship as
+  `<template pp-owner="…">…</template>` inside the component's boundary. The
+  runtime renders the template in the owner's scope and re-renders it
+  whenever the owner's state changes, so `<Badge>{count}</Badge>` follows
+  the page's `count`. Owned content is inert markup until hydration.
+- **Children carrying their own `<script>`** are a self-contained block: a
+  single root is stamped `pp-component` — the same block a separate
+  `html! { … }` child argument is — and its bindings resolve against state
+  it declares itself, never the caller's.
+- **Static children** are served inline, visible without JavaScript, with a
+  single root stamped as before.
+
+Two shapes still do not cross the boundary: children rooted in `<>…</>`
+keep the fragment's own-block stamping even when they carry bindings, and
+children built in Rust and handed over as `@{expr}` are opaque `Html` — the
+macro cannot see their bindings, so they render inside the component's
+boundary and read its scope, not the caller's. A `{…}` prop on a nested
+component tag written inside children (`<Card><Badge class={x} /></Card>`)
+does not by itself make the children owned either; event-handler props still
+fire correctly, but a non-event prop binding there re-renders only with the
+component that carries it.
+
+State, functions, and the script that declares them still belong together: a
+reusable interactive child should be its own `#[component]` or carry its own
+script inside its own root.
 
 ## Component Modules
 

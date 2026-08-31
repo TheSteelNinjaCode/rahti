@@ -1529,9 +1529,12 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
-        "A reactive block and its `<script>` must be self-contained.\n\
-         PulsePoint state does not cross an `html!` component/children\n\
-         boundary."
+        "A reactive block and its `<script>` must be self-contained. Children\n\
+         written between component tags are the exception: a `{…}` binding\n\
+         there reads the writing block's state — `html!` ships such children\n\
+         as an owner-scoped `<template pp-owner=\"…\">`, the React children\n\
+         semantics. Fragment-rooted (`<>…</>`) and `@{expr}`-built children\n\
+         still do not cross the boundary."
             .to_string(),
     );
     rules.push(

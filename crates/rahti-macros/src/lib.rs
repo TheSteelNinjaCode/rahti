@@ -22,7 +22,7 @@ mod socket;
 #[path = "tests/emit.rs"]
 mod lib_tests;
 
-use parse::{COMPONENT_ATTR, Op, Parsed, SlotKind, TagAttr};
+use parse::{COMPONENT_ATTR, OWNER_ATTR, Op, Parsed, SlotKind, TagAttr};
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -259,11 +259,18 @@ pub fn socket(
 /// Write `pp-component="…"` into the root element's open tag — or, for a
 /// document, around its slot.
 fn stamp(mut parsed: Parsed, file: &str) -> Vec<Op> {
+    let file_id = component::identifier(file);
+    // The scope children between component tags read is the block they were
+    // written in — the page named after the file, or the `#[component]`
+    // function whose name was handed down. That is the id an owner wrap
+    // carries; static child blocks are still named by the file alone.
+    let owner_id = parsed.forced_component.clone().or_else(|| file_id.clone());
+
     // Children written between component tags are their own blocks, named
     // the way an inline `html! { … }` child argument is: by the file alone.
     // That keeps the two spellings byte-identical — and it is independent of
     // how this block itself is named, so it happens before any early return.
-    stamp_component_children(&mut parsed.ops, component::identifier(file).as_deref());
+    stamp_component_children(&mut parsed.ops, file_id.as_deref(), owner_id.as_deref());
 
     if parsed.declares_component {
         return parsed.ops;
@@ -327,24 +334,55 @@ fn wrap_slot(mut ops: Vec<Op>, slot_at: Option<usize>, id: &str) -> Vec<Op> {
     ops
 }
 
-/// Name the child blocks of every component tag, recursively.
+/// Name the child blocks of every component tag, recursively — and hand the
+/// ones that read this block's state to their owner.
 ///
-/// A single-rooted child fragment gets `pp-component` on that root, exactly
-/// where a separate `html! { … }` child block would have carried it — its own
-/// reactive scope, per the boundary rule. A fragment with several roots, or
-/// none, matches the `Html::concat`/escaped-text shapes, which never carried
-/// a name. An author-written `pp-component` inside the children turns the
+/// Three shapes, decided per child block:
+///
+/// - **Owner-scoped children** — the block carries a client `{…}` binding
+///   (in text or on an element's attribute) and no `<script>` of its own.
+///   Those expressions read the state of the block that wrote them, the way
+///   React children close over the component that rendered them — so the
+///   whole child block ships as `<template pp-owner="…">…</template>` inside
+///   the component's boundary. The client runtime extracts the template,
+///   renders it in the owner's scope, and re-renders it whenever the owner's
+///   state changes. No `pp-component` is stamped: the content is the
+///   owner's, not a block of its own.
+/// - **Self-contained children** — the block carries its own `<script>`. It
+///   is a reactive block of its own wherever it lands, so a single root gets
+///   `pp-component`, exactly where a separate `html! { … }` child block
+///   would have carried it.
+/// - **Static children** — no bindings at all. Served inline as before,
+///   visible without JavaScript, with a single root named for form's sake.
+///
+/// A fragment-rooted child block keeps the old stamping even when it carries
+/// bindings: its comment markers are what the runtime raises into a
+/// boundary, and that shape has a name slot rather than an element to wrap.
+/// An author-written `pp-component` inside the children turns every
 /// injection off, the same override every block has.
-fn stamp_component_children(ops: &mut [Op], file_id: Option<&str>) {
+fn stamp_component_children(ops: &mut [Op], file_id: Option<&str>, owner_id: Option<&str>) {
     for op in ops {
         let Op::Component(call) = op else { continue };
         let Some(child) = &mut call.children else {
             continue;
         };
-        stamp_component_children(&mut child.ops, file_id);
-        let (Some(id), false, Some(slot)) =
-            (file_id, child.declares_component, child.component_slot)
-        else {
+        stamp_component_children(&mut child.ops, file_id, owner_id);
+        if child.declares_component {
+            continue;
+        }
+
+        let is_fragment = matches!(child.component_slot, Some((_, _, SlotKind::Fragment)));
+        if child.has_bindings && !child.has_script && !is_fragment {
+            if let Some(owner) = owner_id {
+                child
+                    .ops
+                    .insert(0, Op::Static(format!("<template {OWNER_ATTR}=\"{owner}\">")));
+                child.ops.push(Op::Static("</template>".into()));
+                continue;
+            }
+        }
+
+        let (Some(id), Some(slot)) = (file_id, child.component_slot) else {
             continue;
         };
         write_name(&mut child.ops, slot, id);

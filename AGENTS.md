@@ -88,8 +88,12 @@ preserve them, and documentation or scaffold changes must teach them.
 9. Children are an explicit `Html` argument rendered with `<slot />`. An
    empty tag pair passes `Html::empty()`, a self-closing tag passes no
    `children` at all. `Html::concat(...)` joins a list built in Rust.
-10. A reactive block and its `<script>` must be self-contained. PulsePoint
-    state does not cross an `html!` component/children boundary.
+10. A reactive block and its `<script>` must be self-contained. Children
+    written between component tags are the exception: a `{…}` binding there
+    reads the writing block's state — `html!` ships such children as an
+    owner-scoped `<template pp-owner="…">`, the React children semantics.
+    Fragment-rooted (`<>…</>`) and `@{expr}`-built children still do not
+    cross the boundary.
 11. A page-owned `#[rpc]` sits beside its caller in that `page.rs`; a
     component-owned `#[rpc]` sits in the component file. Component RPC names
     are application-wide; the same page RPC name may exist on different page
