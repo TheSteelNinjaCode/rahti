@@ -253,6 +253,7 @@ policy at runtime.
 ```text
 cargo rahti new <name> [--tailwind] [--db [backend]] [--ws] [--mcp] [--local <path>]
 cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
+cargo rahti studio [--port <port>]
 ```
 
 Every feature flag adds something, and leaving it out is how you say no. One
@@ -325,6 +326,27 @@ with nowhere to ask takes the flags at their word.
 - In `rahti.config.json`, `upgrade` rewrites only what it owns: `createdWith`
   and the `scaffold` ledger. Everything else — the port, the app directory,
   any CSS setting — stays exactly as you wrote it.
+
+### Prisma Studio
+
+`cargo rahti studio` opens Prisma Studio against the database configured for
+the current Rahti project. It requires a database-enabled `rahti.config.json`.
+The command reads `DATABASE_URL` from the environment first, then the ignored
+`.env` file; it never prints the connection string. Rahti's SQLite URL is
+translated to Prisma's `file:` form automatically, and PostgreSQL/MySQL URLs
+are passed through in Prisma's spelling.
+
+Prisma is an optional local developer dependency. Install it yourself; the
+command never downloads or installs packages:
+
+```text
+npm install --save-dev prisma
+cargo rahti studio
+cargo rahti studio --port 5556
+```
+
+Studio is a local database editor. Do not run it against a production database
+unless you intend to inspect or modify that database directly.
 
 When changing scaffold behavior, update templates/assets, hash-ledger behavior,
 tests, and this document together.

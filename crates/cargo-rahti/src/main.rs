@@ -12,6 +12,7 @@
 mod native;
 mod new;
 mod prompt;
+mod studio;
 mod templates;
 mod upgrade;
 mod wiring;
@@ -35,6 +36,7 @@ fn main() -> ExitCode {
     let result = match args.first().copied() {
         Some("new") => new::run(&args[1..]),
         Some("upgrade") => upgrade::run(&args[1..]),
+        Some("studio") => studio::run(&args[1..]),
         // Handed to `cargo-rahti-native`, which is a separate install. Returns
         // rather than falling through to the `Result` below, because what the
         // helper exited with is what this should exit with.
@@ -78,6 +80,7 @@ Create and maintain Rahti projects.
 USAGE:
     cargo rahti new <name> [options]
     cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
+    cargo rahti studio [--port <port>]
     cargo rahti native <command> [options]
 
 NEW:
@@ -123,6 +126,14 @@ UPGRADE:
     Cargo.toml and .env are never regenerated, because your dependencies and
     your credentials are yours — but they are amended when a feature needs
     it, by additions only, and never the same one twice.
+
+STUDIO:
+    Starts Prisma Studio for this Rahti project's configured database. It
+    reads DATABASE_URL from the environment or .env, without printing it.
+    Prisma is an optional developer dependency: install it yourself first
+    with `npm install --save-dev prisma`, then run this command.
+
+    --port <port>     Port for the local Prisma Studio server.
 
 NATIVE:
     Optional Windows and Android packaging, in a separate tool so that a web
