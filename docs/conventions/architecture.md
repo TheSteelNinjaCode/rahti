@@ -162,11 +162,6 @@ On every relevant Cargo build it:
   `rahti.config.json` so a half-wired project is repaired by running it
   again.
 - `--dry-run` previews an upgrade.
-- `cargo rahti studio` opens an installed local Prisma Studio against the
-  project's database. It reads `DATABASE_URL` from the environment or `.env`,
-  never prints it, and translates Rahti's SQLite connection URL to Prisma's
-  `file:` form. Prisma remains a developer-installed npm dependency; the
-  command never installs it.
 - `cargo rahti native <command>` is forwarded to `cargo-rahti-native`, a
   separately installed executable. The forwarding is a `Command` spawn and adds
   no dependency; a missing helper prints the line that installs it. Nothing
