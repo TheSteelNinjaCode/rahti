@@ -135,8 +135,10 @@ preserve them, and documentation or scaffold changes must teach them.
     per table; `src/migrations/` one flat file per change, named
     `mYYYYMMDD_NNNNNN_<what>.rs` because filename order is application order.
     The migration is the schema. The connection is a process-wide static
-    (`crate::db::db()`) installed from `main`; `db::migrate()` is never
-    automatic.
+    (`crate::db::db()`) installed by `db::connect_if_configured()` when
+    `DATABASE_URL` exists; database-using code must check `db::is_connected()`
+    when the application may start before its owner configures a connection.
+    `db::migrate()` is never automatic.
 19. A connection string is a credential. It lives in `DATABASE_URL` via an
     ignored `.env`, never in `rahti.config.json`, which records only which
     backend the project is on.

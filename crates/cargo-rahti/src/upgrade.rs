@@ -809,7 +809,7 @@ fn report(
         println!(
             "  src/main.rs is yours, so wire the database in yourself: declare\n  \
              `mod db;`, `mod migrations;` and `mod models;`, and call\n  \
-             `db::connect().await` at the top of `main` — see\n  \
+             `db::connect_if_configured().await` at the top of `main` — see\n  \
              docs/conventions/database.md.\n"
         );
     }

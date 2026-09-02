@@ -531,9 +531,10 @@ pub mod migrations;
 pub mod models;
 "#,
             r#"
-    // Before the router, so a project that cannot reach its database says so
-    // once at startup rather than once per request.
-    db::connect()
+    // A database is optional until the deployment owner supplies DATABASE_URL.
+    // A configured but unreachable database still stops startup: serving
+    // requests while persistence is broken would hide a configuration error.
+    db::connect_if_configured()
         .await
         .map_err(|message| StartupError::new("database", message))?;
 
@@ -747,31 +748,34 @@ static DB: OnceLock<DatabaseConnection> = OnceLock::new();
 pub fn db() -> &'static DatabaseConnection {
     DB.get().expect(
         "the database has not been connected.\n  \
-         `db::connect().await` runs from `main` before the server starts — \
+         `db::connect_if_configured().await` runs from `main` before the \
+         server starts — \
          if you removed it, put it back.",
     )
 }
 
-/// Connect once, at startup.
+/// Whether a connection has been installed for this process.
+pub fn is_connected() -> bool {
+    DB.get().is_some()
+}
+
+/// Connect once at startup when a database has been configured.
 ///
-/// Before the listener binds, so a project that cannot reach its database
-/// says so once with a readable message instead of once per request with a
-/// 500. Exits rather than panicking: a backtrace through tokio describes the
-/// framework, and the cause is almost always the URL or a server that is not
-/// running.
-pub async fn connect() -> Result<(), String> {
+/// An absent `DATABASE_URL` leaves the application online without persistence,
+/// so deployment owners can set their chosen connection string later. A present
+/// but unusable URL remains an error instead of silently hiding a broken setup.
+pub async fn connect_if_configured() -> Result<(), String> {
     // One `.env` reader for the process, in the framework — `AuthSettings`
     // needs the same file, and a project with no database still has one.
     // Idempotent, so neither caller has to know which ran first, and a real
     // environment variable still wins over the file.
     rahti::load_env();
 
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        return Err("DATABASE_URL is not set.\n  \
-             It lives in `.env`, which is ignored by git because a connection \
-             string is a credential.\n  \
-             Copy `.env.example` to `.env`, or export it in your shell."
-            .to_string());
+    let Some(url) = std::env::var("DATABASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(());
     };
 
     connect_to(&url).await.map_err(|e| {

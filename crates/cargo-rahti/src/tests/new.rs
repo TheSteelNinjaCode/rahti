@@ -378,7 +378,7 @@ fn a_database_project_gets_the_files_that_wire_one_up() {
     // Wired from `src/lib.rs`, not `src/main.rs`: startup is shared with the
     // optional native package, which has no `main` to call.
     let lib = tree.read("src/lib.rs");
-    assert!(lib.contains("db::connect()"), "{lib}");
+    assert!(lib.contains("db::connect_if_configured()"), "{lib}");
     assert!(lib.contains("pub mod models;"), "{lib}");
     assert!(lib.contains("initialize_application"), "{lib}");
 

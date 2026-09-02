@@ -122,7 +122,11 @@ let rows = todo::Entity::find().all(db()).await?;
 ```
 
 `db()` is a process-wide `OnceLock<DatabaseConnection>`, installed by
-`db::connect()` which `main` calls before the listener binds.
+`db::connect_if_configured()` before the listener binds when `DATABASE_URL`
+is configured. A deployment can start without the variable, which lets its
+owner choose and add their connection string later; database-using pages and
+RPCs must check `db::is_connected()` and return a useful unavailable state
+instead of calling `db()` while no connection exists.
 
 It is a global rather than a handler argument because **Rahti handlers take no
 state**. A `page()` is a plain function, an `#[rpc]` is a plain function, and
@@ -221,7 +225,7 @@ migration is the schema; the entity is how Rust talks to it.
 
 ## Migrations Are Not Automatic
 
-`db::migrate()` exists and is never called by `db::connect()`.
+`db::migrate()` exists and is never called by `db::connect_if_configured()`.
 
 A framework that changes your schema because you started the server is the
 same class of surprise as one that downloads a compiler you did not ask for,
@@ -340,8 +344,8 @@ the question that has been wrong before.
 | Symptom | Cause |
 | --- | --- |
 | `db.backend is "…", which is not a backend` | Misspelled in `rahti.config.json`. Not defaulted, deliberately. |
-| `the database has not been connected` | `db()` was reached before `db::connect()`. In a test, the setup helper was not called. |
-| `DATABASE_URL is not set` | No `.env` and nothing exported. Copy `.env.example`. |
+| `the database has not been connected` | `db()` was reached while `DATABASE_URL` is absent, or before `db::connect_if_configured()`. Guard the page or RPC with `db::is_connected()`. |
+| `DATABASE_URL` is absent | This is allowed. The app starts without persistence until its owner configures a connection string and restarts it. |
 | `no such table` after a migration was written | The migration ran but the table is not there: almost always an in-memory SQLite that outlived its runtime. See Testing. |
 | `unresolved import sea_orm` | The config has a `db` object and `Cargo.toml` does not have the dependency. Run `cargo rahti upgrade`, which adds it. |
 | `… is a directory, and src/models is flat` | An entity in a subdirectory. Move it up. |
