@@ -322,7 +322,8 @@ fn secret_from_env(strict: bool) -> String {
              `cargo rahti new` writes one per project; generate one per \
              environment with:\n    \
              openssl rand -base64 32\n  \
-             The variables auth reads are documented at https://rahti.dev\n  \
+             The variables auth reads are documented at:\n    \
+             https://rahti.tsnc.tech/docs/environment\n  \
              Development invents a key instead; this is a release build, where \
              guessing would be worse than stopping."
         );

@@ -123,7 +123,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cargo-rahti"
-version = "0.0.31"
+version = "0.0.32"
 dependencies = [
  "getrandom 0.3.4",
  "rahti-build",
@@ -832,7 +832,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rahti"
-version = "0.0.31"
+version = "0.0.32"
 dependencies = [
  "axum",
  "base64",
@@ -857,14 +857,14 @@ dependencies = [
 
 [[package]]
 name = "rahti-build"
-version = "0.0.31"
+version = "0.0.32"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "rahti-macros"
-version = "0.0.31"
+version = "0.0.32"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "rahti-mcp"
-version = "0.0.31"
+version = "0.0.32"
 dependencies = [
  "rmcp",
  "serde",

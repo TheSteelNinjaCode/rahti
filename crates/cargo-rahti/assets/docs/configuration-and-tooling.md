@@ -275,8 +275,8 @@ with nowhere to ask takes the flags at their word.
   `AUTH_COOKIE_NAME` and, with `--db`, a `DATABASE_URL`. It is gitignored and
   untracked by the ledger, so no upgrade rewrites it, and nothing is committed
   in its place. What a clone has to supply is the environment reference at
-  <https://rahti.dev>; the variables themselves are covered in
-  `authentication.md` and `database.md`.
+  <https://rahti.tsnc.tech/docs/environment>; the variables
+  themselves are covered in `authentication.md` and `database.md`.
 - Every project is written with its own documentation: `AGENTS.md` — the
   project guide `CLAUDE.md` points at — and the convention documents under
   `docs/conventions/`, with `database.md` and `websockets.md` only where the

@@ -116,7 +116,7 @@ no environment in which a typo here is what someone meant.
 cookie name in it, and git ignores it. Nothing is committed in its place — a
 signing secret in git is not a secret. The three variables above are the whole
 list, and the reference for them is this section and the environment reference
-at <https://rahti.dev>.
+at <https://rahti.tsnc.tech/docs/environment>.
 
 That means a fresh clone has no `.env` at all. In development it still runs —
 `AUTH_SECRET` is invented and warned about — and before it is deployed the

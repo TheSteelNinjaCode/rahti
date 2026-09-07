@@ -221,8 +221,8 @@ pub fn project_files(
 /// rewrite.
 ///
 /// Nothing is committed beside it: what a clone has to supply is the
-/// environment reference at <https://rahti.dev>, which is written once and so
-/// cannot drift per project.
+/// environment reference at <https://rahti.tsnc.tech/docs/environment>,
+/// which is written once and so cannot drift per project.
 const UNTRACKED: [(&str, &str); 1] = [("public/css/styles.css", "")];
 
 /// Everything but the config, which needs the ledger this fills in.
@@ -283,7 +283,7 @@ pub fn write_config(
 
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str("  \"$schema\": \"https://rahti.dev/schema/1.json\",\n");
+    out.push_str("  \"$schema\": \"https://rahti.tsnc.tech/schema/1.json\",\n");
     out.push_str("  \"schema\": 1,\n");
     out.push_str(&format!("  \"createdWith\": \"{VERSION}\",\n\n"));
 

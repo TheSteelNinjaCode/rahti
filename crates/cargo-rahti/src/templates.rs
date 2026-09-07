@@ -301,8 +301,9 @@ pub fn gitignore(db: bool) -> String {
 # Nothing below .rahti is application input or shipped output.
 /.rahti
 # Credentials: the session signing secret, and the connection string if this
-# project has a database. Every variable this file may hold is documented at
-# https://rahti.dev — a clone reads it there rather than from a committed copy.
+# project has a database. Every variable this file may hold is documented
+# at https://rahti.tsnc.tech/docs/environment — a clone reads it there
+# rather than from a committed copy.
 /.env
 "#,
     );
@@ -370,9 +371,9 @@ DATABASE_URL="{url}"
 /// The project's `.env`.
 ///
 /// Written once and git-ignored, because a signing secret in git is not a
-/// secret. What every variable means, and what a clone has to fill in, is the
-/// environment reference at <https://rahti.dev> — one account of it, kept
-/// beside the runtime that reads them.
+/// secret. What every variable means, and what a clone has to fill in, is
+/// the environment reference at <https://rahti.tsnc.tech/docs/environment>
+/// — one account of it, kept beside the runtime that reads them.
 pub fn env(backend: Option<Backend>, values: &EnvValues) -> String {
     let mut out = String::new();
 
@@ -386,8 +387,9 @@ pub fn env(backend: Option<Backend>, values: &EnvValues) -> String {
 # Read by rahti::auth. Which routes are private lives in src/auth.rs, not here:
 # a policy is code, and only the three values below are environment.
 #
-# This file is git-ignored, so a clone starts without it. What to put back is
-# documented at https://rahti.dev — these three names and nothing else.
+# This file is git-ignored, so a clone starts without it. What to put back
+# is documented at https://rahti.tsnc.tech/docs/environment
+# — these three names and nothing else.
 # =============================================================================
 
 # Session signing secret. Unique and strong per app and per environment.

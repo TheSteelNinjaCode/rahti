@@ -310,8 +310,9 @@ at all.
 ## Security
 
 - `DATABASE_URL` lives in `.env`, which is gitignored. Nothing is committed in
-  its place — the environment reference at <https://rahti.dev> says what a
-  clone has to supply, so there is no second copy of it to go stale.
+  its place — the environment reference at
+  <https://rahti.tsnc.tech/docs/environment> says what a clone has to supply,
+  so there is no second copy of it to go stale.
 - A real environment variable always beats the file. `src/db.rs` reads `.env`
   without overriding what is already set, so a deployment that exports
   `DATABASE_URL` cannot be silently redirected by a stale file on the same

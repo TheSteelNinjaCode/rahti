@@ -23,8 +23,8 @@ A new project compiles and serves on the first `cargo run`. It carries:
   JavaScript build step;
 - a generated, gitignored `.env` with a per-project session signing secret and
   cookie name; what a clone has to supply is documented at
-  <https://rahti.dev>, and a release build refuses to start on a placeholder
-  secret;
+  <https://rahti.tsnc.tech/docs/environment>, and a release build
+  refuses to start on a placeholder secret;
 - with `--db`: SeaORM dependencies, a worked example entity and migration,
   and the process-wide connection in `src/db.rs`;
 - with `--ws`: the `ws` feature on the `rahti` dependency, which compiles
