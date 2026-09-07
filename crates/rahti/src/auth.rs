@@ -309,7 +309,7 @@ fn secret_from_env(strict: bool) -> String {
         let detail = match problem {
             SecretProblem::Missing => format!("{SECRET_ENV} is not set."),
             SecretProblem::Placeholder => {
-                format!("{SECRET_ENV} is still the placeholder value from `.env.example`.")
+                format!("{SECRET_ENV} is still a placeholder value.")
             }
             SecretProblem::TooShort => {
                 format!("{SECRET_ENV} is shorter than {MIN_SECRET} characters, which is not a key.")
@@ -319,9 +319,10 @@ fn secret_from_env(strict: bool) -> String {
             "rahti: {detail}\n  \
              It signs every session cookie, so it is a credential: put a long \
              random value in `.env`, which git ignores.\n  \
-             `cargo rahti new` writes one per project — copy that line, or \
-             generate one:\n    \
+             `cargo rahti new` writes one per project; generate one per \
+             environment with:\n    \
              openssl rand -base64 32\n  \
+             The variables auth reads are documented at https://rahti.dev\n  \
              Development invents a key instead; this is a release build, where \
              guessing would be worse than stopping."
         );

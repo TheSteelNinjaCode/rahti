@@ -495,9 +495,6 @@ fn the_manifest_and_env_are_wired_to_the_config() {
         manifest
     );
 
-    // `.env.example` was not there, so nothing was invented in its place.
-    assert!(!root.join(".env.example").exists());
-
     let _ = fs::remove_dir_all(&root);
 }
 

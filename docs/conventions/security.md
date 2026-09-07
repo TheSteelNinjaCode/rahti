@@ -119,8 +119,9 @@ or other secrets. Delete the log before sharing a workspace archive.
 
 - The connection string is a credential and never appears in
   `rahti.config.json`, which is committed. It is read from `DATABASE_URL`.
-- `.env` holds it in development and is gitignored; `.env.example` is
-  committed and carries the shape without the value.
+- `.env` holds it in development and is gitignored. Nothing is committed in
+  its place: what the file may contain is documented at <https://rahti.dev>,
+  not scaffolded into a second file that would go stale.
 - `src/db.rs` reads `.env` without overriding variables already set, so a
   deployment that exports `DATABASE_URL` cannot be redirected by a stale file
   on the same machine.

@@ -201,7 +201,7 @@ pub fn project_files(
         ));
     }
 
-    // `.env` and `.env.example` are deliberately not here — see `UNTRACKED`.
+    // `.env` is deliberately not here — see `UNTRACKED`.
     files
 }
 
@@ -220,12 +220,9 @@ pub fn project_files(
 /// — and, worse, would make `.env` a file the scaffold believes it may
 /// rewrite.
 ///
-/// `.env.example` is untracked for a third reason. It is committed, so it
-/// looks like a scaffold file — but it carries this project's generated
-/// `AUTH_COOKIE_NAME`, and the generator runs afresh on every call. Tracked,
-/// `upgrade` would rewrite it with a *different* cookie name each time and
-/// silently disagree with the `.env` beside it. Written once, it stays the
-/// account of what this project's clones have to fill in.
+/// Nothing is committed beside it: what a clone has to supply is the
+/// environment reference at <https://rahti.dev>, which is written once and so
+/// cannot drift per project.
 const UNTRACKED: [(&str, &str); 1] = [("public/css/styles.css", "")];
 
 /// Everything but the config, which needs the ledger this fills in.
@@ -254,20 +251,11 @@ fn write_project(
         .map(|(path, contents)| ((*path).to_string(), contents.as_bytes().to_vec()))
         .collect();
 
-    // Generated once and used for both files, so the cookie name in the
-    // example is the cookie name the project actually runs on. The secret is
-    // the one thing that differs: `.env` gets the real key, and the committed
-    // example gets a placeholder the runtime knows to refuse.
-    //
     // Written whether or not the project has a database: `AUTH_SECRET` is not
     // a database setting, and a project whose `.env` only appeared when you
     // chose SQLite would be a trap.
     let values = t::EnvValues::generate();
-    untracked.push((".env".to_string(), t::env(db, &values, false).into_bytes()));
-    untracked.push((
-        ".env.example".to_string(),
-        t::env(db, &values, true).into_bytes(),
-    ));
+    untracked.push((".env".to_string(), t::env(db, &values).into_bytes()));
 
     for (path, contents) in untracked {
         let mut throwaway = Ledger::new();

@@ -36,7 +36,7 @@ in `rahti.config.json`, and then finishes the job in the two files it never
 regenerates: `sea-orm` and `sea-orm-migration` are appended to
 `[dependencies]`, pinned to major version 2 with the feature for your backend
 (`sqlx-sqlite`, `sqlx-postgres`, `sqlx-mysql`), and a `DATABASE_URL` is added
-to `.env` and `.env.example`.
+to `.env`.
 
 Those two are additions, not rewrites. Everything else in the manifest stays
 as it is — your dependencies, your versions, and a `--local` project's path
@@ -70,7 +70,6 @@ src/
     ├── mod.rs                             generated — do not edit
     └── m20260101_000001_create_todo.rs    one file per change — yours
 .env                                       DATABASE_URL — gitignored
-.env.example                               its shape, without the credential
 ```
 
 Both directories are **flat**. A table name is a flat namespace — there is no
@@ -310,8 +309,9 @@ at all.
 
 ## Security
 
-- `DATABASE_URL` lives in `.env`, which is gitignored. `.env.example` is
-  committed and carries the shape without the credential.
+- `DATABASE_URL` lives in `.env`, which is gitignored. Nothing is committed in
+  its place — the environment reference at <https://rahti.dev> says what a
+  clone has to supply, so there is no second copy of it to go stale.
 - A real environment variable always beats the file. `src/db.rs` reads `.env`
   without overriding what is already set, so a deployment that exports
   `DATABASE_URL` cannot be silently redirected by a stale file on the same

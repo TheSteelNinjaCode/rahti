@@ -547,12 +547,8 @@ fn the_config_records_the_backend_and_not_the_credential() {
 /// `.env` holds the credentials, so it is written once and never tracked —
 /// tracking it would have `upgrade` compare a hash against somebody's
 /// password, and would make it a file the scaffold believes it may rewrite.
-///
-/// `.env.example` is untracked for its own reason: it carries this project's
-/// generated cookie name, and an upgrade that regenerated it would silently
-/// disagree with the `.env` beside it.
 #[test]
-fn neither_env_file_is_tracked() {
+fn the_env_file_is_written_once_and_not_tracked() {
     let tree = Tree::new("db-env");
     let ledger = scaffold_with(&tree, true, Some(Backend::Sqlite));
 
@@ -561,11 +557,6 @@ fn neither_env_file_is_tracked() {
         !ledger.contains_key(".env"),
         "the credential is not the scaffold's"
     );
-    assert!(
-        !ledger.contains_key(".env.example"),
-        "regenerating it would change the project's cookie name"
-    );
-    assert!(tree.0.join(".env.example").exists(), "still written once");
     assert!(tree.read(".gitignore").contains("/.env"));
 }
 
@@ -595,19 +586,15 @@ fn two_projects_get_different_secrets() {
     );
 }
 
-/// The real key goes in the ignored file. The committed example gets the
-/// placeholder the runtime refuses to start a release build on — a secret in
-/// git is not a secret, and the example has to say so rather than look
-/// configured.
+/// The real key goes in the ignored file, and it is a key — not one of the
+/// words `rahti::auth` refuses to start a release build on.
 #[test]
-fn the_example_carries_a_placeholder_and_not_the_key() {
-    let tree = Tree::new("secret-example");
+fn the_env_file_carries_a_real_key() {
+    let tree = Tree::new("secret-real");
     scaffold_with(&tree, true, Some(Backend::Sqlite));
 
-    let env = tree.read(".env");
-    let example = tree.read(".env.example");
-
-    let secret = env
+    let secret = tree
+        .read(".env")
         .lines()
         .find_map(|line| line.strip_prefix("AUTH_SECRET="))
         .expect("a secret")
@@ -615,38 +602,29 @@ fn the_example_carries_a_placeholder_and_not_the_key() {
         .to_string();
 
     assert!(secret.len() >= 32, "a real key: {secret}");
-    assert_ne!(secret, t::SECRET_PLACEHOLDER);
-    assert!(
-        !example.contains(&secret),
-        "the committed file must not carry the key:\n{example}"
-    );
-    assert!(
-        example.contains(&format!("AUTH_SECRET=\"{}\"", t::SECRET_PLACEHOLDER)),
-        "{example}"
-    );
+    for placeholder in ["change-me", "changeme", "secret", "replace-me"] {
+        assert_ne!(secret.to_lowercase(), placeholder, "{secret}");
+    }
 }
 
 /// The cookie name is not a credential — it is the project's identity under a
-/// shared parent domain — so both files carry the same one. A clone that read
-/// a different name out of the example would write a second cookie.
+/// shared parent domain — so it is generated rather than fixed, and has to be
+/// a name a `Cookie` header can carry unquoted.
 #[test]
-fn both_env_files_agree_on_the_cookie_name() {
+fn the_cookie_name_is_a_legal_token() {
     let tree = Tree::new("cookie-name");
     scaffold_with(&tree, true, Some(Backend::Sqlite));
 
-    let name_in = |contents: &str| {
-        contents
-            .lines()
-            .find_map(|line| line.strip_prefix("AUTH_COOKIE_NAME="))
-            .map(|v| v.trim_matches('"').to_string())
-            .expect("a cookie name")
-    };
+    let name = tree
+        .read(".env")
+        .lines()
+        .find_map(|line| line.strip_prefix("AUTH_COOKIE_NAME="))
+        .map(|v| v.trim_matches('"').to_string())
+        .expect("a cookie name");
 
-    let real = name_in(&tree.read(".env"));
-    assert_eq!(real, name_in(&tree.read(".env.example")));
-    // A legal cookie name without quoting: hex, and long enough not to collide.
-    assert_eq!(real.len(), 16, "{real}");
-    assert!(real.chars().all(|c| c.is_ascii_hexdigit()), "{real}");
+    // Hex, and long enough not to collide.
+    assert_eq!(name.len(), 16, "{name}");
+    assert!(name.chars().all(|c| c.is_ascii_hexdigit()), "{name}");
 }
 
 /// All three, under the names `rahti::auth` reads.

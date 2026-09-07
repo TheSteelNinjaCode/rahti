@@ -19,7 +19,7 @@ members = [
 # that mixed versions would fail to compile with an error naming neither
 # crate. Releasing them in lockstep makes the mismatch impossible to reach.
 [workspace.package]
-version = "0.0.30"
+version = "0.0.31"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jeffersonabraham/rahti"
@@ -33,6 +33,6 @@ rust-version = "1.97"
 # version once the crate is on crates.io, and a path-only dependency cannot
 # be published at all.
 [workspace.dependencies]
-rahti = { path = "crates/rahti", version = "0.0.30" }
-rahti-build = { path = "crates/rahti-build", version = "0.0.30" }
-rahti-macros = { path = "crates/rahti-macros", version = "0.0.30" }
+rahti = { path = "crates/rahti", version = "0.0.31" }
+rahti-build = { path = "crates/rahti-build", version = "0.0.31" }
+rahti-macros = { path = "crates/rahti-macros", version = "0.0.31" }

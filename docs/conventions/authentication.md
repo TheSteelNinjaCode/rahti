@@ -98,8 +98,9 @@ follows it as a cookie attribute.
 Not a credential — it is the project's identity under a shared parent domain.
 `a.example.com` and `b.example.com` both write cookies to `.example.com`, so
 two apps sharing a cookie name overwrite each other's sessions. Generated per
-project so that case is handled before anyone runs into it, and written to
-**both** `.env` and `.env.example` — a clone has to use the same name.
+project so that case is handled before anyone runs into it, and the same name
+has to be used everywhere that project runs: it is one value the deployment
+copies from development rather than invents.
 
 ### `SESSION_LIFETIME_HOURS`
 
@@ -109,18 +110,23 @@ hours, greater than zero. A value that is present but unreadable —
 to one hour would sign people out all day for no visible reason, and there is
 no environment in which a typo here is what someone meant.
 
-### `.env` and `.env.example`
+### `.env`
 
-`.env` is git-ignored and carries the real key. `.env.example` is committed and
-carries `AUTH_SECRET="change-me"` in its place, because a signing secret in git
-is not a secret — and because the runtime knows that word, copying the example
-to `.env` and forgetting the rest fails loudly in production instead of quietly
-working.
+`cargo rahti new` writes one `.env`, with this project's generated key and
+cookie name in it, and git ignores it. Nothing is committed in its place — a
+signing secret in git is not a secret. The three variables above are the whole
+list, and the reference for them is this section and the environment reference
+at <https://rahti.dev>.
 
-Neither file is tracked in the scaffold ledger, so `cargo rahti upgrade` never
-rewrites them. For `.env` that protects your credentials; for `.env.example` it
-protects the generated cookie name, which a regenerating upgrade would change
-out from under the `.env` beside it.
+That means a fresh clone has no `.env` at all. In development it still runs —
+`AUTH_SECRET` is invented and warned about — and before it is deployed the
+three values are written by hand or set in the environment. `AUTH_COOKIE_NAME`
+is the one that has to be carried over rather than made up again.
+
+`.env` is not tracked in the scaffold ledger, so `cargo rahti upgrade` never
+rewrites it — it only ever adds a `DATABASE_URL` above what is already there,
+and only when the project gains a database. That is what protects your
+credentials from an upgrade.
 
 `.env` is read by `rahti::load_env()`, which both `AuthSettings::from_env` and
 the application's `db::connect` call. It is idempotent, so neither has to know

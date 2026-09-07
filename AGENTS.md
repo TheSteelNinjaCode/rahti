@@ -158,10 +158,11 @@ preserve them, and documentation or scaffold changes must teach them.
     `AUTH_COOKIE_NAME`, and the optional `SESSION_LIFETIME_HOURS`. The first
     two are generated per project by `cargo rahti new` so no two applications
     share a signing key or a cookie name. `AUTH_SECRET` is a credential and
-    lives in the ignored `.env`; `.env.example` carries the placeholder
-    `change-me`, which a release build refuses to start on. In development a
-    missing secret is invented and warned about; in production it stops the
-    server. Do not add a fourth variable.
+    lives in the ignored `.env`. The scaffold writes that one file and commits
+    nothing in its place: what a clone supplies is documented, on the Rahti
+    site and in `authentication.md`. A release build refuses to start on a
+    placeholder secret such as `change-me`; in development a missing secret is
+    invented and warned about. Do not add a fourth variable.
 24. `rahti::load_env()` is the only `.env` reader in the process. Do not
     write a second copy.
 25. The session payload is signed, not encrypted, and readable by whoever

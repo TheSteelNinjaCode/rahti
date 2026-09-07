@@ -354,16 +354,14 @@ fn wire(root: &Path, config: &Config, dry_run: bool) -> Result<Wiring, String> {
         wiring.manifest = Some(manifest.into_bytes());
     }
 
-    // Only files that are there. A `.env` the author deleted is a decision —
-    // the same one an absent scaffold file records — and a `.env.example`
-    // invented here would carry a connection string and none of the session
-    // settings a clone also has to fill in.
+    // Only `.env`, and only when it is there. A `.env` the author deleted is a
+    // decision — the same one an absent scaffold file records — and inventing
+    // one here would write a connection string with none of the session
+    // settings a running project also needs.
     if let Some(backend) = config.db {
-        for name in [".env", ".env.example"] {
-            let full = root.join(name);
-            let Ok(current) = fs::read_to_string(&full) else {
-                continue;
-            };
+        let name = ".env";
+        let full = root.join(name);
+        if let Ok(current) = fs::read_to_string(&full) {
             if let Some(amended) = wiring::with_database_url(&current, backend) {
                 if !dry_run {
                     fs::write(&full, amended).map_err(|e| format!("cannot write {name}: {e}"))?;

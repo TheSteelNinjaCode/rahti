@@ -120,7 +120,7 @@ fn a_secret_that_is_not_a_secret_is_named_as_such() {
     assert_eq!(check_secret(""), Err(SecretProblem::Missing));
     assert_eq!(check_secret("   "), Err(SecretProblem::Missing));
 
-    // The value `.env.example` ships, and the ones people reach for.
+    // The words people reach for when they mean "fill this in later".
     for placeholder in ["change-me", "changeme", "CHANGE-ME", "Secret", "replace-me"] {
         assert_eq!(
             check_secret(placeholder),

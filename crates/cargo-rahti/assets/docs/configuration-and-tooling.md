@@ -271,6 +271,12 @@ with nowhere to ask takes the flags at their word.
 - `--mcp` writes `.mcp.json`, records `"mcp": true`, and otherwise leaves the
   application unchanged. The separate `rahti-mcp` executable is installed
   once per machine rather than added to every application's dependencies.
+- `new` writes one `.env`, carrying this project's generated `AUTH_SECRET` and
+  `AUTH_COOKIE_NAME` and, with `--db`, a `DATABASE_URL`. It is gitignored and
+  untracked by the ledger, so no upgrade rewrites it, and nothing is committed
+  in its place. What a clone has to supply is the environment reference at
+  <https://rahti.dev>; the variables themselves are covered in
+  `authentication.md` and `database.md`.
 - Every project is written with its own documentation: `AGENTS.md` — the
   project guide `CLAUDE.md` points at — and the convention documents under
   `docs/conventions/`, with `database.md` and `websockets.md` only where the
@@ -298,8 +304,8 @@ with nowhere to ask takes the flags at their word.
   credential — but it does amend them, by the smallest edit that makes the
   files it just wrote compile and run: the version pins above, `sea-orm` and
   `sea-orm-migration` appended to `[dependencies]`, `features = ["ws"]` folded
-  into the `rahti` line, `DATABASE_URL` added above what is already in `.env` and
-  `.env.example`. Driven by `rahti.config.json` rather than by what this run
+  into the `rahti` line, `DATABASE_URL` added above what is already in `.env`.
+  Driven by `rahti.config.json` rather than by what this run
   added, so a project that gained a feature by editing its config is repaired
   by running `upgrade` again; every edit is skipped when it is already there,
   so running it any number of times is the same as running it once. A shape

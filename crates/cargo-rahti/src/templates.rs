@@ -293,16 +293,16 @@ fn main() {
 pub fn gitignore(db: bool) -> String {
     // `/.env` is ignored whether or not there is a database: it carries
     // AUTH_SECRET either way, and a session signing key is a credential for
-    // exactly the same reason a connection string is. `.env.example` is
-    // committed and carries a placeholder in its place.
+    // exactly the same reason a connection string is. Nothing is committed in
+    // its place — what a clone has to fill in is documented, not scaffolded.
     let mut out = String::from(
         r#"/target
 # Generated manifests, build scratch space, and development diagnostics.
 # Nothing below .rahti is application input or shipped output.
 /.rahti
 # Credentials: the session signing secret, and the connection string if this
-# project has a database. `.env.example` is the committed shape of this file,
-# with a placeholder where the secret goes.
+# project has a database. Every variable this file may hold is documented at
+# https://rahti.dev — a clone reads it there rather than from a committed copy.
 /.env
 "#,
     );
@@ -321,34 +321,18 @@ pub fn gitignore(db: bool) -> String {
     out
 }
 
-/// The values `new` generates once and writes into both `.env` files.
+/// The values `new` generates once and writes into `.env`.
 ///
 /// Generated per project rather than fixed, so two Rahti applications never
-/// ship the same signing key or fight over the same cookie name. Made once and
-/// passed to both calls of [`env`]: the cookie name has to be *the same* in
-/// the real file and the committed example, and the secret has to differ.
+/// ship the same signing key or fight over the same cookie name.
 pub struct EnvValues {
-    /// The real signing key. Written to `.env` only.
+    /// The real signing key.
     pub secret: String,
     /// The cookie's name. Not a credential — it is the project's identity
-    /// under a shared parent domain — so it is written to both files.
+    /// under a shared parent domain.
     pub cookie: String,
 }
 
-/// The placeholder the committed example carries in place of the real key.
-///
-/// A word the runtime knows: `rahti::auth` refuses to start a release build
-/// whose `AUTH_SECRET` is still this, so copying `.env.example` to `.env` and
-/// forgetting the rest fails loudly instead of signing every session in
-/// production with a value that is in the repository.
-pub const SECRET_PLACEHOLDER: &str = "change-me";
-
-/// `.env`, and the committed `.env.example` beside it.
-///
-/// `example` is what separates them. The real file carries the generated key;
-/// the example carries a placeholder, because a signing secret in git is not a
-/// secret. Everything else is identical, so the example is an accurate account
-/// of what a clone has to fill in.
 /// The example connection string for a backend — what the scaffold's `.env`
 /// starts with, and what `upgrade` prints when a database is added to a
 /// project whose `.env` it will not touch.
@@ -383,40 +367,35 @@ DATABASE_URL="{url}"
     )
 }
 
-pub fn env(backend: Option<Backend>, values: &EnvValues, example: bool) -> String {
+/// The project's `.env`.
+///
+/// Written once and git-ignored, because a signing secret in git is not a
+/// secret. What every variable means, and what a clone has to fill in, is the
+/// environment reference at <https://rahti.dev> — one account of it, kept
+/// beside the runtime that reads them.
+pub fn env(backend: Option<Backend>, values: &EnvValues) -> String {
     let mut out = String::new();
 
     if let Some(backend) = backend {
         out.push_str(&database_env(backend));
     }
 
-    let secret = if example {
-        SECRET_PLACEHOLDER
-    } else {
-        &values.secret
-    };
-
-    // The example says what the placeholder costs you, because the person
-    // reading it is the person who is about to copy this file.
-    let secret_note = if example {
-        "\n# This is a placeholder, not a key. A release build refuses to start\n\
-         # while AUTH_SECRET is still `change-me` — generate your own:\n\
-         #     openssl rand -base64 32\n"
-    } else {
-        ""
-    };
-
     out.push_str(&format!(
         r#"# =============================================================================
 # AUTHENTICATION AND SESSIONS
 # Read by rahti::auth. Which routes are private lives in src/auth.rs, not here:
 # a policy is code, and only the three values below are environment.
+#
+# This file is git-ignored, so a clone starts without it. What to put back is
+# documented at https://rahti.dev — these three names and nothing else.
 # =============================================================================
 
 # Session signing secret. Unique and strong per app and per environment.
+# Generated for this project; regenerate per environment with:
+#     openssl rand -base64 32
 # In production the app refuses to start when this is missing or left on a
 # placeholder; in development it invents one and warns, so a fresh clone runs.
-{secret_note}AUTH_SECRET="{secret}"
+AUTH_SECRET="{secret}"
 
 # Session cookie name. Generated per project: several apps under one parent
 # domain that share a cookie name overwrite each other's sessions.
@@ -425,6 +404,7 @@ AUTH_COOKIE_NAME="{cookie}"
 # Optional. Session lifetime in hours; the default is 1.
 SESSION_LIFETIME_HOURS="{lifetime}"
 "#,
+        secret = values.secret,
         cookie = values.cookie,
         lifetime = DEFAULT_LIFETIME_HOURS,
     ));
