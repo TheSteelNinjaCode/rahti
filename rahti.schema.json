@@ -106,7 +106,7 @@
     },
     "mcp": {
       "type": "boolean",
-      "description": "The project opts into Rahti's MCP developer tooling. When true, the scaffold owns .mcp.json, which launches the separately installed `rahti-mcp` server against this project. It does not add an application dependency or expose an HTTP route. Absent means no."
+      "description": "The project opts into MCP. When true, the scaffold owns .mcp.json for local stdio, enables rahti's optional mcp Cargo feature, publishes an editable public/llms.txt, and mounts a bearer-protected Streamable HTTP endpoint at /mcp/. Absent or false means none of those application routes or dependencies are generated."
     },
     "db": {
       "type": ["object", "null"],

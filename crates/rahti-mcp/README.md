@@ -14,3 +14,9 @@ cargo run -p rahti-mcp -- --project .
 The server never reads `.env` and does not reuse the application's browser
 session. It reports whether RPCs and WebSockets require a session, while route
 privacy remains a runtime application policy.
+
+Projects created or upgraded with `--mcp` also enable Rahti's optional `mcp`
+feature. Their generated application router exposes Streamable HTTP at
+`/mcp/`, discovery at `/.well-known/mcp.json`, and public context at
+`/llms.txt`. HTTP access uses `RAHTI_MCP_AUTH_TOKEN`; production hosts must
+also be named by `RAHTI_MCP_ALLOWED_HOSTS`.

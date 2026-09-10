@@ -7,12 +7,25 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Read-only Model Context Protocol server for Rahti projects"
 
+[[bin]]
+name = "rahti-mcp"
+path = "src/main.rs"
+required-features = ["stdio"]
+
+[features]
+default = ["stdio"]
+stdio = ["rmcp/transport-io", "tokio/io-std", "tokio/rt-multi-thread"]
+http = ["dep:axum", "dep:subtle", "rmcp/transport-streamable-http-server", "tokio/rt"]
+
 [dependencies]
-rmcp = { version = "3.1.4", default-features = false, features = ["macros", "server", "transport-io"] }
+axum = { version = "0.8.9", optional = true }
+rmcp = { version = "3.1.4", default-features = false, features = ["macros", "server"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.53.1", features = ["io-std", "macros", "rt-multi-thread"] }
+subtle = { version = "2.6", optional = true }
+tokio = { version = "1.53.1", features = ["macros"] }
 
 [dev-dependencies]
 rmcp = { version = "3.1.4", default-features = false, features = ["client", "macros", "server", "transport-io"] }
 tokio = { version = "1.53.1", features = ["io-util", "macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }

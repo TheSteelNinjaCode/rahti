@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -15,6 +15,8 @@ const MAX_DIAGNOSTICS: usize = 200;
 #[derive(Debug, Clone)]
 pub struct Project {
     root: PathBuf,
+    transport: &'static str,
+    expose_root: bool,
 }
 
 impl Project {
@@ -31,11 +33,30 @@ impl Project {
                 root.display()
             ));
         }
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            transport: "stdio-local",
+            expose_root: true,
+        })
+    }
+
+    #[cfg(feature = "http")]
+    pub(crate) fn open_http(root: impl AsRef<Path>) -> Result<Self, String> {
+        let mut project = Self::open(root)?;
+        project.transport = "streamable-http";
+        project.expose_root = false;
+        Ok(project)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub(crate) fn server_instructions(&self) -> String {
+        format!(
+            "Read-only Rahti project context over {}. This server never reads .env, never mutates the project, and does not act as a browser-authenticated application user.",
+            self.transport
+        )
     }
 
     pub fn config(&self) -> Result<Value, String> {
@@ -52,7 +73,7 @@ impl Project {
         let config = self.config()?;
         let manifest = self.manifest()?;
         Ok(json!({
-            "projectRoot": self.root.display().to_string(),
+            "projectRoot": self.expose_root.then(|| self.root.display().to_string()),
             "createdWith": config.get("createdWith"),
             "appDir": manifest.get("appDir"),
             "webSocketsEnabled": config.get("ws").and_then(Value::as_bool).unwrap_or(false),
@@ -69,7 +90,7 @@ impl Project {
                 "routePolicy": "runtime",
                 "routePrivacyKnown": false,
                 "rpcAndSocketRequirementsKnown": true,
-                "mcpTransport": "stdio-local",
+                "mcpTransport": self.transport,
                 "browserSessionUsed": false,
             }
         }))
@@ -98,6 +119,19 @@ impl Project {
 
     pub fn database_artifacts(&self) -> Result<Value, String> {
         Ok(self.manifest()?.get("db").cloned().unwrap_or(Value::Null))
+    }
+
+    pub fn site_info(&self) -> Result<Value, String> {
+        let content = fs::read_to_string(self.site_info_path()?)
+            .map_err(|error| format!("cannot read public site information: {error}"))?;
+        Ok(json!({
+            "source": "/llms.txt",
+            "content": content,
+        }))
+    }
+
+    pub fn has_site_info(&self) -> bool {
+        self.site_info_path().is_ok_and(|path| path.is_file())
     }
 
     pub fn validate(&self) -> Result<Value, String> {
@@ -203,6 +237,8 @@ impl Project {
         match uri {
             "rahti://project/config" => pretty(self.config()?),
             "rahti://project/manifest" => pretty(self.manifest()?),
+            "rahti://site/llms" => fs::read_to_string(self.site_info_path()?)
+                .map_err(|error| format!("cannot read public site information: {error}")),
             _ => {
                 let (_, _, path) = self
                     .convention_resources()?
@@ -221,6 +257,27 @@ impl Project {
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         serde_json::from_str(&text)
             .map_err(|error| format!("invalid JSON in {}: {error}", path.display()))
+    }
+
+    fn site_info_path(&self) -> Result<PathBuf, String> {
+        let configured = env::var("RAHTI_PUBLIC_DIR")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.config()
+                    .ok()?
+                    .pointer("/app/public")?
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "public".to_string());
+        let directory = PathBuf::from(configured);
+        let directory = if directory.is_absolute() {
+            directory
+        } else {
+            self.root.join(directory)
+        };
+        Ok(directory.join("llms.txt"))
     }
 }
 

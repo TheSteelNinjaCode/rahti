@@ -16,6 +16,7 @@ fn config() -> Config {
         public_dir: "public".to_string(),
         host: "0.0.0.0".to_string(),
         port: 3000,
+        mcp: false,
         // The router is the same with a database and without one — the
         // connection is reached from a page, not routed to.
         db: None,
@@ -31,6 +32,20 @@ fn config() -> Config {
             engine: Engine::Tailwind,
         },
     }
+}
+
+#[test]
+fn mcp_is_merged_only_when_configured() {
+    let mut enabled = config();
+    enabled.mcp = true;
+    let with_mcp = gen_routes(&app(), &[], &enabled);
+    assert!(
+        with_mcp.contains(".merge(::rahti::mcp::http_routes())"),
+        "{with_mcp}"
+    );
+
+    let without_mcp = gen_routes(&app(), &[], &config());
+    assert!(!without_mcp.contains("rahti::mcp"), "{without_mcp}");
 }
 
 /// Build the entries a scan of these files would produce.

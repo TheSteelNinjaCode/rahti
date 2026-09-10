@@ -35,6 +35,8 @@ pub struct Config {
     pub public_dir: String,
     pub host: String,
     pub port: u16,
+    /// The optional authenticated HTTP MCP endpoint.
+    pub mcp: bool,
     pub css: Css,
     /// The database wiring, when the project has one.
     ///
@@ -182,6 +184,22 @@ pub fn run() {
 
     let scan = scanner::scan(Path::new(&config.app_dir));
     let components = components::scan(Path::new(components::COMPONENTS_DIR));
+
+    if config.mcp {
+        for reserved in ["/mcp", "/.well-known/mcp.json"] {
+            if let Some(entry) = scan
+                .entries
+                .iter()
+                .find(|entry| entry.urls.iter().any(|url| url == reserved))
+            {
+                panic!(
+                    "rahti: {} generates the reserved MCP route `{reserved}`.\n  \
+                     Move that route or set `\"mcp\": false` in {CONFIG_PATH}.",
+                    entry.file
+                );
+            }
+        }
+    }
 
     // Only when the project configured one. An app with no `db` object never
     // has these directories created, never has a module generated, and never
@@ -354,6 +372,10 @@ fn parse_config(raw: &str) -> Config {
         host: string_at("server", "host", "0.0.0.0"),
         port: u16::try_from(port)
             .unwrap_or_else(|_| panic!("rahti: server.port must be 0-65535, got {port}")),
+        mcp: value
+            .get("mcp")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
         css,
     }
 }

@@ -58,9 +58,9 @@ cd my-app && cargo run
 ```
 
 Open <http://localhost:3000> and edit `src/app/page.rs`. Add `--db
-[sqlite|postgres|mysql]` for a SeaORM-backed database, `--ws` for
-WebSockets, or `--mcp` for the read-only local MCP configuration; leave a flag
-out and the project carries nothing of the feature.
+[sqlite|postgres|mysql]` for a SeaORM-backed database, `--ws` for WebSockets,
+or `--mcp` for read-only local stdio plus secured Streamable HTTP MCP; leave a
+flag out and the project carries nothing of the feature.
 
 ## What ships in the box
 
@@ -109,7 +109,7 @@ Lines in `.rahti/dev.log`, a file an agent can read.
 | `rahti-macros` | `html!`, `#[component]`, `#[rpc]`, `#[socket]` — re-exported by `rahti`. |
 | `rahti-build` | The build step: scans conventions, generates the router and modules, compiles CSS. |
 | `cargo-rahti` | `cargo rahti new` and `cargo rahti upgrade`. |
-| `rahti-mcp` | Optional read-only stdio project inspection for MCP clients. |
+| `rahti-mcp` | Optional read-only project inspection over local stdio or secured Streamable HTTP. |
 
 This repository is the framework workspace: the crates above, and the
 documents under [`docs/conventions/`](docs/conventions/) — the canonical

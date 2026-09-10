@@ -1,4 +1,9 @@
+#[cfg(feature = "http")]
+mod http;
 mod project;
+
+#[cfg(feature = "http")]
+pub use http::routes as http_routes;
 
 use rmcp::{
     RoleServer, ServerHandler,
@@ -82,6 +87,11 @@ impl RahtiMcp {
         Self::tool_result(self.project.database_artifacts())
     }
 
+    #[tool(description = "Read the public agent-facing service description from /llms.txt")]
+    fn site_info(&self) -> Result<Json<Value>, ErrorData> {
+        Self::tool_result(self.project.site_info())
+    }
+
     #[tool(description = "Validate generated manifest references without changing the project")]
     fn validate_project(&self) -> Result<Json<Value>, ErrorData> {
         Self::tool_result(self.project.validate())
@@ -105,9 +115,7 @@ impl ServerHandler for RahtiMcp {
                 .enable_resources()
                 .build(),
         )
-        .with_instructions(
-            "Read-only Rahti project context. This stdio server never reads .env, never mutates the project, and does not act as a browser-authenticated application user.",
-        )
+        .with_instructions(self.project.server_instructions())
     }
 
     fn list_resources(
@@ -126,6 +134,12 @@ impl ServerHandler for RahtiMcp {
                 )
                 .with_mime_type("application/json"),
             ];
+            if self.project.has_site_info() {
+                resources.push(
+                    Resource::new("rahti://site/llms", "Public agent-facing site information")
+                        .with_mime_type("text/plain"),
+                );
+            }
             resources.extend(
                 conventions
                     .map_err(|message| ErrorData::internal_error(message, None))?

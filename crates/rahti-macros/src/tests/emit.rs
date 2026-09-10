@@ -417,7 +417,9 @@ fn binding_children_are_wrapped_for_their_owner() {
     let out = markup("<main><Badge>{count}</Badge></main>", "src/app/page.rs");
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
     assert!(
-        out.contains(&format!("<template pp-owner=\"{expected}\">{{count}}</template>")),
+        out.contains(&format!(
+            "<template pp-owner=\"{expected}\">{{count}}</template>"
+        )),
         "{out}"
     );
 }
@@ -426,10 +428,7 @@ fn binding_children_are_wrapped_for_their_owner() {
 /// of its own — the owner wrap replaces the `pp-component` stamp.
 #[test]
 fn a_single_rooted_binding_child_is_owned_not_stamped() {
-    let out = markup(
-        "<main><Card><p>{seen}</p></Card></main>",
-        "src/app/page.rs",
-    );
+    let out = markup("<main><Card><p>{seen}</p></Card></main>", "src/app/page.rs");
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
     assert!(
         out.contains(&format!(
@@ -472,10 +471,7 @@ fn scripted_children_stay_their_own_block() {
 /// template hides them, and the old stamping stands.
 #[test]
 fn static_children_take_no_owner_wrap() {
-    let out = markup(
-        "<main><Card><p>hi</p></Card></main>",
-        "src/app/page.rs",
-    );
+    let out = markup("<main><Card><p>hi</p></Card></main>", "src/app/page.rs");
     assert!(!out.contains("pp-owner"), "{out}");
 }
 

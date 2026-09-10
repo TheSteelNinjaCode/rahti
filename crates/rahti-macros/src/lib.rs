@@ -374,9 +374,10 @@ fn stamp_component_children(ops: &mut [Op], file_id: Option<&str>, owner_id: Opt
         let is_fragment = matches!(child.component_slot, Some((_, _, SlotKind::Fragment)));
         if child.has_bindings && !child.has_script && !is_fragment {
             if let Some(owner) = owner_id {
-                child
-                    .ops
-                    .insert(0, Op::Static(format!("<template {OWNER_ATTR}=\"{owner}\">")));
+                child.ops.insert(
+                    0,
+                    Op::Static(format!("<template {OWNER_ATTR}=\"{owner}\">")),
+                );
                 child.ops.push(Op::Static("</template>".into()));
                 continue;
             }

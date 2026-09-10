@@ -20,6 +20,11 @@ default = ["dev-watch"]
 # should not compile it. `cargo rahti new --ws` is what turns it on.
 ws = ["axum/ws", "tokio/time"]
 
+# Model Context Protocol: the authenticated Streamable HTTP endpoint merged by
+# generated routers when `rahti.config.json` opts in. The separate stdio tool
+# remains available without making every Rahti application compile MCP.
+mcp = ["dep:rahti-mcp"]
+
 # The `public/` filesystem watcher behind live reload — the half of dev mode
 # that pushes a CSS swap without a rebuild. On by default, because every web
 # project wants it and nobody should have to ask.
@@ -61,6 +66,7 @@ notify = { version = "8", optional = true }
 serde = "1"
 serde_json = "1"
 rahti-macros.workspace = true
+rahti-mcp = { workspace = true, optional = true, default-features = false, features = ["http"] }
 # `fs` and `io-util` are the upload spool: a part past the threshold is
 # written to disk as it arrives rather than held, and a handler that blocks on
 # that write blocks the runtime thread it is on. See src/upload.rs.

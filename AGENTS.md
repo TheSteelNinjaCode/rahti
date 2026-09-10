@@ -190,6 +190,13 @@ preserve them, and documentation or scaffold changes must teach them.
     documented gate, so without it the formatter and the build undid each
     other on every run. If rustfmt is absent the text is written as codegen
     produced it, which still compiles.
+30. MCP remains optional. A project with `"mcp": true` and the matching
+    `rahti` cargo feature exposes discovery at `/.well-known/mcp.json`, public
+    service context at `/llms.txt`, and bearer-protected Streamable HTTP at
+    `/mcp/`; a project without the option has none of those generated MCP
+    routes or application dependencies. Local stdio through `.mcp.json`
+    remains available for opted-in development. Release HTTP access must fail
+    closed when `RAHTI_MCP_AUTH_TOKEN` is absent.
 
 ## Repository Map
 
@@ -203,8 +210,9 @@ preserve them, and documentation or scaffold changes must teach them.
   bundle). `cargo rahti native` is forwarded from here to a separately
   installed `cargo-rahti-native`; the forwarding is a `Command` spawn and adds
   no dependency.
-- `crates/rahti-mcp/` - read-only stdio MCP server for generated project
-  metadata, conventions, database artifacts, and development diagnostics.
+- `crates/rahti-mcp/` - read-only MCP server for generated project metadata,
+  public site information, conventions, database artifacts, and development
+  diagnostics; stdio is the default transport and Streamable HTTP is optional.
 - `docs/conventions/` - the canonical convention documentation.
 - `rahti.schema.json` - the JSON schema for `rahti.config.json`.
 

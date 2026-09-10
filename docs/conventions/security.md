@@ -102,6 +102,24 @@ private uploads, environment files, or server-only configuration there.
 The public-directory override must point to the intended asset root. Treat
 `RAHTI_PUBLIC_DIR` as trusted deployment configuration.
 
+## Model Context Protocol
+
+MCP is absent unless the project enables it. The public `/llms.txt` contains
+only information safe for any visitor; never put credentials, private source,
+customer data, or internal diagnostics there.
+
+The `/mcp/` Streamable HTTP endpoint is a deeper read-only inspection surface.
+Protect it with a unique `RAHTI_MCP_AUTH_TOKEN`; it does not accept the browser
+session as authorization. Release builds fail closed when the token is absent,
+and invalid credentials receive a Bearer challenge. Set
+`RAHTI_MCP_ALLOWED_HOSTS` to the deployment's public hostnames so the MCP
+transport's DNS-rebinding guard accepts the intended origin and nothing else.
+Use `RAHTI_MCP_ALLOWED_ORIGINS` when browser-based MCP clients are allowed.
+
+The discovery document deliberately publishes a relative endpoint and no
+credential. `/mcp` redirects relatively to `/mcp/` with `307`, preserving the
+client's HTTPS origin and request method across reverse proxies.
+
 ## Development Mode
 
 Development mode injects a reload client and exposes internal dev endpoints.

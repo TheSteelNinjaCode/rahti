@@ -203,6 +203,28 @@ fn an_mcp_project_gets_a_recorded_client_configuration() {
     assert!(client.contains("\"command\": \"rahti-mcp\""), "{client}");
     assert!(client.contains("\"--project\", \".\""), "{client}");
     assert!(tree.read("rahti.config.json").contains("\"mcp\": true"));
+    assert!(
+        tree.read("Cargo.toml").contains("features = [\"mcp\"]"),
+        "the application dependency must compile the HTTP endpoint"
+    );
+    assert!(ledger.contains_key("public/llms.txt"));
+    assert!(
+        tree.read("public/llms.txt")
+            .contains("/.well-known/mcp.json")
+    );
+    let env = tree.read(".env");
+    assert!(env.contains("RAHTI_MCP_AUTH_TOKEN="), "{env}");
+    assert!(env.contains("RAHTI_MCP_ALLOWED_HOSTS="), "{env}");
+}
+
+#[test]
+fn mcp_and_websockets_share_the_rahti_feature_list() {
+    let manifest = t::cargo_toml("demo", "\"0.0.7\"", None, true, true);
+    assert!(
+        manifest.contains("features = [\"mcp\", \"ws\"]")
+            || manifest.contains("features = [\"ws\", \"mcp\"]"),
+        "{manifest}"
+    );
 }
 
 // ------------------------------------------------------------------ engines
@@ -812,13 +834,19 @@ fn ws_is_off_unless_asked_for() {
 /// dependency takes — a published version, or a `--local` path.
 #[test]
 fn ws_puts_the_feature_on_the_rahti_dependency() {
-    let with = t::cargo_toml("demo", "\"0.0.7\"", None, true);
+    let with = t::cargo_toml("demo", "\"0.0.7\"", None, true, false);
     assert!(
         with.contains("rahti = { version = \"0.0.7\", features = [\"ws\"] }"),
         "{with}"
     );
 
-    let local = t::cargo_toml("demo", "{ path = \"/checkout/crates/rahti\" }", None, true);
+    let local = t::cargo_toml(
+        "demo",
+        "{ path = \"/checkout/crates/rahti\" }",
+        None,
+        true,
+        false,
+    );
     assert!(
         local.contains("rahti = { path = \"/checkout/crates/rahti\", features = [\"ws\"] }"),
         "{local}"
@@ -829,7 +857,7 @@ fn ws_puts_the_feature_on_the_rahti_dependency() {
         "{local}"
     );
 
-    let without = t::cargo_toml("demo", "\"0.0.7\"", None, false);
+    let without = t::cargo_toml("demo", "\"0.0.7\"", None, false, false);
     assert!(without.contains("rahti = \"0.0.7\""), "{without}");
     assert!(!without.contains("ws"), "{without}");
 }

@@ -28,6 +28,8 @@ mod statics;
 mod upload;
 #[cfg(feature = "ws")]
 pub mod ws;
+#[cfg(feature = "mcp")]
+pub use rahti_mcp as mcp;
 
 /// The auth layer, under the name generated code calls it by — beside `csrf`
 /// and `revalidate`, which is where it sits in the router.

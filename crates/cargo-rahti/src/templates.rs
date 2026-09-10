@@ -111,16 +111,18 @@ pub const MCP_CONFIG: &str = r#"{
 pub const TAILWIND_MERGE: &[u8] = include_bytes!("../assets/js/tailwind-merge.mjs");
 pub const FAVICON: &[u8] = include_bytes!("../assets/favicon.ico");
 
-pub fn cargo_toml(name: &str, rahti: &str, db: Option<Backend>, ws: bool) -> String {
+pub fn cargo_toml(name: &str, rahti: &str, db: Option<Backend>, ws: bool, mcp: bool) -> String {
     // WebSockets are a feature of the `rahti` dependency, not a crate of
     // their own: the wire brings tokio-tungstenite with it, so a project
     // that never opens a socket should not compile it. The build dependency
     // below stays as it is — `rahti-build` has no such feature.
-    let rahti_dep = if ws {
-        with_ws_feature(rahti)
-    } else {
-        rahti.to_string()
-    };
+    let mut rahti_dep = rahti.to_string();
+    if ws {
+        rahti_dep = with_feature(&rahti_dep, "ws");
+    }
+    if mcp {
+        rahti_dep = with_feature(&rahti_dep, "mcp");
+    }
 
     // SeaORM is the application's dependency, not the framework's — `rahti`
     // does not depend on it and never sees it. The scaffold adds it here
@@ -250,6 +252,14 @@ pub fn sea_orm_dependencies(backend: Backend) -> [(&'static str, String); 2] {
 /// somebody has been editing: `upgrade` adds the feature to a project that
 /// gained WebSockets after it was created.
 pub(crate) fn with_ws_feature(rahti: &str) -> String {
+    with_feature(rahti, "ws")
+}
+
+pub(crate) fn with_mcp_feature(rahti: &str) -> String {
+    with_feature(rahti, "mcp")
+}
+
+fn with_feature(rahti: &str, feature: &str) -> String {
     let rahti = rahti.trim();
 
     // An existing list is joined rather than replaced. Found by the bracket
@@ -261,12 +271,12 @@ pub(crate) fn with_ws_feature(rahti: &str) -> String {
         } else {
             ", "
         };
-        return format!("{}\"ws\"{separator}{}", &rahti[..open], rest);
+        return format!("{}\"{feature}\"{separator}{}", &rahti[..open], rest);
     }
 
     match rahti.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
-        Some(inner) => format!("{{{}, features = [\"ws\"] }}", inner.trim_end()),
-        None => format!("{{ version = {rahti}, features = [\"ws\"] }}"),
+        Some(inner) => format!("{{{}, features = [\"{feature}\"] }}", inner.trim_end()),
+        None => format!("{{ version = {rahti}, features = [\"{feature}\"] }}"),
     }
 }
 
@@ -332,6 +342,8 @@ pub struct EnvValues {
     /// The cookie's name. Not a credential — it is the project's identity
     /// under a shared parent domain.
     pub cookie: String,
+    /// Bearer credential for the optional public MCP endpoint.
+    pub mcp_token: String,
 }
 
 /// The example connection string for a backend — what the scaffold's `.env`
@@ -374,7 +386,7 @@ DATABASE_URL="{url}"
 /// secret. What every variable means, and what a clone has to fill in, is
 /// the environment reference at <https://rahti.tsnc.tech/docs/environment>
 /// — one account of it, kept beside the runtime that reads them.
-pub fn env(backend: Option<Backend>, values: &EnvValues) -> String {
+pub fn env(backend: Option<Backend>, mcp: bool, values: &EnvValues) -> String {
     let mut out = String::new();
 
     if let Some(backend) = backend {
@@ -411,6 +423,24 @@ SESSION_LIFETIME_HOURS="{lifetime}"
         lifetime = DEFAULT_LIFETIME_HOURS,
     ));
 
+    if mcp {
+        out.push_str(&format!(
+            r#"
+
+# =============================================================================
+# MODEL CONTEXT PROTOCOL
+# Protects the optional Streamable HTTP endpoint at /mcp/. Generate a distinct
+# value for every environment and send it only to MCP clients you authorize.
+# Production also sets RAHTI_MCP_ALLOWED_HOSTS to its public hostnames.
+# =============================================================================
+
+RAHTI_MCP_AUTH_TOKEN="{token}"
+RAHTI_MCP_ALLOWED_HOSTS="localhost,127.0.0.1"
+"#,
+            token = values.mcp_token,
+        ));
+    }
+
     out
 }
 
@@ -428,8 +458,15 @@ impl EnvValues {
             // A name, not a key: short, and hex so it is a legal cookie name
             // without quoting.
             cookie: hex(&random(8)),
+            mcp_token: base64(&random(32)),
         }
     }
+}
+
+pub fn llms_txt(name: &str) -> String {
+    format!(
+        "# {name}\n\n> A Rahti application. Replace this paragraph with the public service summary an agent should know.\n\n- Home: /\n- MCP discovery: /.well-known/mcp.json\n- MCP endpoint: /mcp/\n\n## Services\n\nDescribe the services, ideal customers, deliverables, constraints, pricing approach, and contact path here. Keep secrets and private implementation details out of this public file.\n"
+    )
 }
 
 fn random(bytes: usize) -> Vec<u8> {

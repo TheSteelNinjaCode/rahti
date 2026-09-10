@@ -30,6 +30,10 @@ cargo publish -p rahti-build
 ```
 
 ```bash
+cargo publish -p rahti-mcp
+```
+
+```bash
 cargo publish -p rahti
 ```
 
@@ -37,26 +41,19 @@ cargo publish -p rahti
 cargo publish -p cargo-rahti
 ```
 
-`rahti-mcp` has no dependency on another Rahti crate, but shares the release
-version and is published with the same release:
-
-```bash
-cargo publish -p rahti-mcp
-```
-
 Wait for each to appear on the index before the next — crates.io takes a
 moment, and the following publish resolves against it.
 
-## Why `cargo package -p rahti` fails today
+## Why `cargo package -p rahti` can fail before its turn
 
 ```
-no matching package named `rahti-macros` found
+no matching package named `rahti-mcp` found
 ```
 
 That is not a defect. `cargo package` verifies by building the packaged crate
-against crates.io, and `rahti-macros` is not there yet. It resolves the moment
-the first publish lands. `rahti-macros` and `rahti-build` both package and
-verify cleanly today, which is as far as this can be checked before release.
+against crates.io, and its internal dependencies are not there yet. It
+resolves once `rahti-macros` and `rahti-mcp` for the release have landed.
+Publish strictly in the dependency order above.
 
 ## The version lockstep
 
@@ -64,8 +61,9 @@ verify cleanly today, which is as far as this can be checked before release.
 each intra-framework dependency to that same number. This is deliberate:
 `html!` expands to paths in `rahti`, and `rahti-build` writes code calling
 functions in it, so a project that mixed versions would fail to compile with
-an error naming neither crate. `rahti-mcp` is standalone but follows the same
-workspace release number. Release them together, always.
+an error naming neither crate. The optional HTTP feature makes `rahti-mcp` a
+dependency of `rahti`, so it must publish first. Release them together,
+always.
 
 ## After publishing
 

@@ -247,6 +247,8 @@ struct Wiring {
     dependencies: Vec<String>,
     /// The `ws` feature folded into the `rahti` dependency.
     ws_feature: bool,
+    /// The `mcp` feature folded into the `rahti` dependency.
+    mcp_feature: bool,
     /// The files `DATABASE_URL` was added to.
     env: Vec<String>,
     /// The amended manifest, when there was one to amend. Handed back so the
@@ -270,6 +272,7 @@ impl Wiring {
     fn is_empty(&self) -> bool {
         self.dependencies.is_empty()
             && !self.ws_feature
+            && !self.mcp_feature
             && self.env.is_empty()
             && self.bumps.is_empty()
     }
@@ -347,6 +350,20 @@ fn wire(root: &Path, config: &Config, dry_run: bool) -> Result<Wiring, String> {
         }
     }
 
+    if config.mcp {
+        match wiring::with_mcp_feature(&manifest) {
+            Ok(Some(amended)) => {
+                manifest = amended;
+                wiring.mcp_feature = true;
+            }
+            Ok(None) => {}
+            Err(reason) => wiring.manual.push(Manual {
+                reason,
+                line: "rahti = { version = \"…\", features = [\"mcp\"] }".to_string(),
+            }),
+        }
+    }
+
     if manifest != original {
         if !dry_run {
             fs::write(&path, &manifest).map_err(|e| format!("cannot write Cargo.toml: {e}"))?;
@@ -394,7 +411,7 @@ struct Options {
     db: Option<Backend>,
     /// `--ws`: add WebSockets, if the project does not have them.
     ws: bool,
-    /// `--mcp`: add the project-level MCP client configuration.
+    /// `--mcp`: enable local stdio and optional public HTTP MCP.
     mcp: bool,
     /// `--force`, and the paths that followed it. `None` is the ordinary
     /// upgrade, which never takes an edited file. `Some([])` is the bulk
@@ -709,6 +726,12 @@ fn report(
             verb("wired  ", "would wire")
         );
     }
+    if wiring.mcp_feature {
+        println!(
+            "  {} Cargo.toml — the `mcp` feature on rahti",
+            verb("wired  ", "would wire")
+        );
+    }
     for name in &wiring.env {
         println!("  {} {name} — DATABASE_URL", verb("wired  ", "would wire"));
     }
@@ -813,7 +836,10 @@ fn report(
     }
 
     if added_mcp {
-        println!("  MCP is configured in .mcp.json. Install its server once:\n");
+        println!("  MCP is optional and now enabled. The app serves discovery at");
+        println!("  /.well-known/mcp.json and Streamable HTTP at /mcp/. Set a strong");
+        println!("  RAHTI_MCP_AUTH_TOKEN in the deployment environment before release.");
+        println!("  Local stdio is configured in .mcp.json; install that server once:\n");
         println!("    cargo install rahti-mcp\n");
     }
 
@@ -854,7 +880,7 @@ struct Config {
     db: Option<Backend>,
     /// `"ws": true` in the config: this project uses WebSockets.
     ws: bool,
-    /// `"mcp": true` in the config: this project ships MCP client config.
+    /// `"mcp": true` in the config: this project opts into MCP support.
     mcp: bool,
     /// A `path` dependency on a Rahti checkout, recovered from `Cargo.toml`
     /// so a project made with `--local` stays that way.

@@ -39,8 +39,10 @@
 - `db` is absent unless the project has a database, and carries no connection
   string: that is a credential and this file is committed. See
   `database.md`.
-- `mcp` is absent unless the project opted into the local MCP tooling. It adds
-  no application dependency or HTTP route.
+- `mcp` is absent unless the project opted into MCP. When true, `rahti` carries
+  its optional `mcp` Cargo feature, the generated router mounts `/mcp/` and
+  `/.well-known/mcp.json`, and the scaffold writes `.mcp.json` plus an editable
+  `public/llms.txt`. False or absent compiles and mounts none of it.
 - The active Rahti version comes from `Cargo.toml`.
 
 All operational keys default, but keep the file valid JSON and update the
@@ -213,8 +215,9 @@ development diagnostic log; none are application input or shipped assets.
 ## Model Context Protocol
 
 `rahti-mcp` is the read-only MCP server for a Rahti project. Choose it when
-`cargo rahti new` asks, or pass `--mcp`; the scaffold records `"mcp": true`
-and writes this ledger-owned `.mcp.json`:
+`cargo rahti new` asks, or pass `--mcp`; the scaffold records `"mcp": true`,
+enables the optional application feature, writes `public/llms.txt`, and writes
+this ledger-owned `.mcp.json` for local clients:
 
 ```json
 {
@@ -227,8 +230,8 @@ and writes this ledger-owned `.mcp.json`:
 }
 ```
 
-The application does not depend on or compile the server. Install the tool
-once per machine, then let an MCP client start it from the project root:
+Install the stdio tool once per machine, then let a local MCP client start it
+from the project root:
 
 ```text
 cargo install rahti-mcp
@@ -247,6 +250,20 @@ It is authentication-aware only in the useful sense: it reports the generated
 `#[rpc(auth)]` and `#[socket(auth)]` requirements. Private route policy remains
 unknown to build tooling because the application installs that ordinary Rust
 policy at runtime.
+
+The opted-in application also mounts Streamable HTTP at `/mcp/`. `/mcp`
+answers every supported method with a relative `307` redirect so an edge proxy
+cannot downgrade HTTPS and a POST body is retained. `/.well-known/mcp.json`
+advertises the relative endpoint and `/llms.txt` is public agent-facing context
+the application owner edits with its services, constraints, and contact path.
+
+Set `RAHTI_MCP_AUTH_TOKEN` to a distinct random bearer credential. A debug
+build is open when it is absent for first-run development; a release build
+fails the endpoint closed with `503`. Invalid or missing credentials receive
+`401` and `WWW-Authenticate: Bearer realm="Rahti MCP"`. Public deployments
+also set `RAHTI_MCP_ALLOWED_HOSTS` to a comma-separated hostname allowlist;
+browser callers may set `RAHTI_MCP_ALLOWED_ORIGINS` to full origins. Neither
+credential belongs in `rahti.config.json` or `public/llms.txt`.
 
 ## Scaffold CLI
 
@@ -268,9 +285,10 @@ with nowhere to ask takes the flags at their word.
 - `--ws` puts `features = ["ws"]` on the `rahti` dependency — which is what
   compiles `rahti::ws` and the `#[socket]` attribute — and records
   `"ws": true` in `rahti.config.json`. See `websockets.md`.
-- `--mcp` writes `.mcp.json`, records `"mcp": true`, and otherwise leaves the
-  application unchanged. The separate `rahti-mcp` executable is installed
-  once per machine rather than added to every application's dependencies.
+- `--mcp` writes `.mcp.json` and `public/llms.txt`, records `"mcp": true`, and
+  enables rahti's optional `mcp` feature. That feature mounts the secured HTTP
+  endpoint; a project that leaves it out compiles no MCP application code.
+  The separate stdio executable is still installed once per machine.
 - `new` writes one `.env`, carrying this project's generated `AUTH_SECRET` and
   `AUTH_COOKIE_NAME` and, with `--db`, a `DATABASE_URL`. It is gitignored and
   untracked by the ledger, so no upgrade rewrites it, and nothing is committed

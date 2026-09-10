@@ -121,6 +121,14 @@ fn append_to_table(manifest: &str, header: &str, line: &str) -> String {
 /// value rather than append a line, and a dependency spelled across several
 /// lines as a `[dependencies.rahti]` table is a shape it will not guess at.
 pub fn with_ws_feature(manifest: &str) -> Result<Option<String>, String> {
+    with_rahti_feature(manifest, "ws")
+}
+
+pub fn with_mcp_feature(manifest: &str) -> Result<Option<String>, String> {
+    with_rahti_feature(manifest, "mcp")
+}
+
+fn with_rahti_feature(manifest: &str, feature: &str) -> Result<Option<String>, String> {
     if manifest.lines().any(|l| l.trim() == "[dependencies.rahti]") {
         return Err("`rahti` is declared as a [dependencies.rahti] table".to_string());
     }
@@ -143,11 +151,18 @@ pub fn with_ws_feature(manifest: &str) -> Result<Option<String>, String> {
     if value.starts_with('{') && !value.ends_with('}') {
         return Err("the `rahti` dependency spans more than one line".to_string());
     }
-    if declares_ws(value) {
+    if declares_feature(value, feature) {
         return Ok(None);
     }
 
-    let wired = format!("{key}= {}", t::with_ws_feature(value));
+    let wired = format!(
+        "{key}= {}",
+        if feature == "ws" {
+            t::with_ws_feature(value)
+        } else {
+            t::with_mcp_feature(value)
+        }
+    );
     lines[at] = wired;
 
     let mut out = lines.join("\n");
@@ -160,8 +175,8 @@ pub fn with_ws_feature(manifest: &str) -> Result<Option<String>, String> {
 /// Whether a dependency value already lists the `ws` feature. Quoted, so a
 /// path with `ws` in it — or the `tokio/time` a feature enables — is not read
 /// as the feature itself.
-fn declares_ws(value: &str) -> bool {
-    value.contains("\"ws\"")
+fn declares_feature(value: &str, feature: &str) -> bool {
+    value.contains(&format!("\"{feature}\""))
 }
 
 /// The manifest with `name`'s version pin moved to `current`, and the version

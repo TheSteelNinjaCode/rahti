@@ -652,6 +652,11 @@ pub fn routes_rs(
         out.push_str("        .merge(::rahti::ws::routes())\n");
     }
 
+    if config.mcp {
+        out.push_str("        // Optional authenticated Streamable HTTP MCP endpoint.\n");
+        out.push_str("        .merge(::rahti::mcp::http_routes())\n");
+    }
+
     // Empty outside dev mode, so this costs a release build nothing.
     out.push_str("        .merge(::rahti::dev_routes(::rahti::public_dir(PUBLIC_DIR)))\n");
 

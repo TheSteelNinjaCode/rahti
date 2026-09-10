@@ -9,12 +9,13 @@ fn a_full_configuration_is_read() {
         // Every value here differs from its default — the loopback host
         // included — so a reader that quietly ignored the file would fail
         // this rather than pass it by coincidence.
-        r#"{"app":{"dir":"src/pages","public":"assets"},"server":{"host":"127.0.0.1","port":8080}}"#,
+        r#"{"app":{"dir":"src/pages","public":"assets"},"server":{"host":"127.0.0.1","port":8080},"mcp":true}"#,
     );
     assert_eq!(config.app_dir, "src/pages");
     assert_eq!(config.public_dir, "assets");
     assert_eq!(config.host, "127.0.0.1");
     assert_eq!(config.port, 8080);
+    assert!(config.mcp);
 }
 
 /// Every key is optional: an app that has not configured anything gets the
@@ -26,6 +27,7 @@ fn everything_has_a_default() {
     assert_eq!(config.public_dir, "public");
     assert_eq!(config.host, "0.0.0.0");
     assert_eq!(config.port, 3000);
+    assert!(!config.mcp);
 }
 
 /// An empty file is a project that has configured nothing, which is a

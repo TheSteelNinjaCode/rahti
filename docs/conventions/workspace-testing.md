@@ -137,11 +137,13 @@ Install the new bundle at
 
 ## Workspace Gate
 
-For MCP changes, run `cargo test -p rahti-mcp` first. Its tests use an
-isolated temporary Rahti project and cover the stdio server's advertised
-capabilities, bounded diagnostics, and generated RPC authentication metadata.
-Scaffold integration belongs to `cargo-rahti` tests as well: they verify that
-`--mcp` writes and ledgers `.mcp.json`, records the feature, and leaves it
+For MCP changes, run `cargo test -p rahti-mcp --all-features` first. Its tests
+use an isolated temporary Rahti project and cover the stdio server's advertised
+capabilities, bounded diagnostics, generated RPC authentication metadata, HTTP
+discovery, bearer protection, and the Streamable HTTP transport. Scaffold
+integration belongs to `cargo-rahti` tests as well: they verify that `--mcp`
+writes and ledgers `.mcp.json` and `public/llms.txt`, records and wires the
+feature, provisions HTTP protection in `.env`, and leaves all MCP pieces
 entirely absent when not selected.
 
 Before completing a framework-wide change:

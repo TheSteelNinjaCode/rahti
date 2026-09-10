@@ -65,6 +65,8 @@ The server runtime exports:
 - behind the optional `ws` cargo feature: `rahti::ws` — the socket endpoint,
   the `Socket`/`SocketSender` conversation types, link-time socket
   registration, and the same-origin handshake check (see `websockets.md`);
+- behind the optional `mcp` cargo feature: the bearer-protected Streamable
+  HTTP endpoint, its relative canonical redirect, and public discovery;
 - public-directory resolution;
 - `listen`: the server's listener — `PORT` and `HOST` override the configured
   address so a deployment needs no code change, and a busy port falls forward
@@ -169,16 +171,15 @@ On every relevant Cargo build it:
 
 ### `rahti-mcp`
 
-The standalone read-only MCP server uses the official Rust MCP SDK and stdio
-transport. It reads `rahti.config.json`, generated `.rahti/manifest.json`,
-convention documents, and a bounded tail of `.rahti/dev.log`; it does not link
-into the application server, read `.env`, mutate the project, or inherit a
-browser session. Generated RPC and socket auth metadata is visible to tools,
-while private route policy remains runtime-owned application code.
-It is a first-class optional scaffold feature: choosing MCP writes a
-ledger-owned `.mcp.json` and records `"mcp": true`, while the executable stays
-a separately installed developer tool and never becomes an application
-dependency.
+The read-only MCP server uses the official Rust MCP SDK. Local clients launch
+its stdio executable through `.mcp.json`; an opted-in application compiles the
+same tools behind bearer-protected Streamable HTTP at `/mcp/`. It reads
+`rahti.config.json`, generated `.rahti/manifest.json`, convention documents,
+the public `llms.txt`, and a bounded tail of `.rahti/dev.log`; it never mutates
+the project or inherits a browser session. Generated RPC and socket auth
+metadata is visible to tools, while private route policy remains runtime-owned
+application code. Projects without the feature compile neither the HTTP
+transport nor its routes.
 
 ### `rahti-native`
 
@@ -265,9 +266,10 @@ The current implementation covers:
   and no role system;
 - generated manifest metadata for routes, layouts, errors, loading regions,
   components, RPCs, sockets, and the database;
-- optional read-only MCP project inspection over stdio, selected with
-  `cargo rahti new --mcp`, configured by `.mcp.json`, and absent from an
-  application that did not ask;
+- optional read-only MCP project inspection over local stdio and secured
+  Streamable HTTP, selected with `cargo rahti new --mcp`, with public
+  `llms.txt` and well-known discovery, and absent from an application that did
+  not ask;
 - scaffold creation — including each project's own `AGENTS.md`, `CLAUDE.md`,
   convention documentation, and a passing test suite in `src/tests/` — and
   non-destructive upgrades;

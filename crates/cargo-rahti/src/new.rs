@@ -119,7 +119,7 @@ pub fn project_files(
     let mut files: Vec<(String, Vec<u8>)> = vec![
         (
             "Cargo.toml".into(),
-            t::cargo_toml(name, &rahti, db, ws).into_bytes(),
+            t::cargo_toml(name, &rahti, db, ws, mcp).into_bytes(),
         ),
         ("build.rs".into(), t::BUILD_RS.into()),
         (".cargo/config.toml".into(), t::CARGO_CONFIG.into()),
@@ -179,6 +179,7 @@ pub fn project_files(
 
     if mcp {
         files.push((".mcp.json".into(), t::MCP_CONFIG.into()));
+        files.push(("public/llms.txt".into(), t::llms_txt(name).into_bytes()));
     }
 
     if tailwind {
@@ -255,7 +256,7 @@ fn write_project(
     // a database setting, and a project whose `.env` only appeared when you
     // chose SQLite would be a trap.
     let values = t::EnvValues::generate();
-    untracked.push((".env".to_string(), t::env(db, &values).into_bytes()));
+    untracked.push((".env".to_string(), t::env(db, mcp, &values).into_bytes()));
 
     for (path, contents) in untracked {
         let mut throwaway = Ledger::new();
@@ -391,7 +392,7 @@ struct Options {
     /// `--ws` was given: the project gets rahti's `ws` feature and the
     /// `#[socket]` attribute with it.
     ws: bool,
-    /// `--mcp` was given: write the client configuration for `rahti-mcp`.
+    /// `--mcp` was given: enable local stdio and optional public HTTP MCP.
     mcp: bool,
     /// A Rahti checkout to depend on by path, for framework development.
     local: Option<String>,
@@ -531,7 +532,10 @@ fn report(name: &str, tailwind: bool, db: Option<Backend>, ws: bool, mcp: bool) 
         println!("  table. See docs/conventions/database.md.\n");
     }
     if mcp {
-        println!("  MCP is configured in .mcp.json. Install its server once:");
+        println!("  MCP is optional and enabled for this project. The app serves");
+        println!("  discovery at /.well-known/mcp.json and Streamable HTTP at /mcp/;");
+        println!("  its generated bearer token is in .env. Local stdio is configured");
+        println!("  in .mcp.json; install that server once:");
         println!("    cargo install rahti-mcp\n");
     }
 }
