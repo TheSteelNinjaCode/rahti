@@ -145,6 +145,9 @@ rahti::auth::configure(auth::settings());
 ```rust
 pub fn settings() -> AuthSettings {
     AuthSettings {
+        // Fixed lifetime. Set true to refresh the expiry on each
+        // authenticated request and make it an idle timeout.
+        sliding: false,
         private_routes: vec!["/account".to_string()],
         auth_routes: vec!["/signin".to_string()],
         after_signin: "/account".to_string(),
@@ -154,6 +157,12 @@ pub fn settings() -> AuthSettings {
     }
 }
 ```
+
+Keep `sliding` explicit in the application policy: `false` gives every
+session the fixed lifetime from `SESSION_LIFETIME_HOURS`; `true` makes that
+lifetime an idle timeout. The guard performs the refresh automatically on
+authenticated requests — application handlers do not call a separate refresh
+function.
 
 | Field | Meaning |
 | --- | --- |

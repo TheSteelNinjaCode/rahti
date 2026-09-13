@@ -31,6 +31,7 @@
 //! ```no_run
 //! # use rahti::auth::AuthSettings;
 //! rahti::auth::configure(AuthSettings {
+//!     sliding: false,
 //!     private_routes: vec!["/dashboard".into(), "/account".into()],
 //!     ..AuthSettings::from_env()
 //! });
@@ -757,13 +758,7 @@ pub async fn guard(req: Request, next: Next) -> Response {
     // A sliding session is re-issued before the handler runs rather than
     // after, so a handler that signs out still wins: `sign_out` overwrites the
     // pending slot.
-    if settings.sliding
-        && let Some(current) = session
-    {
-        let refreshed = Session {
-            expires: now() + settings.validity.as_secs(),
-            ..current
-        };
+    if let Some(refreshed) = refreshed_session(session.as_ref(), &settings) {
         if let Ok(mut slot) = context.session.lock() {
             *slot = Some(refreshed.clone());
         }
@@ -791,6 +786,18 @@ pub async fn guard(req: Request, next: Next) -> Response {
     }
 
     res
+}
+
+/// Return the session the guard should re-issue when sliding refresh is on.
+fn refreshed_session(session: Option<&Session>, settings: &AuthSettings) -> Option<Session> {
+    if !settings.sliding {
+        return None;
+    }
+
+    session.map(|current| Session {
+        expires: now() + settings.validity.as_secs(),
+        ..current.clone()
+    })
 }
 
 /// `Set-Cookie`, appended rather than inserted: the CSRF layer sets one too.

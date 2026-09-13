@@ -83,6 +83,30 @@ fn an_expired_session_knows_it() {
 }
 
 #[test]
+fn sliding_refresh_is_off_when_the_policy_says_false() {
+    let current = session(serde_json::json!({ "id": 7 }), 60);
+
+    assert!(refreshed_session(Some(&current), &settings()).is_none());
+}
+
+#[test]
+fn sliding_refresh_reissues_the_session_with_the_configured_lifetime() {
+    let current = session(serde_json::json!({ "id": 7 }), 60);
+    let policy = AuthSettings {
+        validity: Duration::from_secs(3600),
+        sliding: true,
+        ..settings()
+    };
+
+    let before = now();
+    let refreshed = refreshed_session(Some(&current), &policy).expect("a refreshed session");
+
+    assert_eq!(refreshed.user(), current.user());
+    assert!(refreshed.expires_at() > current.expires_at());
+    assert!(refreshed.expires_at() >= before + policy.validity.as_secs());
+}
+
+#[test]
 fn a_cleared_cookie_expires_immediately() {
     assert!(cleared_cookie_line("rahti_session").contains("Max-Age=0"));
     assert!(cleared_cookie_line("rahti_session").contains("HttpOnly"));
