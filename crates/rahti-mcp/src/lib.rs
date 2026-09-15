@@ -169,13 +169,12 @@ impl ServerHandler for RahtiMcp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::TestProject;
     use rmcp::{ServiceExt, model::ReadResourceRequestParams};
 
     #[test]
     fn advertises_read_only_tools_and_resources() {
-        let fixture = TestProject::new();
-        let server = RahtiMcp::new(fixture.project());
+        let fixture = crate::project::test_project();
+        let server = RahtiMcp::new(fixture.project.clone());
         let info = server.get_info();
         assert!(info.capabilities.tools.is_some());
         assert!(info.capabilities.resources.is_some());
@@ -184,8 +183,8 @@ mod tests {
 
     #[tokio::test]
     async fn serves_tools_and_resources_over_the_mcp_protocol() {
-        let fixture = TestProject::new();
-        let server = RahtiMcp::new(fixture.project());
+        let fixture = crate::project::test_project();
+        let server = RahtiMcp::new(fixture.project.clone());
         let (server_transport, client_transport) = tokio::io::duplex(64 * 1024);
         let server_task = tokio::spawn(async move {
             server

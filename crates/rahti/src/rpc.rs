@@ -779,15 +779,16 @@ pub fn rpc_ok<T: Serialize>(value: &T) -> Response {
 
 /// An `#[rpc]` that returned [`Err`].
 ///
-/// The status and message are the ones the function chose, so `Error::new`
-/// with a 404 reaches the browser as a 404 and its text.
+/// The status is the one the function chose. Expected errors keep their public
+/// message; unexpected production failures are redacted before JSON is built.
 pub fn rpc_failed(error: Error) -> Response {
-    super::dev::record_server(
-        "error",
-        "rpc",
-        &format!("rahti: rpc {} — {}", error.status(), error.message()),
-    );
-    json_error(error.status(), error.message())
+    error.record("rpc");
+    let development = super::dev::enabled();
+    json_error_with_details(
+        error.status(),
+        error.client_message(development),
+        error.client_details(development),
+    )
 }
 
 /// A name the dispatcher does not know.
@@ -816,25 +817,52 @@ pub fn rpc_panic_response(err: Box<dyn Any + Send + 'static>) -> Response {
         "panicked".to_string()
     };
 
-    super::dev::record_server(
-        "error",
-        "rpc-panic",
-        &format!("rahti: rpc panicked — {message}"),
-    );
-    json_error(StatusCode::INTERNAL_SERVER_ERROR, message)
+    let error = Error::internal(message);
+    error.record("rpc-panic");
+    json_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        error.client_message(super::dev::enabled()),
+    )
 }
 
-/// `{"error": "…"}` — the shape the client reads before it throws.
+/// `{"error": "…"}` — the base shape the client reads before it throws.
+/// A validation failure also carries its `errors` field beside the summary.
 ///
 /// Shared with `auth.rs`: a call refused for want of a session is refused on
 /// the same wire as one refused for want of a token.
 pub(crate) fn json_error(status: StatusCode, message: impl std::fmt::Display) -> Response {
-    let body = serde_json::json!({ "error": message.to_string() });
+    json_error_with_details(status, message, None)
+}
+
+fn json_error_with_details(
+    status: StatusCode,
+    message: impl std::fmt::Display,
+    details: Option<&Value>,
+) -> Response {
+    let mut body = Map::new();
+    body.insert("error".to_string(), Value::String(message.to_string()));
+    if let Some(Value::Object(fields)) = details {
+        for (name, value) in fields {
+            if name != "error" && name != "requestId" {
+                body.insert(name.clone(), value.clone());
+            }
+        }
+    } else if let Some(details) = details {
+        body.insert("details".to_string(), details.clone());
+    }
+    if let Some(request_id) = super::observability::request_id() {
+        body.insert(
+            "requestId".to_string(),
+            Value::String(request_id.to_string()),
+        );
+    }
     let mut res = (status, serde_json::to_vec(&body).unwrap_or_default()).into_response();
     res.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
     );
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     res.extensions_mut().insert(RpcBody);
     res
 }

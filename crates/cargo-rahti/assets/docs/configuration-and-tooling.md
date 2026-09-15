@@ -114,9 +114,55 @@ optional. In production a missing or placeholder `AUTH_SECRET` stops the server
 rather than falling back. None of the three belongs in `rahti.config.json` —
 the auth policy is code, in `src/auth.rs`, and the secret is a credential.
 
+`APP_TIMEZONE` is read from the same environment source, defaults to `UTC`,
+and is written explicitly in a new project's ignored `.env`. It must be an
+IANA name such as `America/Santo_Domingo`; an invalid name stops startup.
+It controls application calendar interpretation and local daily schedules,
+not absolute expiry or storage. See `application-timezone.md`.
+
+## Environment Reference
+
+`cargo rahti new` writes the settings required by the selected project and
+lists safe optional overrides as commented entries. Uncomment an optional
+entry to replace its documented default. A setting that does not apply to the
+project stays inert; MCP credentials are written as active generated values
+only when the project enables MCP.
+
+| Variable | Default or availability | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | database projects only | Application-owned database connection string. |
+| `AUTH_SECRET` | generated per project | Session-signing credential; required in production. |
+| `AUTH_COOKIE_NAME` | generated per project | Application-specific session cookie name. |
+| `SESSION_LIFETIME_HOURS` | `1` | Whole-number session lifetime used by fixed or sliding policy. |
+| `APP_TIMEZONE` | `UTC` | IANA application timezone and local-schedule calendar. |
+| `HOST` | `server.host` | Runtime listener-address override. |
+| `PORT` | `server.port` | Runtime listener-port override. |
+| `RAHTI_PUBLIC_DIR` | `app.public` | Runtime public-assets directory override. |
+| `RAHTI_MAX_UPLOAD` | `134217728` | Maximum total RPC upload request in bytes. |
+| `RAHTI_MAX_FILE` | `0` | Per-file upload limit in bytes; zero means the total request limit. |
+| `RAHTI_SPILL_THRESHOLD` | `262144` | Bytes retained in memory before an upload spills to disk. |
+| `RAHTI_SPILL_DIR` | OS temporary directory | Private directory for spilled uploads. |
+| `RAHTI_DEV` | build profile | Explicitly enables or disables development behavior. |
+| `RAHTI_TAILWIND` | binary lookup | Path to a Tailwind CLI executable. |
+| `RAHTI_MCP_AUTH_TOKEN` | MCP projects only | Distinct bearer credential for the HTTP MCP endpoint. |
+| `RAHTI_MCP_ALLOWED_HOSTS` | MCP SDK default | Comma-separated host allowlist for the HTTP MCP endpoint. |
+| `RAHTI_MCP_ALLOWED_ORIGINS` | MCP SDK default | Comma-separated full origins allowed for browser MCP clients. |
+
+Authorization policies, security headers, rate limiting, the request pipeline,
+observability, cache adapters, jobs, and schedules are configured through
+typed Rust startup APIs. They deliberately have no environment-variable
+mirror: an undocumented string should not bypass validation or replace
+application policy.
+
+`RAHTI_STATIC_OUTPUT`, `RAHTI_APP_DIR`, and `RAHTI_NATIVE_*` are not ordinary
+application settings. The build/static-export tools set the first two
+internally, while native signing credentials belong in the packaging or CI
+environment and must never be bundled into an application's `.env`.
+
 `rahti::load_env()` is the one `.env` reader for the process. It is called by
-`AuthSettings::from_env` and by the application's `db::connect`, is idempotent,
-and never overwrites a variable the environment already carries.
+`AppTime::from_env`, `AuthSettings::from_env`, and the application's
+`db::connect`, is idempotent, and never overwrites a variable the environment
+already carries.
 
 Explicit application routes win. Public files are the router fallback, and
 the root 404 runs only when neither claims a path.
@@ -269,6 +315,7 @@ credential belongs in `rahti.config.json` or `public/llms.txt`.
 
 ```text
 cargo rahti new <name> [--tailwind] [--db [backend]] [--ws] [--mcp] [--local <path>]
+cargo rahti build --static [--out <directory>]
 cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
 ```
 
@@ -276,6 +323,13 @@ Every feature flag adds something, and leaving it out is how you say no. One
 spelling per answer, so there are no opposing flags to reconcile. An
 interactive run asks about whatever was not named, defaulting to no; a run
 with nowhere to ask takes the flags at their word.
+
+`cargo rahti build --static` renders the generated page routes through the
+application's normal startup and router, then copies public assets. Output is
+`dist/` unless `--out` names a dedicated directory. Dynamic pages declare
+their concrete URLs with `static_paths()`; skipped routes and runtime-only
+RPC or WebSocket dependencies are reported. See `static-generation.md` for
+the render contract and output safety rules.
 
 - `--local` is for framework development and writes path dependencies.
 - `--tailwind` compiles with the Tailwind CLI. Without it, plain CSS.
@@ -290,9 +344,12 @@ with nowhere to ask takes the flags at their word.
   endpoint; a project that leaves it out compiles no MCP application code.
   The separate stdio executable is still installed once per machine.
 - `new` writes one `.env`, carrying this project's generated `AUTH_SECRET` and
-  `AUTH_COOKIE_NAME` and, with `--db`, a `DATABASE_URL`. It is gitignored and
-  untracked by the ledger, so no upgrade rewrites it, and nothing is committed
-  in its place. What a clone has to supply is the environment reference at
+  `AUTH_COOKIE_NAME`, explicit session/timezone defaults, every supported
+  optional application override as a commented entry, and, with `--db`, a
+  `DATABASE_URL`. MCP projects additionally receive their generated endpoint
+  credential and local host allowlist. The file is gitignored and untracked by
+  the ledger, so no upgrade rewrites it, and nothing is committed in its
+  place. What a clone has to supply is the environment reference at
   <https://rahti.tsnc.tech/docs/environment>; the variables
   themselves are covered in `authentication.md` and `database.md`.
 - Every project is written with its own documentation: `AGENTS.md` — the
@@ -349,6 +406,9 @@ with nowhere to ask takes the flags at their word.
 - In `rahti.config.json`, `upgrade` rewrites only what it owns: `createdWith`
   and the `scaffold` ledger. Everything else — the port, the app directory,
   any CSS setting — stays exactly as you wrote it.
+
+Studio is a local database editor. Do not run it against a production database
+unless you intend to inspect or modify that database directly.
 
 When changing scaffold behavior, update templates/assets, hash-ledger behavior,
 tests, and this document together.

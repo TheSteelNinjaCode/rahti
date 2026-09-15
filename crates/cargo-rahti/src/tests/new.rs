@@ -215,6 +215,7 @@ fn an_mcp_project_gets_a_recorded_client_configuration() {
     let env = tree.read(".env");
     assert!(env.contains("RAHTI_MCP_AUTH_TOKEN="), "{env}");
     assert!(env.contains("RAHTI_MCP_ALLOWED_HOSTS="), "{env}");
+    assert!(env.contains("RAHTI_MCP_ALLOWED_ORIGINS="), "{env}");
 }
 
 #[test]
@@ -295,6 +296,20 @@ fn the_layout_leaves_the_component_marker_to_the_macro() {
         markup.contains("<slot />"),
         "the slot is where it goes:\n{layout}"
     );
+}
+
+#[test]
+fn a_new_project_has_managed_metadata_and_navigation_sync() {
+    let tree = Tree::new("metadata-project");
+    scaffold(&tree, true);
+    let layout = tree.read("src/app/layout.rs");
+    let client = tree.read("public/js/main.js");
+
+    assert!(layout.contains("pub fn metadata() -> Metadata"), "{layout}");
+    assert!(layout.contains(".title_template("), "{layout}");
+    assert!(!layout.contains("<title>"), "{layout}");
+    assert!(client.contains("rahti-metadata"), "{client}");
+    assert!(client.contains("data-rahti-metadata"), "{client}");
 }
 
 /// Both engines produce the same project but for the files that must differ.
@@ -378,6 +393,7 @@ fn a_project_without_a_database_carries_nothing_of_one() {
     assert!(!env.contains("DATABASE_URL"), "{env}");
     assert!(env.contains("AUTH_SECRET="), "{env}");
     assert!(tree.read(".gitignore").contains("/.env"));
+    assert!(tree.read(".gitignore").contains("/dist"));
 }
 
 #[test]
@@ -407,6 +423,8 @@ fn a_database_project_gets_the_files_that_wire_one_up() {
     // And the binary is the thin half that only knows an address.
     let main = tree.read("src/main.rs");
     assert!(main.contains("initialize_application()"), "{main}");
+    assert!(main.contains("static_output()"), "{main}");
+    assert!(main.contains("routes::static_routes().await"), "{main}");
     assert!(!main.contains("db::connect"), "{main}");
 }
 
@@ -658,6 +676,36 @@ fn the_env_file_names_the_three_auth_variables() {
 
     for key in ["AUTH_SECRET", "AUTH_COOKIE_NAME", "SESSION_LIFETIME_HOURS"] {
         assert!(env.contains(&format!("{key}=")), "{key} missing:\n{env}");
+    }
+}
+
+#[test]
+fn the_env_file_makes_the_application_timezone_explicit() {
+    let tree = Tree::new("app-timezone");
+    scaffold_with(&tree, true, None);
+    let env = tree.read(".env");
+
+    assert!(env.contains("APP_TIMEZONE=\"UTC\""), "{env}");
+}
+
+#[test]
+fn the_env_file_lists_every_optional_application_override() {
+    let tree = Tree::new("optional-env-vars");
+    scaffold_with(&tree, true, None);
+    let env = tree.read(".env");
+
+    for key in [
+        "HOST",
+        "PORT",
+        "RAHTI_PUBLIC_DIR",
+        "RAHTI_MAX_UPLOAD",
+        "RAHTI_MAX_FILE",
+        "RAHTI_SPILL_THRESHOLD",
+        "RAHTI_SPILL_DIR",
+        "RAHTI_DEV",
+        "RAHTI_TAILWIND",
+    ] {
+        assert!(env.contains(&format!("# {key}=")), "{key} missing:\n{env}");
     }
 }
 

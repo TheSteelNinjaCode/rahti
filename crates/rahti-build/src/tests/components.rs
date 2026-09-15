@@ -200,6 +200,9 @@ fn page(file: &str, rpcs: &[&str]) -> Entry {
         auth_rpcs: Vec::new(),
         sockets: Vec::new(),
         auth_sockets: Vec::new(),
+        metadata: false,
+        static_paths: false,
+        page_cache: false,
         root: false,
     }
 }

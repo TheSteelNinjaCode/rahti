@@ -82,9 +82,25 @@ flag out and the project carries nothing of the feature.
 - **Authentication** as a signed session cookie plus an application-owned
   route policy. Signing secrets and cookie names are generated per project,
   and a release build refuses to start on a placeholder secret.
+- **Authorization and validation.** Named abilities and typed resource
+  policies fail closed; `Validator` returns deterministic field errors as HTTP
+  422 without confusing malformed RPC payloads with invalid business input.
+- **Metadata, SEO, and static generation.** Layout/page metadata inheritance,
+  request-specific overrides, canonical/social tags, and static HTML builds
+  through the real generated router, including declared dynamic paths.
+- **Caching and revalidation.** A backend-neutral typed cache with a bounded
+  in-memory default, plus explicit anonymous page caching and path/tag
+  invalidation.
+- **Production HTTP foundations.** Security headers and CSP, process-local
+  rate limiting, an ordered application middleware pipeline, correlated safe
+  error responses, JSONL events, bounded metrics, and health/readiness probes.
+- **Background work and time.** Bounded typed job queues with retries,
+  timeouts, and graceful drain; interval, daily, and one-shot scheduling; and
+  validated IANA application-timezone handling.
 - **Database** (optional): SeaORM wiring with one file per table and one per
   migration, in filename order. Migrations never run automatically.
-- **Deployment** is a compiled binary and a `public/` directory.
+- **Deployment** is a compiled binary and a `public/` directory, or static
+  output produced by `cargo rahti build --static`.
 
 ## Written for coding agents
 
@@ -105,10 +121,10 @@ Lines in `.rahti/dev.log`, a file an agent can read.
 
 | Crate | Role |
 | --- | --- |
-| `rahti` | The server runtime: HTML values, layouts, errors, RPC, streaming, uploads, auth, sockets. |
+| `rahti` | The server runtime: rendering, metadata, RPC, auth, validation, caching, security, observability, background work, time, and sockets. |
 | `rahti-macros` | `html!`, `#[component]`, `#[rpc]`, `#[socket]` — re-exported by `rahti`. |
 | `rahti-build` | The build step: scans conventions, generates the router and modules, compiles CSS. |
-| `cargo-rahti` | `cargo rahti new` and `cargo rahti upgrade`. |
+| `cargo-rahti` | `cargo rahti new`, `cargo rahti upgrade`, and `cargo rahti build --static`. |
 | `rahti-mcp` | Optional read-only project inspection over local stdio or secured Streamable HTTP. |
 
 This repository is the framework workspace: the crates above, and the

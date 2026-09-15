@@ -32,11 +32,13 @@ The generated router is ordinary Rust compiled into the application. Rahti
 does not discover routes at runtime.
 
 An application's startup lives in its `src/lib.rs`, behind
-`initialize_application`: the database, the migrations it chooses to run, the
-auth policy, and the generated router. `src/main.rs` calls it and binds the
-public listener. A native package calls the same function and binds a loopback
-one — see `native-packaging.md` — which is why the sequence is in a library
-rather than in a `main` Android would have no way to reach.
+`initialize_application`: the application timezone, the database, the
+migrations it chooses to run, the auth policy, the application request
+pipeline, the production-observability policy, and the generated router.
+`src/main.rs` calls it and binds the public
+listener. A native package calls the same function and binds a loopback one —
+see `native-packaging.md` — which is why the sequence is in a library rather
+than in a `main` Android would have no way to reach.
 
 ```text
 src/lib.rs::initialize_application
@@ -45,7 +47,7 @@ src/lib.rs::initialize_application
         +--> native/src/lib.rs  binds 127.0.0.1:0, the packaged application
 ```
 
-## Workspace Crates
+## Framework Packages
 
 ### `rahti`
 
@@ -56,11 +58,43 @@ The server runtime exports:
   attribute is written at all, and what a `@{..spread}` puts on a tag;
 - layout and error-boundary response layers, including the root-layout layer
   that names the document a response was rendered in;
-- `Error`, `ErrorInfo`, and `Result`;
+- `Error`, `ErrorInfo`, and `Result`: nested page boundaries, production-safe
+  message redaction, Problem Details fallbacks, RPC-preserving JSON failures,
+  request correlation, and non-cacheable error responses;
 - RPC parsing, serialization, CSRF, streaming, and upload types;
 - `auth`: a signed session cookie, a route-protection policy, and the guard
   layer that applies it — no user storage, no password handling, no providers,
   no roles;
+- `authorization`: application-defined named abilities, typed session and
+  resource policies, optional before hooks, and fail-closed 401/403 decisions;
+- `security`: application-wide browser security headers, a PulsePoint-compatible
+  CSP, production-only HSTS, and validated application overrides that preserve
+  response-owned values;
+- `rate_limit`: a bounded process-local sliding-window request budget keyed by
+  validated client IP, with real-public-file exemptions, proxy opt-in, 429 RPC
+  compatibility, and limit/reset response headers;
+- `request_pipeline`: ordered application middleware around matched pages,
+  APIs, and RPCs, with owned request mutation, reverse response unwinding, and
+  deliberate short circuits inside framework security boundaries;
+- `observability`: production request ids, JSONL request/application events,
+  fixed-cardinality process metrics, and framework-owned liveness/readiness
+  probes with concurrent dependency checks;
+- `jobs`: typed named handlers on bounded process-local queues, explicit
+  backpressure, retry/backoff and attempt timeouts, request-origin
+  correlation, fixed-cardinality counters, and grace-bounded shutdown drain;
+- `schedule`: process-local interval, application-timezone/UTC daily, and
+  one-shot timers that submit registered jobs, prevent overlap by default,
+  coalesce missed ticks, and stop before job queues drain;
+- `time`: validated IANA application time, aware local `now`/`today`, UTC
+  conversion and half-open local-day query bounds, kept deliberately separate
+  from absolute expiry and duration clocks;
+- `cache`: typed JSON caching over a replaceable asynchronous byte-store
+  contract, with expiration and invalidation plus a bounded process-local LRU
+  default; pages can opt into anonymous complete-document caching with TTL,
+  tags, and path/tag revalidation;
+- `validation`: deterministic field-error collection, common typed-input
+  rules, custom checks, and structured HTTP 422 RPC failures that compose with
+  `rahti::Result`;
 - link-time component RPC registration;
 - behind the optional `ws` cargo feature: `rahti::ws` — the socket endpoint,
   the `Socket`/`SocketSender` conversation types, link-time socket
@@ -68,6 +102,8 @@ The server runtime exports:
 - behind the optional `mcp` cargo feature: the bearer-protected Streamable
   HTTP endpoint, its relative canonical redirect, and public discovery;
 - public-directory resolution;
+- in-process static export through the real application router, including
+  guarded output ownership, public-asset copying, and a route-by-route report;
 - `listen`: the server's listener — `PORT` and `HOST` override the configured
   address so a deployment needs no code change, and a busy port falls forward
   to the next free one in dev mode while release treats it as an error;
@@ -132,6 +168,9 @@ On every relevant Cargo build it:
 - `cargo rahti new <name>` scaffolds a project and records hashes of owned
   scaffold files. `--tailwind`, `--db [backend]`, `--ws`, and `--mcp` answer its
   questions from the command line; each flag only ever says yes.
+- `cargo rahti build --static` runs the application binary in export mode,
+  writing fixed pages and declared dynamic paths to `dist/` (or `--out`) and
+  copying public assets without binding a listener.
 - Every scaffolded project carries its own documentation: `AGENTS.md`,
   `CLAUDE.md`, and the applicable convention documents under
   `docs/conventions/`. The documents are embedded from copies in
@@ -221,7 +260,16 @@ the project workspace, and `cargo-rahti-native` is a separate install.
 The current implementation covers:
 
 - static, dynamic, catch-all, optional catch-all, and route-group paths;
+- static site generation through the application's real startup and generated
+  router: fixed pages automatically, dynamic pages through async
+  `static_paths()`, request-resolved metadata intact, public assets copied,
+  and redirects, non-HTML responses, failures, and server-dependent browser
+  calls surfaced in the build report;
 - nested layouts, nearest error boundaries, root 404, and unwrapped API routes;
+- typed static and request-specific metadata inherited from root layout through
+  nested layouts to the page, including titles and templates, descriptions,
+  canonical links, robots directives, Open Graph and Twitter fields, with the
+  managed head synchronized after same-document navigation;
 - `loading.rs` regions: rendered once at startup, written into every document,
   and chosen in the browser by walking the current path up to the nearest one
   — with a build-time refusal of a region under a dynamic segment, which the
@@ -263,7 +311,52 @@ The current implementation covers:
   the call as opposed to the page — user storage and password checking are the
   application's (a `user` table and argon2id in `src/auth.rs`, typically), and
   the framework stores no users, sees no password, and ships no OAuth provider
-  and no role system;
+  and no role system; session lifetime comes from `SESSION_LIFETIME_HOURS`,
+  while the application explicitly chooses fixed or sliding expiry;
+- authorization through application-defined named abilities, typed session and
+  resource policies, optional before hooks, and fail-closed decisions that
+  distinguish an unauthenticated caller from an authenticated but forbidden
+  one without inventing a role or permission model;
+- application-wide security middleware around the complete generated router:
+  a PulsePoint-compatible content security policy, browser security headers,
+  production-only HSTS, and validated startup overrides that cannot silently
+  replace a response-owned header;
+- a bounded process-local sliding-window rate limiter outside application,
+  authentication, and CSRF work, with validated client-IP selection, explicit
+  trusted-proxy opt-in, exemptions for real public files and framework health
+  traffic, RPC-compatible 429 failures, and limit/reset headers;
+- an ordered application request pipeline around matched pages, APIs, and
+  RPCs: middleware can mutate the owned request, unwind over the response in
+  reverse order, or short-circuit application work without escaping the
+  framework's CSRF, rate-limit, security-header, or observability boundaries;
+- production observability through request correlation, bounded JSONL request
+  and application events, fixed-cardinality process metrics, and
+  framework-owned liveness/readiness endpoints whose named dependency checks
+  run concurrently under a common timeout;
+- error handling that sends page failures and panics to the nearest boundary,
+  preserves the RPC error wire format, emits Problem Details for unbounded HTTP
+  failures, redacts private server diagnostics in production, correlates the
+  response with its request, and prevents failures from being cached;
+- deterministic typed-input validation through `Validator`, including common
+  rules, custom checks, named field messages, and structured HTTP 422 RPC
+  failures while malformed or mistyped payloads remain HTTP 400;
+- application-data caching through a backend-neutral async `CacheStore`, a
+  typed JSON facade, explicit expiration/removal/clear operations, and a
+  bounded in-memory LRU default; a public deterministic page can separately
+  opt into anonymous complete-document caching with TTL and tags, and
+  successful authoritative writes can explicitly revalidate a concrete path
+  or tag; no distributed adapter or implicit caching is implied;
+- typed process-local background jobs on bounded named queues, with explicit
+  backpressure, retries and backoff, attempt timeouts, request-origin
+  correlation, fixed-cardinality metrics, and grace-bounded shutdown drain;
+- process-local task scheduling for intervals, one-shot instants, and daily
+  application-timezone or UTC wall times, submitting registered jobs with
+  overlap prevention by default, missed-tick coalescing, bounded-queue
+  behavior, and shutdown ordering ahead of job-queue drain;
+- application time fixed once at startup from a validated IANA
+  `APP_TIMEZONE`, defaulting to UTC, with aware local `now`/`today`, UTC
+  conversion, DST-correct half-open local-day query bounds, and deliberate
+  separation from absolute expiration and duration clocks;
 - generated manifest metadata for routes, layouts, errors, loading regions,
   components, RPCs, sockets, and the database;
 - optional read-only MCP project inspection over local stdio and secured
@@ -290,7 +383,7 @@ Use this order when behavior is unclear:
 1. executable tests;
 2. implementation in `crates/`;
 3. generated output (`src/routes.rs`, `.rahti/manifest.json`);
-4. examples in `src/app/` and `src/components/`;
+4. scaffold templates and assets under `crates/cargo-rahti/assets/`;
 5. these convention documents.
 
 Generated output is evidence, not an editing surface.
@@ -300,12 +393,12 @@ Generated output is evidence, not an editing surface.
 PulsePoint ships as a prebuilt bundle. Nothing in this workspace compiles or
 bundles JavaScript, and a checkout is complete as it stands.
 
-The runtime asset must exist in both:
+The canonical runtime asset in this framework workspace is:
 
 ```text
-public/js/pp-reactive-v2.min.js
 crates/cargo-rahti/assets/js/pp-reactive-v2.min.js
 ```
 
-`public/js/main.js` imports the minified runtime, installs `twMerge`, and calls
-`pp.mount()` once the DOM is ready.
+`cargo rahti new` copies it to `public/js/pp-reactive-v2.min.js` in the new
+application. The scaffolded `public/js/main.js` imports that bundle, installs
+`twMerge`, and calls `pp.mount()` once the DOM is ready.

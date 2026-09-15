@@ -20,6 +20,7 @@ use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use super::html::{Html, PageBody};
+use super::metadata::{Metadata, ResolvedMetadata};
 
 #[cfg(test)]
 #[path = "tests/layout.rs"]
@@ -52,7 +53,16 @@ const ROOT_LAYOUT_META: &str = "name=\"pp-root-layout\"";
 /// what keeps `route.rs` handlers and files served out of `public/` from
 /// being wrapped in a page shell.
 pub async fn apply_layout(layout: fn(Html) -> Html, res: Response) -> Response {
-    wrap(layout, res, None).await
+    wrap(layout, None, res, None).await
+}
+
+/// Apply a layout and merge the metadata it supplies below its parent.
+pub async fn apply_layout_metadata(
+    layout: fn(Html) -> Html,
+    metadata: Metadata,
+    res: Response,
+) -> Response {
+    wrap(layout, Some(metadata), res, None).await
 }
 
 /// The same, for the layout that owns the document.
@@ -66,7 +76,17 @@ pub async fn apply_root_layout(
     id: &'static str,
     res: Response,
 ) -> Response {
-    wrap(layout, res, Some(id)).await
+    wrap(layout, None, res, Some(id)).await
+}
+
+/// Apply a document-owning layout together with its metadata defaults.
+pub async fn apply_root_layout_metadata(
+    layout: fn(Html) -> Html,
+    id: &'static str,
+    metadata: Metadata,
+    res: Response,
+) -> Response {
+    wrap(layout, Some(metadata), res, Some(id)).await
 }
 
 /// A page the router assembled by calling its layouts directly, marked as the
@@ -76,15 +96,29 @@ pub async fn apply_root_layout(
 /// [`apply_root_layout`] on, because it renders below the static-file
 /// fallback rather than inside a route group.
 pub fn root_document(id: &'static str, html: Html) -> Response {
-    let mut res =
-        Html::from_raw(super::loading::inject(mark(html.into_string(), id))).into_response();
+    root_document_metadata(id, html, Metadata::new())
+}
+
+/// Assemble a generated fallback document with its inherited metadata.
+pub fn root_document_metadata(id: &'static str, html: Html, metadata: Metadata) -> Response {
+    let body = super::metadata::inject(mark(html.into_string(), id), metadata);
+    let mut res = Html::from_raw(super::loading::inject(body)).into_response();
     set_root_header(&mut res, id);
     res
 }
 
-async fn wrap(layout: fn(Html) -> Html, res: Response, root: Option<&'static str>) -> Response {
+async fn wrap(
+    layout: fn(Html) -> Html,
+    metadata: Option<Metadata>,
+    mut res: Response,
+    root: Option<&'static str>,
+) -> Response {
     if res.extensions().get::<PageBody>().is_none() {
         return res;
+    }
+
+    if let Some(metadata) = metadata {
+        super::metadata::merge_into_response(metadata, &mut res);
     }
 
     let (mut parts, body) = res.into_parts();
@@ -122,7 +156,13 @@ async fn wrap(layout: fn(Html) -> Html, res: Response, root: Option<&'static str
     // the app-wide furniture: the identity the client navigates by, and the
     // loading regions it reads at the start of a navigation.
     if let Some(id) = root {
-        body = super::loading::inject(mark(body, id));
+        body = mark(body, id);
+        let metadata = parts
+            .extensions
+            .remove::<ResolvedMetadata>()
+            .map(|resolved| resolved.0)
+            .unwrap_or_default();
+        body = super::loading::inject(super::metadata::inject(body, metadata));
     }
 
     // The length changed, and the marker stays so any outer layout in the

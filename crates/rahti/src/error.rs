@@ -20,6 +20,8 @@ use axum::response::{IntoResponse, Response};
 
 use super::html::{Html, PageBody};
 
+const UNEXPECTED_ERROR: &str = "An unexpected error occurred.";
+
 #[cfg(test)]
 #[path = "tests/error.rs"]
 mod tests;
@@ -37,19 +39,44 @@ pub struct ErrorSource(pub String);
 pub struct Error {
     status: StatusCode,
     message: String,
+    public_message: Option<String>,
+    details: Option<serde_json::Value>,
 }
 
 impl Error {
+    /// An expected failure. Messages on 4xx statuses are public; messages on
+    /// 5xx statuses remain private unless explicitly replaced or exposed.
     pub fn new(status: StatusCode, message: impl Display) -> Self {
+        let message = message.to_string();
         Error {
             status,
-            message: message.to_string(),
+            public_message: (!status.is_server_error()).then(|| message.clone()),
+            message,
+            details: None,
         }
     }
 
-    /// A 500 — the usual case for `.map_err(Error::internal)?`.
+    /// A private 500 — the usual case for `.map_err(Error::internal)?`.
+    ///
+    /// The diagnostic is visible in development and server logs, but a
+    /// production client receives only a generic message.
     pub fn internal(message: impl Display) -> Self {
         Error::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
+
+    /// An error whose message is intentionally safe for every client.
+    ///
+    /// Prefer [`Error::new`] for expected 4xx failures and [`Error::internal`]
+    /// for unexpected failures. This constructor is for deliberate public
+    /// 5xx explanations such as a maintenance response.
+    pub fn public(status: StatusCode, message: impl Display) -> Self {
+        let message = message.to_string();
+        Error {
+            status,
+            public_message: Some(message.clone()),
+            message,
+            details: None,
+        }
     }
 
     pub fn status(&self) -> StatusCode {
@@ -58,6 +85,52 @@ impl Error {
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Replace the client-facing text while retaining the original diagnostic
+    /// for server logs.
+    pub fn with_public_message(mut self, message: impl Display) -> Self {
+        self.public_message = Some(message.to_string());
+        self
+    }
+
+    /// Structured error context for an RPC response. Object fields are merged
+    /// beside the wire's `error` message; page boundaries continue to receive
+    /// only status and message. Unexpected production failures suppress these
+    /// details with their diagnostic message.
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    pub fn details(&self) -> Option<&serde_json::Value> {
+        self.details.as_ref()
+    }
+
+    pub(crate) fn client_message(&self, development: bool) -> &str {
+        if development {
+            &self.message
+        } else {
+            self.public_message.as_deref().unwrap_or(UNEXPECTED_ERROR)
+        }
+    }
+
+    pub(crate) fn client_details(&self, development: bool) -> Option<&serde_json::Value> {
+        (development || self.public_message.is_some())
+            .then_some(self.details.as_ref())
+            .flatten()
+    }
+
+    pub(crate) fn record(&self, target: &str) {
+        super::dev::record_server(
+            if self.status.is_server_error() {
+                "error"
+            } else {
+                "warn"
+            },
+            target,
+            &format!("rahti: {} — {}", self.status, self.message),
+        );
     }
 }
 
@@ -69,35 +142,23 @@ impl<E: std::error::Error + Send + Sync + 'static> From<E> for Error {
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        super::dev::record_server(
-            "error",
-            "page",
-            &format!("rahti: {} — {}", self.status, self.message),
-        );
-        // The body is a placeholder: a boundary replaces it, and without one
-        // the status line is all the client gets anyway.
-        let mut res = (
-            self.status,
-            self.status
-                .canonical_reason()
-                .unwrap_or("Error")
-                .to_string(),
-        )
-            .into_response();
-        res.extensions_mut().insert(ErrorSource(self.message));
-        res
+        self.record("page");
+        let client_message = self.client_message(super::dev::enabled()).to_string();
+        problem_response(self.status, client_message)
     }
 }
 
 /// What `error.rs` receives.
 ///
-/// `message` is passed through exactly as the page produced it. Whether any
-/// of it reaches the browser is the boundary's decision — the full text is
-/// already on stderr by the time this is built.
+/// `message` is safe client text. In development it contains the originating
+/// diagnostic; unexpected production failures carry only a generic or
+/// explicitly supplied public message. The full diagnostic is recorded before
+/// this value is built.
 #[derive(Debug, Clone)]
 pub struct ErrorInfo {
     status: StatusCode,
     message: String,
+    request_id: Option<super::observability::RequestId>,
 }
 
 impl ErrorInfo {
@@ -112,6 +173,12 @@ impl ErrorInfo {
 
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// Correlation id for a support reference when production observability is
+    /// enabled. It is not a credential and may be shown to the user.
+    pub fn request_id(&self) -> Option<&super::observability::RequestId> {
+        self.request_id.as_ref()
     }
 
     /// `"Internal Server Error"` and the like — safe to show anyone.
@@ -136,12 +203,42 @@ pub fn panic_response(err: Box<dyn Any + Send + 'static>) -> Response {
         "panicked".to_string()
     };
 
-    super::dev::record_server(
-        "error",
-        "page-panic",
-        &format!("rahti: handler panicked — {message}"),
+    let error = Error::internal(message);
+    error.record("page-panic");
+    let client_message = error.client_message(super::dev::enabled()).to_string();
+    problem_response(StatusCode::INTERNAL_SERVER_ERROR, client_message)
+}
+
+fn problem_response(status: StatusCode, detail: String) -> Response {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "type".into(),
+        serde_json::Value::String("about:blank".into()),
     );
-    Error::internal(message).into_response()
+    body.insert(
+        "title".into(),
+        serde_json::Value::String(status.canonical_reason().unwrap_or("Error").into()),
+    );
+    body.insert("status".into(), status.as_u16().into());
+    body.insert("detail".into(), serde_json::Value::String(detail.clone()));
+    if let Some(request_id) = super::observability::request_id() {
+        body.insert(
+            "requestId".into(),
+            serde_json::Value::String(request_id.to_string()),
+        );
+    }
+
+    let mut response = (status, serde_json::to_vec(&body).unwrap_or_default()).into_response();
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/problem+json"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response.extensions_mut().insert(ErrorSource(detail));
+    response
 }
 
 /// Render a failed response through one error boundary.
@@ -169,7 +266,11 @@ pub async fn apply_error(boundary: fn(ErrorInfo) -> Html, res: Response) -> Resp
     };
 
     let (mut parts, _) = res.into_parts();
-    let body = boundary(ErrorInfo { status, message });
+    let body = boundary(ErrorInfo {
+        status,
+        message,
+        request_id: super::observability::request_id(),
+    });
 
     // Hand back a page: outer layouts wrap this exactly as they would have
     // wrapped the page that failed.

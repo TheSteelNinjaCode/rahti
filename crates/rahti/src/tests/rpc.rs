@@ -211,7 +211,26 @@ async fn a_value_comes_back_as_json() {
 async fn a_failure_comes_back_as_its_status_and_its_message() {
     let res = rpc_failed(Error::new(StatusCode::NOT_FOUND, "no such customer"));
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(body_of(res).await, r#"{"error":"no such customer"}"#);
+}
+
+#[tokio::test]
+async fn public_details_cannot_replace_reserved_rpc_error_fields() {
+    let res = rpc_failed(
+        Error::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid order").with_details(
+            serde_json::json!({
+                "error": "forged",
+                "requestId": "forged",
+                "quantity": "must be positive"
+            }),
+        ),
+    );
+    let body: serde_json::Value = serde_json::from_str(&body_of(res).await).unwrap();
+
+    assert_eq!(body["error"], "invalid order");
+    assert_eq!(body["quantity"], "must be positive");
+    assert!(body.get("requestId").is_none());
 }
 
 #[tokio::test]

@@ -185,21 +185,7 @@ pub fn run() {
     let scan = scanner::scan(Path::new(&config.app_dir));
     let components = components::scan(Path::new(components::COMPONENTS_DIR));
 
-    if config.mcp {
-        for reserved in ["/mcp", "/.well-known/mcp.json"] {
-            if let Some(entry) = scan
-                .entries
-                .iter()
-                .find(|entry| entry.urls.iter().any(|url| url == reserved))
-            {
-                panic!(
-                    "rahti: {} generates the reserved MCP route `{reserved}`.\n  \
-                     Move that route or set `\"mcp\": false` in {CONFIG_PATH}.",
-                    entry.file
-                );
-            }
-        }
-    }
+    check_reserved_routes(&scan.entries, config.mcp);
 
     // Only when the project configured one. An app with no `db` object never
     // has these directories created, never has a module generated, and never
@@ -256,6 +242,29 @@ pub fn run() {
             &config,
         ),
     );
+}
+
+fn check_reserved_routes(entries: &[scanner::Entry], mcp: bool) {
+    let mut reserved = vec![
+        ("/health", "production liveness"),
+        ("/ready", "production readiness"),
+    ];
+    if mcp {
+        reserved.extend([("/mcp", "MCP"), ("/.well-known/mcp.json", "MCP discovery")]);
+    }
+
+    for (url, owner) in reserved {
+        if let Some(entry) = entries
+            .iter()
+            .find(|entry| entry.urls.iter().any(|candidate| candidate == url))
+        {
+            panic!(
+                "rahti: {} generates the reserved {owner} route `{url}`.\n  \
+                 Move that application route; Rahti owns this endpoint.",
+                entry.file
+            );
+        }
+    }
 }
 
 /// Every `#[socket]` in the project, pages and components in one list.

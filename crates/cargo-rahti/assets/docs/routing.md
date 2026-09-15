@@ -14,6 +14,20 @@ Only known convention filenames participate.
 | root `not-found.rs` | `pub async fn not_found() -> Html` | Static/public fallback 404 body |
 | `route.rs` | one or more HTTP method functions | Unwrapped endpoint |
 
+A page, layout, or the root `not-found.rs` may also export
+`pub fn metadata() -> Metadata`. Metadata follows the same layout chain and
+is documented in `metadata-and-seo.md`.
+
+A dynamic page may also export `pub async fn static_paths()` to name the
+concrete URLs rendered by `cargo rahti build --static`. Static pages are
+included automatically. The provider and exporter contract are documented in
+`static-generation.md`.
+
+A public, deterministic page may export `pub fn cache() -> PageCache` to
+cache its complete HTML response. This is opt-in, anonymous-only, and separate
+from static generation. TTL, tags, bypass rules, and path/tag revalidation are
+documented in `caching.md`.
+
 A page may return `Html`, any compatible Axum response, or `rahti::Result`
 when fallible. Its parameters may use normal Axum extractors:
 
@@ -284,7 +298,8 @@ nearest ancestor `error.rs` can render. The boundary receives:
 
 - `error.code()` - numeric status;
 - `error.reason()` - canonical status text;
-- `error.message()` - application or panic detail.
+- `error.message()` - client-safe detail;
+- `error.request_id()` - optional production correlation reference.
 
 The error UI replaces the failed subtree. Layouts below the selected boundary
 are skipped; layouts above it still wrap the rendered error. RPC failures do
@@ -298,7 +313,11 @@ return Err(Error::new(StatusCode::BAD_REQUEST, "explanation"));
 ```
 
 or let a standard error cross `?`; standard errors convert to an internal
-Rahti error.
+Rahti error. Internal diagnostics and panic messages are visible in development
+and server telemetry but redacted from production clients. An error with no
+page boundary becomes an `application/problem+json` response. Constructor
+selection, RPC behavior, cache policy, and production redaction are documented
+in `error-handling.md`.
 
 ## Loading Regions
 
@@ -413,7 +432,12 @@ Nested `not-found.rs` files are not currently routed.
 
 `rahti-build` groups pages sharing the same layout/error chain into Axum
 subrouters. It adds page RPC POST routes, component RPC fallback, upload body
-limits, static fallback, CSRF, dev routes, and revalidation.
+limits, static fallback, CSRF, dev routes, revalidation, and the configured
+application request pipeline.
+
+`/health` and `/ready` are framework-owned production probes. They are merged
+outside application route groups and the application request pipeline; an
+application convention file resolving to either exact URL is a build error.
 
 It also installs the auth guard as the outermost layer of every group and of
 the RPC router — but not over the static fallback, so `public/` is served
@@ -423,3 +447,9 @@ file tree: it is the policy the application installs from `main`. See
 
 Never modify `src/routes.rs`. Change the convention files or build generator
 and rebuild.
+
+Application middleware runs only around matched pages, APIs, and RPCs, after
+the auth/session guard and before page or RPC execution. Static files, the 404
+fallback, and framework-owned endpoints do not enter it. Its precise order,
+short-circuit behavior, and configuration contract are documented in
+`request-pipeline.md`.

@@ -37,6 +37,45 @@ fn internal_is_a_500() {
     );
 }
 
+#[test]
+fn production_hides_unexpected_server_diagnostics() {
+    for err in [
+        Error::internal("database password appeared here"),
+        Error::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "database password appeared here",
+        ),
+    ] {
+        assert_eq!(err.client_message(false), UNEXPECTED_ERROR);
+        assert_eq!(err.client_message(true), "database password appeared here");
+    }
+}
+
+#[test]
+fn expected_client_errors_and_explicit_public_server_errors_keep_their_message() {
+    let missing = Error::new(StatusCode::NOT_FOUND, "no such customer");
+    assert_eq!(missing.client_message(false), "no such customer");
+
+    let maintenance = Error::public(StatusCode::SERVICE_UNAVAILABLE, "Back shortly");
+    assert_eq!(maintenance.client_message(false), "Back shortly");
+
+    let mapped = Error::internal("upstream connection refused")
+        .with_public_message("The service is temporarily unavailable");
+    assert_eq!(
+        mapped.client_message(false),
+        "The service is temporarily unavailable"
+    );
+    assert_eq!(mapped.message(), "upstream connection refused");
+}
+
+#[test]
+fn private_server_errors_do_not_expose_structured_details() {
+    let err = Error::internal("database failed")
+        .with_details(serde_json::json!({ "connection": "secret" }));
+    assert!(err.client_details(false).is_none());
+    assert!(err.client_details(true).is_some());
+}
+
 /// `From<E: std::error::Error>` is what makes `?` work in a page, and is the
 /// reason `Error` deliberately does not implement `Error` itself.
 #[test]
@@ -56,6 +95,23 @@ fn a_failed_page_responds_with_its_status_and_a_source() {
         .get::<ErrorSource>()
         .expect("the message is carried");
     assert_eq!(source.0, "upstream said no");
+    assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(
+        res.headers()[header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+}
+
+#[tokio::test]
+async fn an_unbounded_error_is_a_problem_details_response() {
+    let res = Error::new(StatusCode::CONFLICT, "already exists").into_response();
+    let body = body_of(res).await;
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    assert_eq!(body["type"], "about:blank");
+    assert_eq!(body["title"], "Conflict");
+    assert_eq!(body["status"], 409);
+    assert_eq!(body["detail"], "already exists");
 }
 
 // ------------------------------------------------------------------ panics

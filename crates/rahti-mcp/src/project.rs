@@ -364,82 +364,65 @@ fn pretty(value: Value) -> Result<String, String> {
 
 #[cfg(test)]
 pub(crate) struct TestProject {
+    pub project: Project,
     root: PathBuf,
-}
-
-#[cfg(test)]
-impl TestProject {
-    pub(crate) fn new() -> Self {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
-            "rahti-mcp-tests-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(root.join(".rahti")).expect("fixture manifest directory");
-        fs::create_dir_all(root.join("docs/conventions")).expect("fixture conventions directory");
-        fs::write(
-            root.join(CONFIG_FILE),
-            r#"{
-  "createdWith": "0.0.20",
-  "app": { "dir": "src/app", "public": "public" },
-  "ws": true
-}"#,
-        )
-        .expect("fixture config");
-        fs::write(
-            root.join(MANIFEST_FILE),
-            r#"{
-  "generatedBy": "rahti-build",
-  "appDir": "src/app",
-  "routes": [
-    {
-      "url": "/account",
-      "kind": "page",
-      "methods": ["GET", "POST"],
-      "component": "page_account",
-      "rpcs": ["rename"],
-      "authRpcs": ["rename"],
-      "file": "src/app/account/page.rs"
-    }
-  ],
-  "layouts": [],
-  "errors": [],
-  "loading": [],
-  "components": [],
-  "sockets": [
-    { "name": "private_feed", "file": "src/app/account/page.rs", "auth": true }
-  ],
-  "db": null
-}"#,
-        )
-        .expect("fixture manifest");
-        fs::write(
-            root.join(DIAGNOSTICS_FILE),
-            "{\"level\":\"warn\",\"message\":\"fixture\"}\n",
-        )
-        .expect("fixture diagnostics");
-        fs::write(
-            root.join("docs/conventions/architecture.md"),
-            "# Architecture\n",
-        )
-        .expect("fixture convention");
-        Self { root }
-    }
-
-    pub(crate) fn project(&self) -> Project {
-        Project::open(&self.root).expect("temporary Rahti project")
-    }
 }
 
 #[cfg(test)]
 impl Drop for TestProject {
     fn drop(&mut self) {
-        debug_assert!(self.root.starts_with(std::env::temp_dir()));
-        let _ = fs::remove_dir_all(&self.root);
+        let temporary = env::temp_dir();
+        if self.root.starts_with(&temporary)
+            && self
+                .root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("rahti-mcp-test-"))
+        {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn test_project() -> TestProject {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = env::temp_dir().join(format!(
+        "rahti-mcp-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(root.join(".rahti")).expect("create manifest directory");
+    fs::create_dir_all(root.join("docs/conventions")).expect("create conventions directory");
+    fs::write(
+        root.join(CONFIG_FILE),
+        r#"{"createdWith":"test","app":{"public":"public"}}"#,
+    )
+    .expect("write project config");
+    fs::write(
+        root.join(MANIFEST_FILE),
+        r#"{
+  "generatedBy": "rahti-build",
+  "appDir": "src/app",
+  "routes": [{
+    "url": "/account",
+    "file": "src/app/account/page.rs",
+    "rpcs": ["rename"],
+    "authRpcs": ["rename"]
+  }],
+  "layouts": [],
+  "errors": [],
+  "loading": [],
+  "components": [],
+  "sockets": []
+}"#,
+    )
+    .expect("write project manifest");
+    fs::write(root.join("docs/conventions/testing.md"), "# Testing\n").expect("write convention");
+    let project = Project::open(&root).expect("open test project");
+    TestProject { project, root }
 }
 
 #[cfg(test)]
@@ -447,9 +430,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_metadata_exposes_authenticated_callables() {
-        let fixture = TestProject::new();
-        let project = fixture.project();
+    fn a_project_exposes_authenticated_callables() {
+        let fixture = test_project();
+        let project = &fixture.project;
         let rpcs = project.rpcs().expect("RPC inventory");
         let rename = rpcs
             .as_array()
@@ -466,8 +449,8 @@ mod tests {
 
     #[test]
     fn diagnostics_limit_is_bounded() {
-        let fixture = TestProject::new();
-        let project = fixture.project();
+        let fixture = test_project();
+        let project = &fixture.project;
         assert_eq!(
             project.recent_diagnostics(Some(usize::MAX)).unwrap()["limit"],
             MAX_DIAGNOSTICS

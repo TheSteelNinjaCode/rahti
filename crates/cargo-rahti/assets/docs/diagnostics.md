@@ -36,8 +36,9 @@ Rahti also records framework-handled backend failures:
 - CSRF random-source failures.
 
 Arbitrary application `println!`, `eprintln!`, or third-party Rust logging is
-not intercepted. Those remain terminal output until Rahti adopts a general
-logging facade.
+not intercepted. Those remain terminal output. Production request records,
+correlation ids, health probes, process metrics, and application events use the
+separate contract in `production-observability.md`.
 
 ## Browser Record
 
@@ -72,11 +73,12 @@ message text and by the `component` boundary it came from.
 Example:
 
 ```json
-{"kind":"server","receivedAtMs":1785300000000,"boot":"...","level":"error","target":"rpc","message":"rahti: rpc 400 Bad Request — text cannot be empty"}
+{"kind":"server","receivedAtMs":1785300000000,"boot":"...","level":"warn","target":"rpc","message":"rahti: rpc 422 Unprocessable Entity — The text field is required."}
 ```
 
 `target` identifies the framework subsystem, such as `page`, `page-panic`,
-`rpc`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `upload-config`, or `csrf`.
+`rpc`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `upload-config`, `csrf`, or
+`jobs`, or `schedule`.
 
 ## Limits and Failure Behavior
 
@@ -106,4 +108,3 @@ network failure can lose its final batch.
 
 Do not treat an old record as proof that the current code still fails. The
 session header and `boot` field identify the server instance that received it.
-

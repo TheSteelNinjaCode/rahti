@@ -266,7 +266,10 @@ unreachable database renders — an empty list is often the honest answer.
 ## Validation Is Still Yours
 
 A database that would accept an empty string is not a reason to store one.
-Validate in the `#[rpc]`, before the query, and return a 400.
+Use `rahti::Validator` in the `#[rpc]` before the query. Invalid typed input
+returns a structured 422 response; see `validation.md`. Keep database
+constraints for invariants such as uniqueness because two valid requests can
+still race after an application-level check.
 
 ## Testing
 

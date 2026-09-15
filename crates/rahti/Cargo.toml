@@ -18,7 +18,7 @@ default = ["dev-watch"]
 # generated router merges. A feature rather than a default because the wire
 # brings tokio-tungstenite with it, and an app that never opens a socket
 # should not compile it. `cargo rahti new --ws` is what turns it on.
-ws = ["axum/ws", "tokio/time"]
+ws = ["axum/ws"]
 
 # Model Context Protocol: the authenticated Streamable HTTP endpoint merged by
 # generated routers when `rahti.config.json` opts in. The separate stdio tool
@@ -47,11 +47,15 @@ axum = { version = "0.8.9", features = ["multipart"] }
 # MAC: a comparison that is not constant-time is a forgeable session, and that
 # is not a thing to write twice.
 base64 = "0.22"
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
 hmac = "0.13"
 sha2 = "0.11"
 # CSRF tokens are asked of the operating system, not of the clock — see the
 # note in src/rpc.rs.
 getrandom = "0.3"
+# Async middleware panic handling and concurrent readiness checks.
+futures-util = "0.3"
 # The streaming half of the upload wire. `axum::extract::Multipart` hands out
 # a `Field` borrowed from it, which cannot be given to a handler; multer — the
 # crate axum's own multipart is built on, so this adds nothing to the tree —
@@ -61,9 +65,12 @@ multer = "3.1"
 # a packaged native application has no source tree to watch; see the
 # `dev-watch` feature.
 notify = { version = "8", optional = true }
+# Decode URL paths before deciding whether a request is for a real public file
+# and therefore exempt from the dynamic-route request budget.
+percent-encoding = "2"
 # The rpc wire. Both already arrive with axum; named here because this crate
 # reads and writes the payload itself.
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rahti-macros.workspace = true
 rahti-mcp = { workspace = true, optional = true, default-features = false, features = ["http"] }
@@ -72,11 +79,13 @@ rahti-mcp = { workspace = true, optional = true, default-features = false, featu
 # that write blocks the runtime thread it is on. See src/upload.rs.
 # `rt` is `task_local!`: the session belongs to the task serving the request,
 # which is what lets a page read it without taking it as an argument.
-tokio = { version = "1.53.1", features = ["fs", "io-util", "rt", "signal", "sync"] }
+tokio = { version = "1.53.1", features = ["fs", "io-util", "rt", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 # `ReaderStream` is `RpcFile::into_stream` — the shape an object-storage
 # client's `put` takes, without the file being read into memory first.
 tokio-util = { version = "0.7", features = ["io"] }
+# Static export drives the generated Axum router in-process with `oneshot`.
+tower = { version = "0.5", features = ["util"] }
 inventory = "0.3.24"
 
 [dev-dependencies]
@@ -88,7 +97,6 @@ http-body-util = "0.1"
 # on a live socket. Only the tests dial one; `futures-util` is the Stream
 # and Sink traits that client speaks.
 tokio-tungstenite = "0.28"
-futures-util = "0.3"
 # `derive` is for the test types an rpc reads; the crate itself needs only
 # the traits.
 serde = { version = "1", features = ["derive"] }

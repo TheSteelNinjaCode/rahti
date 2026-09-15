@@ -30,11 +30,24 @@ application, which is the perspective every rule below serves.
 | Repository architecture and generated files | `docs/conventions/architecture.md` |
 | Pages, layouts, route groups, dynamic routes, APIs, errors, 404s | `docs/conventions/routing.md` |
 | `html!`, interpolation, escaping, components, children | `docs/conventions/rendering-and-components.md` |
+| Page titles, descriptions, social cards, canonical URLs, robots | `docs/conventions/metadata-and-seo.md` |
+| Static HTML builds, dynamic export paths, output safety | `docs/conventions/static-generation.md` |
+| Cache stores, page caching, expiration, invalidation | `docs/conventions/caching.md` |
+| Typed input rules, field errors, HTTP 422 validation failures | `docs/conventions/validation.md` |
 | Browser state, hooks, bindings, events, lists, refs, SPA navigation | `docs/conventions/pulsepoint.md` |
 | Browser/backend development diagnostics and `.rahti/dev.log` | `docs/conventions/diagnostics.md` |
 | `#[rpc]`, errors, component RPCs, streams, files | `docs/conventions/rpc-and-uploads.md` |
 | WebSockets: `#[socket]`, `pp.socket`, the optional `ws` feature | `docs/conventions/websockets.md` |
 | Sessions, route protection, `#[rpc(auth)]` | `docs/conventions/authentication.md` |
+| Abilities, resource policies, 401/403 decisions | `docs/conventions/authorization.md` |
+| CSP, browser security headers, HSTS, policy overrides | `docs/conventions/security-middleware.md` |
+| Request budgets, client IPs, proxy trust, HTTP 429 | `docs/conventions/rate-limiting.md` |
+| Application middleware, ordering, short circuits | `docs/conventions/request-pipeline.md` |
+| Request ids, JSONL events, metrics, health checks | `docs/conventions/production-observability.md` |
+| Boundaries, Problem Details, redaction, correlation | `docs/conventions/error-handling.md` |
+| Bounded queues, retries, timeouts, graceful drain | `docs/conventions/background-jobs.md` |
+| Intervals, daily/one-shot schedules, overlap | `docs/conventions/task-scheduling.md` |
+| IANA application time, conversion, DST-safe day bounds | `docs/conventions/application-timezone.md` |
 | SeaORM entities, migrations, the connection, database tests | `docs/conventions/database.md` |
 | Escaping, CSRF, redirects, upload trust, development exposure | `docs/conventions/security.md` |
 | `rahti.config.json`, CSS, static files, CLI, environment variables | `docs/conventions/configuration-and-tooling.md` |
@@ -142,12 +155,13 @@ preserve them, and documentation or scaffold changes must teach them.
 19. A connection string is a credential. It lives in `DATABASE_URL` via an
     ignored `.env`, never in `rahti.config.json`, which records only which
     backend the project is on.
-20. Authentication is a signed session cookie and a route policy, and nothing
-    else. `rahti::auth` owns the cookie and the guard; the application owns
-    `src/auth.rs` — which routes are private, and how a password is checked.
-    There are no OAuth providers and no roles. Do not add either without
-    being asked.
-21. The auth policy is installed once from `main` with
+20. Authentication is a signed session cookie and a route policy.
+    `rahti::auth` owns the cookie and the guard; the application owns
+    `src/auth.rs` — which routes are private, how a password is checked, and
+    which authorization abilities exist. `rahti::authorization` evaluates
+    application-defined abilities and typed resource policies without
+    inventing roles, permissions, users, or OAuth providers.
+21. The auth policy is installed once from `initialize_application` with
     `rahti::auth::configure(...)`, before the router is built. Everywhere
     else reads `rahti::auth::settings()` — the installed policy.
 22. `#[rpc(auth)]` is not a substitute for listing a route in
@@ -197,11 +211,45 @@ preserve them, and documentation or scaffold changes must teach them.
     routes or application dependencies. Local stdio through `.mcp.json`
     remains available for opted-in development. Release HTTP access must fail
     closed when `RAHTI_MCP_AUTH_TOKEN` is absent.
+31. Route metadata is server-resolved request state. Static `metadata()`
+    values merge root layout to nested layout to page, and `Page::new`
+    provides the dynamic request-specific override. Managed SEO tags belong
+    to Rahti rather than page markup.
+32. `cargo rahti build --static` renders the real application router. Fixed
+    pages are automatic; dynamic pages export concrete URLs through async
+    `static_paths()`. Static output is generated and ownership-guarded.
+33. `rahti::cache` stores derived data, never authority. Page caching is an
+    explicit `cache() -> PageCache` export on a public deterministic page and
+    is limited to anonymous complete-document responses. Revalidate only
+    after the authoritative write succeeds.
+34. Deserialize owned input first, then apply `rahti::Validator` before side
+    effects. Validation failures are HTTP 422; malformed RPC payloads remain
+    HTTP 400, and database constraints remain authoritative under races.
+35. Authentication and authorization never substitute for one another.
+    Sensitive authenticated handlers call `authorize` or
+    `authorize_resource`; unknown abilities and policy type mismatches fail
+    closed. Presentation checks never replace handler enforcement.
+36. The generated router applies security headers once around every response,
+    with rate limiting and the application pipeline in their documented
+    order. Applications customize policies during startup rather than editing
+    generated code or bypassing framework boundaries.
+37. Production observability owns request correlation, bounded events and
+    metrics, plus liveness/readiness routes. Error handling preserves RPC
+    shapes, uses Problem Details elsewhere, redacts private production
+    diagnostics, and prevents failure responses from being cached.
+38. Background jobs and schedules are bounded and process-local. They are not
+    durable queues or distributed schedulers: applications must choose an
+    external backend when work must survive a process or coordinate replicas.
+39. Application calendar interpretation is installed once from the validated
+    IANA `APP_TIMEZONE`. Local schedules and calendar queries use it; session
+    expiry, cache TTLs, retries, and stored instants remain absolute/UTC.
 
 ## Repository Map
 
-- `crates/rahti/` - server runtime: HTML values, layouts, errors, RPC,
-  streaming, uploads, auth, sockets, statics, live reload, shutdown.
+- `crates/rahti/` - server runtime: HTML values, layouts, metadata, errors,
+  RPC, streaming, uploads, authentication/authorization, caching, validation,
+  security, rate limiting, request middleware, observability, jobs,
+  scheduling, application time, sockets, statics, live reload, and shutdown.
 - `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[socket]`.
 - `crates/rahti-build/` - configuration, filesystem scan, router/component
   generation, manifest, and CSS.

@@ -33,8 +33,10 @@ pub async fn greet(name: String) -> Greeting {
 Rules:
 
 - `#[rpc]` takes `auth`, or nothing. `#[rpc(auth)]` answers `401` unless the
-  browser carries a session — see `authentication.md`. There is no other
-  argument, and in particular no role.
+  browser carries a session — see `authentication.md`. It does not authorize
+  an action or resource; require a named ability inside the handler as
+  described in `authorization.md`. The attribute has no other argument, and
+  in particular no role.
 - Functions may be sync or async, but cannot be methods or generic functions.
 - Parameters need plain names and owned deserializable types.
 - The payload key must match the Rust parameter name.
@@ -49,7 +51,12 @@ const result = await pp.rpc("greet", { name });
 ```
 
 Successful values resolve from JSON. `Err(Error)` becomes an HTTP status plus
-JSON error message and causes the Promise to reject.
+JSON error message and causes the Promise to reject. Expected messages remain
+public; unexpected 5xx diagnostics are generic in production and stay in
+server telemetry. The optional `requestId` correlates the response with that
+telemetry. A
+`ValidationErrors`-backed error uses status 422 and also returns its named
+`errors` map; see `validation.md` and `error-handling.md`.
 
 ## Database Errors
 
@@ -66,7 +73,7 @@ pub async fn list() -> Result<Vec<todo::Model>> {
 
 That produces a 500. Return a real status where one exists — a missing row is
 a 404 — and validate before querying rather than relying on the database to
-refuse. See `database.md`.
+refuse. See `validation.md` and `database.md`.
 
 ## Client Options
 

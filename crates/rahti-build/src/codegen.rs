@@ -97,7 +97,17 @@ fn route_line(entry: &Entry, url: &str) -> String {
             }
             chain
         }
-        _ => format!("axum::routing::get({}::page)", entry.module),
+        _ => {
+            let mut route = format!("axum::routing::get({}::page)", entry.module);
+            if entry.metadata {
+                route.push_str(&format!(
+                    ".layer(axum::middleware::map_response(|res| \
+                     ::rahti::apply_metadata({}::metadata(), res)))",
+                    entry.module
+                ));
+            }
+            route
+        }
     };
     format!(".route(\"{url}\", {handler})")
 }
@@ -255,6 +265,7 @@ fn auth_layer() -> String {
 struct Group<'a> {
     chain: Vec<&'a Entry>,
     boundary: Option<&'a Entry>,
+    cache: Option<&'a Entry>,
     lines: Vec<String>,
 }
 
@@ -338,9 +349,11 @@ pub fn routes_rs(
     for (entry, url) in ordered(entries) {
         let chain = layout_chain(entry, entries);
         let boundary = error_boundary(entry, entries);
+        let cache = entry.page_cache.then_some(entry);
         let line = route_line(entry, url);
         match groups.iter_mut().find(|g| {
             g.boundary.map(|b| &b.file) == boundary.map(|b| &b.file)
+                && g.cache.map(|entry| &entry.file) == cache.map(|entry| &entry.file)
                 && g.chain
                     .iter()
                     .map(|e| &e.file)
@@ -350,6 +363,7 @@ pub fn routes_rs(
             None => groups.push(Group {
                 chain,
                 boundary,
+                cache,
                 lines: vec![line],
             }),
         }
@@ -371,10 +385,25 @@ pub fn routes_rs(
         match root_layout(&as_page, entries) {
             // The identity a page carries, so navigating into a 404 is judged
             // the same way as navigating into any other page.
-            Some(root) => out.push_str(&format!(
-                "::rahti::root_document(\"{}\", {nested})",
-                root_id(root)
-            )),
+            Some(root) => {
+                let mut sources: Vec<String> = chain
+                    .iter()
+                    .filter(|entry| entry.metadata)
+                    .map(|entry| format!("{}::metadata()", entry.module))
+                    .collect();
+                if nf.metadata {
+                    sources.push(format!("{}::metadata()", nf.module));
+                }
+                let metadata = sources
+                    .into_iter()
+                    .fold("::rahti::Metadata::new()".to_string(), |merged, source| {
+                        format!("::rahti::merge_metadata({merged}, {source})")
+                    });
+                out.push_str(&format!(
+                    "::rahti::root_document_metadata(\"{}\", {nested}, {metadata})",
+                    root_id(root)
+                ));
+            }
             None => out.push_str(&nested),
         }
         out.push_str(",\n    )\n}\n\n");
@@ -400,6 +429,42 @@ pub fn routes_rs(
     } else {
         with_rpcs.clone()
     };
+
+    let mut static_pages: Vec<&Entry> = entries
+        .iter()
+        .filter(|entry| entry.kind == Kind::Page)
+        .collect();
+    static_pages.sort_by(|a, b| a.file.cmp(&b.file));
+    out.push_str("/// Pages the in-process static exporter considers.\n");
+    out.push_str("pub async fn static_routes() -> Vec<::rahti::StaticRoute> {\n");
+    out.push_str("    vec![\n");
+    for page in static_pages {
+        if page.urls.iter().any(|url| url.contains('{')) {
+            let patterns = page
+                .urls
+                .iter()
+                .map(|url| format!("\"{url}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            if page.static_paths {
+                out.push_str(&format!(
+                    "        ::rahti::StaticRoute::dynamic(&[{patterns}], {}::static_paths().await),\n",
+                    page.module
+                ));
+            } else {
+                out.push_str(&format!(
+                    "        ::rahti::StaticRoute::undeclared(&[{patterns}]),\n"
+                ));
+            }
+        } else {
+            for url in &page.urls {
+                out.push_str(&format!(
+                    "        ::rahti::StaticRoute::fixed(\"{url}\"),\n"
+                ));
+            }
+        }
+    }
+    out.push_str("    ]\n}\n\n");
 
     out.push_str("/// The application router, built from the file tree.\n");
     out.push_str("///\n");
@@ -497,6 +562,14 @@ pub fn routes_rs(
         out.push_str("    ]);\n\n");
     }
 
+    // One immutable snapshot supplies the probes and the outer lifecycle
+    // middleware, so configuration cannot differ between them.
+    out.push_str(
+        "    let observability = ::rahti::observability::state(\n        \
+         env!(\"CARGO_PKG_NAME\"),\n        \
+         ::rahti::public_dir(PUBLIC_DIR),\n    );\n\n",
+    );
+
     for (i, group) in groups.iter().enumerate() {
         let mut wrapping: Vec<&str> = group.chain.iter().map(|l| l.file.as_str()).collect();
         if let Some(boundary) = group.boundary {
@@ -518,11 +591,19 @@ pub fn routes_rs(
         // out, so this is the order a response climbs on its way back.
         let depth = group.boundary.map(|b| b.dirs.len());
         let layer_layout = |layout: &Entry| {
-            format!(
-                "        .layer(axum::middleware::map_response(|res| \
-                 ::rahti::apply_layout({}::layout, res)))\n",
-                layout.module
-            )
+            if layout.metadata {
+                format!(
+                    "        .layer(axum::middleware::map_response(|res| \
+                     ::rahti::apply_layout_metadata({}::layout, {}::metadata(), res)))\n",
+                    layout.module, layout.module
+                )
+            } else {
+                format!(
+                    "        .layer(axum::middleware::map_response(|res| \
+                     ::rahti::apply_layout({}::layout, res)))\n",
+                    layout.module
+                )
+            }
         };
 
         // The outermost layout owns the document, so it is applied apart from
@@ -563,13 +644,44 @@ pub fn routes_rs(
         // Outside the boundary even when the boundary sits above it in the
         // tree: an error page is still a page, and it needs the document.
         if let Some(root) = root {
+            if root.metadata {
+                out.push_str(&format!(
+                    "        .layer(axum::middleware::map_response(|res| \
+                     ::rahti::apply_root_layout_metadata({}::layout, \"{}\", {}::metadata(), res)))\n",
+                    root.module,
+                    root_id(root),
+                    root.module
+                ));
+            } else {
+                out.push_str(&format!(
+                    "        .layer(axum::middleware::map_response(|res| \
+                     ::rahti::apply_root_layout({}::layout, \"{}\", res)))\n",
+                    root.module,
+                    root_id(root)
+                ));
+            }
+        }
+
+        // Outside page rendering, metadata, boundaries and layouts so the
+        // cached value is the complete document. Inside auth so the request
+        // session is available and authenticated renders always bypass it.
+        if let Some(cache) = group.cache {
             out.push_str(&format!(
-                "        .layer(axum::middleware::map_response(|res| \
-                 ::rahti::apply_root_layout({}::layout, \"{}\", res)))\n",
-                root.module,
-                root_id(root)
+                "        .layer(axum::middleware::from_fn_with_state(\
+                 {}::cache(), ::rahti::cache::page_middleware))\n",
+                cache.module
             ));
         }
+
+        // Application middleware sees matched dynamic requests only. Keep it
+        // immediately inside auth: a user step may stop dispatch, but it may
+        // never answer a protected route before the framework checks the
+        // session. Its response remains outside layouts and page caching.
+        out.push_str(
+            "        .layer(axum::middleware::from_fn_with_state(\n            \
+             ::rahti::request_pipeline::state(),\n            \
+             ::rahti::request_pipeline::middleware,\n        ))\n",
+        );
 
         // Outermost of the group's layers, so a route the policy refuses is a
         // redirect rather than a redirect wrapped in a document — and so the
@@ -624,6 +736,13 @@ pub fn routes_rs(
         out.push_str(
             "        .layer(axum::extract::DefaultBodyLimit::max(::rahti::max_upload()))\n",
         );
+        // The same application chain handles RPC POSTs, after authentication
+        // but before body parsing and dispatch.
+        out.push_str(
+            "        .layer(axum::middleware::from_fn_with_state(\n            \
+             ::rahti::request_pipeline::state(),\n            \
+             ::rahti::request_pipeline::middleware,\n        ))\n",
+        );
         // The rpcs need the session too, and for two reasons: `#[rpc(auth)]`
         // is a check against it, and `auth::sign_in` is called from the rpc
         // that verifies a password — the cookie it asks for is written by
@@ -657,6 +776,10 @@ pub fn routes_rs(
         out.push_str("        .merge(::rahti::mcp::http_routes())\n");
     }
 
+    // Framework-owned probes are deliberately outside application route
+    // groups, sessions, and the application request pipeline.
+    out.push_str("        .merge(::rahti::observability::routes(observability.clone()))\n");
+
     // Empty outside dev mode, so this costs a release build nothing.
     out.push_str("        .merge(::rahti::dev_routes(::rahti::public_dir(PUBLIC_DIR)))\n");
 
@@ -679,6 +802,27 @@ pub fn routes_rs(
     if !posting.is_empty() {
         out.push_str("        .layer(axum::middleware::from_fn(::rahti::csrf))\n");
     }
+
+    // Outside application work and CSRF, but inside the final security-header
+    // layer so a 429 carries the same browser policy as every other response.
+    // The public root lets the limiter exempt only files that actually exist.
+    out.push_str(
+        "        .layer(axum::middleware::from_fn_with_state(\n            \
+         ::rahti::rate_limit_state(::rahti::public_dir(PUBLIC_DIR)),\n            \
+         ::rahti::rate_limit,\n        ))\n",
+    );
+
+    // Every response, including probes, needs the same browser security policy.
+    out.push_str("        .layer(axum::middleware::from_fn(::rahti::security_headers))\n");
+
+    // Outermost: correlation and lifecycle timing cover early security
+    // refusals, missing routes, probes, and public files. The middleware
+    // suppresses probe/public-file noise by policy while still issuing ids.
+    out.push_str(
+        "        .layer(axum::middleware::from_fn_with_state(\n            \
+         observability,\n            \
+         ::rahti::observability::middleware,\n        ))\n",
+    );
 
     out.push_str("}\n");
     out
@@ -726,8 +870,11 @@ pub fn manifest_json(
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "    {{ \"url\": \"{url}\", \"kind\": \"{}\", \"methods\": [{methods}], \"component\": {component}, \"rpcs\": [{rpcs}], \"authRpcs\": [{auth_rpcs}], \"file\": \"{}\" }}{comma}\n",
+            "    {{ \"url\": \"{url}\", \"kind\": \"{}\", \"methods\": [{methods}], \"component\": {component}, \"metadata\": {}, \"staticPaths\": {}, \"pageCache\": {}, \"rpcs\": [{rpcs}], \"authRpcs\": [{auth_rpcs}], \"file\": \"{}\" }}{comma}\n",
             entry.kind.label(),
+            entry.metadata,
+            entry.static_paths,
+            entry.page_cache,
             entry.file
         ));
     }
@@ -760,9 +907,10 @@ pub fn manifest_json(
             .iter()
             .any(|e| root_layout(e, entries).is_some_and(|r| r.file == layout.file));
         out.push_str(&format!(
-            "    {{ \"file\": \"{}\", \"component\": \"{}\", \"root\": {root}, \"wraps\": [{urls}] }}{comma}\n",
+            "    {{ \"file\": \"{}\", \"component\": \"{}\", \"root\": {root}, \"metadata\": {}, \"wraps\": [{urls}] }}{comma}\n",
             layout.file,
-            layout.component.as_deref().unwrap_or("")
+            layout.component.as_deref().unwrap_or(""),
+            layout.metadata
         ));
     }
     out.push_str("  ],\n");

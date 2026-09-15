@@ -25,8 +25,8 @@
 //!
 //! ## The policy
 //!
-//! [`AuthSettings`] is app-owned and installed once from `main`, next to the
-//! database connection:
+//! [`AuthSettings`] is app-owned and installed once during application
+//! initialization, next to the database connection:
 //!
 //! ```no_run
 //! # use rahti::auth::AuthSettings;
@@ -65,10 +65,10 @@
 //! }
 //! ```
 //!
-//! `#[rpc(auth)]` is the whole of the rpc side. There are no roles here: a
-//! call is either from someone signed in or it is not, and anything finer than
-//! that is a question about *your* users, which the framework would only be
-//! guessing at.
+//! `#[rpc(auth)]` authenticates the rpc; it does not authorize an operation on
+//! a particular resource. Define application-owned named abilities with
+//! [`crate::authorization`] and require them inside the handler. Rahti does
+//! not infer roles from a session payload.
 
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -478,7 +478,8 @@ fn cell() -> &'static RwLock<Arc<AuthSettings>> {
     CELL.get_or_init(|| RwLock::new(Arc::new(AuthSettings::lenient())))
 }
 
-/// Install the policy. Called once from `main`, before the listener binds.
+/// Install the policy once during application initialization, before the
+/// router is built.
 pub fn configure(settings: AuthSettings) {
     match cell().write() {
         Ok(mut slot) => *slot = Arc::new(settings),

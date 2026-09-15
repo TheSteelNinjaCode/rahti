@@ -57,6 +57,13 @@ pub struct Entry {
     /// The subset of [`Self::sockets`] that refuse the handshake without a
     /// session.
     pub auth_sockets: Vec<String>,
+    /// This page, layout, or root not-found file exports
+    /// `pub fn metadata() -> Metadata`.
+    pub metadata: bool,
+    /// This dynamic page exports `pub async fn static_paths()`.
+    pub static_paths: bool,
+    /// This page exports `pub fn cache() -> PageCache`.
+    pub page_cache: bool,
     /// For `layout.rs`: this layout owns a document of its own, so no layout
     /// above it wraps the pages below it. Declared with [`ROOT_MARKER`], and
     /// implicit for `app/layout.rs`. Always `false` for every other kind.
@@ -119,6 +126,19 @@ pub fn scan(app_dir: &Path) -> Scan {
             .map(|socket| socket.name.clone())
             .collect();
         let sockets = sockets.into_iter().map(|socket| socket.name).collect();
+        let metadata = declares_metadata(&file);
+        let static_paths = declares_static_paths(&file);
+        let page_cache = declares_page_cache(&file);
+        if static_paths && (kind != Kind::Page || !urls.iter().any(|url| url.contains('{'))) {
+            panic!(
+                "rahti: {file} exports `static_paths()`, but it is not a dynamic page.\n  \
+                 Only a page under `[param]`, `[...param]`, or `[[...param]]` \
+                 needs concrete paths for static generation."
+            );
+        }
+        if page_cache && kind != Kind::Page {
+            panic!("rahti: {file} exports `cache()`, but page caching belongs only in `page.rs`.");
+        }
         match kind {
             Kind::Layout => check_exports(
                 &file,
@@ -164,6 +184,9 @@ pub fn scan(app_dir: &Path) -> Scan {
             auth_rpcs,
             sockets,
             auth_sockets,
+            metadata,
+            static_paths,
+            page_cache,
             root,
         });
     }
@@ -374,6 +397,44 @@ fn function_in(line: &str) -> Option<String> {
 fn declares_root(file: &str) -> bool {
     fs::read_to_string(file)
         .map(|src| src.lines().any(|line| line.trim() == ROOT_MARKER))
+        .unwrap_or(false)
+}
+
+/// Whether a convention file supplies static metadata.
+///
+/// This remains a deliberately small text scan: generated code calls the
+/// real Rust function, so its return type and visibility are still checked by
+/// rustc. Comment lines are ignored so documentation examples do not wire a
+/// function that is not there.
+fn declares_metadata(file: &str) -> bool {
+    fs::read_to_string(file)
+        .map(|src| {
+            src.lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .any(|line| line.contains("pub fn metadata("))
+        })
+        .unwrap_or(false)
+}
+
+/// Whether a dynamic page supplies the concrete URLs static export renders.
+fn declares_static_paths(file: &str) -> bool {
+    fs::read_to_string(file)
+        .map(|src| {
+            src.lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .any(|line| line.contains("pub async fn static_paths("))
+        })
+        .unwrap_or(false)
+}
+
+/// Whether a page opts its complete anonymous response into the cache.
+fn declares_page_cache(file: &str) -> bool {
+    fs::read_to_string(file)
+        .map(|src| {
+            src.lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .any(|line| line.contains("pub fn cache() -> PageCache"))
+        })
         .unwrap_or(false)
 }
 

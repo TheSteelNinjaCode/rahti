@@ -12,6 +12,7 @@
 mod native;
 mod new;
 mod prompt;
+mod static_build;
 mod templates;
 mod upgrade;
 mod wiring;
@@ -35,6 +36,7 @@ fn main() -> ExitCode {
     let result = match args.first().copied() {
         Some("new") => new::run(&args[1..]),
         Some("upgrade") => upgrade::run(&args[1..]),
+        Some("build") => static_build::run(&args[1..]),
         // Handed to `cargo-rahti-native`, which is a separate install. Returns
         // rather than falling through to the `Result` below, because what the
         // helper exited with is what this should exit with.
@@ -77,6 +79,7 @@ Create and maintain Rahti projects.
 
 USAGE:
     cargo rahti new <name> [options]
+    cargo rahti build --static [--out <directory>]
     cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
     cargo rahti native <command> [options]
 
@@ -95,6 +98,11 @@ NEW:
                        Requires `cargo install rahti-mcp` once per machine.
     --local <path>     Depend on a Rahti checkout by path rather than by
                        version. For working on the framework itself.
+
+BUILD:
+    --static           Render pages through the application router and copy
+                       public assets. Dynamic pages need `static_paths()`.
+    --out <directory>  Output directory. Defaults to dist/.
 
 UPGRADE:
     -n, --dry-run      Print what would change, and change nothing.

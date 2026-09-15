@@ -1,12 +1,13 @@
 # Authentication
 
-Rahti provides two things and no more: a **signed session cookie**, and a
+`rahti::auth` provides two things: a **signed session cookie**, and a
 **policy** that says which URLs require one. Users, passwords, registration,
-password resets, and anything resembling a role or permission belong to the
-application.
+password resets, roles, and permission data belong to the application.
 
 There is deliberately no OAuth provider, no user table, and no role system in
-the framework. `rahti` has no database dependency and never sees a password.
+the authentication module. `rahti` has no database dependency and never sees
+a password. For action and resource checks, use the separate generic ability
+gate described in `authorization.md`.
 
 ## Ownership
 
@@ -17,6 +18,7 @@ the framework. `rahti` has no database dependency and never sees a password.
 | `#[rpc(auth)]` | `rahti-macros` |
 | Which routes are private | the application, in `src/auth.rs` |
 | Users, hashing, sign-up rules | the application |
+| Named abilities and typed resource policies | the application, through `rahti::authorization` |
 
 The application half is `src/auth.rs` — the policy and the password check —
 plus whatever the application builds around it: a `user` entity and its
@@ -115,8 +117,9 @@ no environment in which a typo here is what someone meant.
 `cargo rahti new` writes one `.env`, with this project's generated key and
 cookie name in it, and git ignores it. Nothing is committed in its place — a
 signing secret in git is not a secret. The three variables above are the whole
-list, and the reference for them is this section and the environment reference
-at <https://rahti.tsnc.tech/docs/environment>.
+authentication list; the same file also documents non-authentication runtime
+overrides. The reference is this section and the environment reference at
+<https://rahti.tsnc.tech/docs/environment>.
 
 That means a fresh clone has no `.env` at all. In development it still runs —
 `AUTH_SECRET` is invented and warned about — and before it is deployed the
@@ -134,7 +137,8 @@ which ran first, and a project without a database still reaches its variables.
 
 ## The policy
 
-Built in `src/auth.rs` and installed from `main` before the listener binds:
+Built in `src/auth.rs` and installed from `initialize_application` before the
+router is built:
 
 ```rust
 rahti::auth::configure(auth::settings());
@@ -261,7 +265,8 @@ kicked off.
 
 `rahti::auth::settings()` returns the policy `configure` installed. The
 application's own `auth::settings()` in `src/auth.rs` *builds* one. Call the
-builder once, from `main`; read the installed one everywhere else.
+builder once, during application initialization; read the installed one
+everywhere else.
 
 They are only the same object as long as nobody adjusts the policy before
 installing it — and the builder goes through `AuthSettings::from_env`, which

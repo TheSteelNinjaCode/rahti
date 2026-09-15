@@ -30,6 +30,26 @@ fn everything_has_a_default() {
     assert!(!config.mcp);
 }
 
+#[test]
+#[should_panic(expected = "reserved production liveness route `/health`")]
+fn the_liveness_route_is_always_framework_owned() {
+    let tree = Tree::new("reserved-health");
+    tree.layout("layout.rs").page("health/page.rs");
+    let scan = scanner::scan(tree.path());
+    check_reserved_routes(&scan.entries, false);
+}
+
+#[test]
+fn mcp_routes_are_reserved_only_when_the_endpoint_is_enabled() {
+    let tree = Tree::new("reserved-mcp");
+    tree.layout("layout.rs").page("mcp/page.rs");
+    let scan = scanner::scan(tree.path());
+    check_reserved_routes(&scan.entries, false);
+
+    let refused = std::panic::catch_unwind(|| check_reserved_routes(&scan.entries, true));
+    assert!(refused.is_err());
+}
+
 /// An empty file is a project that has configured nothing, which is a
 /// supported way to have a project — not a parse error.
 #[test]

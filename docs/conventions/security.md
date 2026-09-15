@@ -5,7 +5,15 @@
 Treat request data, route parameters, RPC payloads, upload metadata, database
 content, and external service responses as untrusted. Rahti provides transport
 and rendering safeguards; it does not decide application authorization or
-business validation.
+business validation. Use `rahti::Validator` at the handler boundary and keep
+secrets and backend diagnostics out of its user-facing messages.
+
+The generated router also applies baseline browser response headers to every
+route and public file. Their defaults, CSP compatibility requirements, HSTS
+behavior, and application overrides are defined in `security-middleware.md`.
+Dynamic requests additionally pass through the bounded per-client safety net
+described in `rate-limiting.md`; deployment-wide and DDoS controls still
+belong at the proxy or gateway.
 
 ## HTML and Script Safety
 
@@ -37,17 +45,21 @@ the `X-CSRF-Token` header. The server requires a matching non-empty token.
 - Do not disable or bypass the generated `csrf` layer.
 - CSRF proves request origin/session continuity; it is not authentication or
   authorization. Mark a sensitive RPC `#[rpc(auth)]`, and check inside it that
-  the signed-in user may touch the specific row — see `authentication.md`.
+  the signed-in user may touch the specific row with an application-defined
+  ability — see `authentication.md` and `authorization.md`.
 - Declared RPC parameters are the accepted payload surface. Do not add an
   untyped catch-all payload without deliberate validation.
 
-RPC failures return their application error messages to the browser. Do not
-place secrets, credentials, internal queries, or sensitive upstream responses
-in `Error` messages.
+Expected RPC failures return their public application messages to the browser.
+Unexpected 5xx failures are redacted while development mode is off, but their
+diagnostics still reach server telemetry. Public messages and structured
+details remain application-owned: do not place secrets, credentials, internal
+queries, or sensitive upstream responses in them. See `error-handling.md`.
 
 ## Sessions and Authorization
 
-Full rules in `authentication.md`. The security-relevant ones:
+Full rules are in `authentication.md` and `authorization.md`. The
+security-relevant ones:
 
 - The session cookie is **signed, not encrypted**. Its payload is readable by
   whoever holds it. Never sign in a password hash, an API token, or anything
@@ -59,13 +71,14 @@ Full rules in `authentication.md`. The security-relevant ones:
 - The route guard decides who may *load a page*. `#[rpc(auth)]` decides who may
   *make a call*. An RPC is a POST anyone can send, so protecting the page is
   not protecting the endpoint — mark both.
-- Take the caller's identity from the session, never from an RPC parameter. An
-  `id` argument on a mutation lets anyone act as anyone.
+- Take the caller's identity from the session, never from an RPC parameter. A
+  submitted resource id is input to an authorization policy, not proof that
+  the caller owns that resource.
 - Sessions are stateless and cannot be revoked before they expire. Sign-out
   clears the cookie; it does not invalidate a copy taken elsewhere.
 - Do not add roles, permission strings, or OAuth providers to `rahti::auth`.
-  Authorization beyond "is there a session" belongs in application code, where
-  the row is in hand.
+  Define application abilities with `rahti::authorization`, and enforce them
+  in the handler before a protected read or side effect.
 
 ## Redirects and Navigation
 
@@ -196,3 +209,23 @@ PulsePoint's minified runtime is executable application code served to every
 visitor. Replace it only with a trusted build of the same asset, install that
 build in both locations, verify the two are byte-identical, and review the
 diff. Do not patch minified code directly.
+
+## Cache Boundaries
+
+`rahti::cache` is shared application state. Never cache authorization answers,
+sessions, CSRF values, password material, or another value whose absence or
+staleness changes what a caller is allowed to do. For user-specific derived
+data, include the user, tenant, locale, permission set, and every relevant
+input in the key.
+
+`pub fn cache() -> PageCache` is only for public, deterministic pages.
+Authenticated sessions and responses that set cookies bypass it, but the page
+key intentionally contains only the host and complete URL. It does not model
+an application's arbitrary cookies, locale headers, experiments, or other
+request state. If any of those change the HTML, do not declare a page cache.
+Invalidate affected paths or tags only after the authoritative write succeeds.
+
+External cache adapters own a namespace. Their `clear()` implementation must
+clear only that namespace, never an unrelated application's keys on a shared
+server. Cache credentials stay in the environment, not
+`rahti.config.json`. See `caching.md` for the store contract.

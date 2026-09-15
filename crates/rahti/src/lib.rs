@@ -14,18 +14,30 @@
 
 mod attrs;
 pub mod auth;
+pub mod authorization;
+pub mod cache;
 mod dev;
 mod env;
 mod error;
 mod html;
+pub mod jobs;
 mod layout;
 mod listen;
 mod loading;
+mod metadata;
+pub mod observability;
+pub mod rate_limit;
 mod registry;
+pub mod request_pipeline;
 mod rpc;
+pub mod schedule;
+pub mod security;
 mod shutdown;
+mod static_export;
 mod statics;
+pub mod time;
 mod upload;
+pub mod validation;
 #[cfg(feature = "ws")]
 pub mod ws;
 #[cfg(feature = "mcp")]
@@ -45,7 +57,10 @@ pub use dev::{DEV_ENV, revalidate, routes as dev_routes};
 pub use env::load_env;
 pub use error::{Error, ErrorInfo, ErrorSource, Result, apply_error, panic_response};
 pub use html::{Html, Json, PageBody, Render, RenderJs};
-pub use layout::{ROOT_LAYOUT_HEADER, apply_layout, apply_root_layout, root_document};
+pub use layout::{
+    ROOT_LAYOUT_HEADER, apply_layout, apply_layout_metadata, apply_root_layout,
+    apply_root_layout_metadata, root_document, root_document_metadata,
+};
 /// The listener `main` serves on. Binds the configured address; in dev mode a
 /// busy port falls forward to the next free one, in release it is an error.
 /// `local_url` is where to open a browser for it — a wildcard bind address is
@@ -55,6 +70,7 @@ pub use listen::{listen, local_url};
 pub use loading::{
     REGION_ID as LOADING_REGION_ID, URL_ATTR as LOADING_URL_ATTR, install as install_loading,
 };
+pub use metadata::{Metadata, Page, Robots, apply_metadata, merge_metadata};
 /// The `#[socket]` attribute, behind the same feature as the module it
 /// expands against: without `ws` the attribute would write code that names
 /// `rahti::ws`, and the error should say the feature is off rather than
@@ -62,13 +78,19 @@ pub use loading::{
 #[cfg(feature = "ws")]
 pub use rahti_macros::socket;
 pub use rahti_macros::{component, html, rpc};
+pub use rate_limit::{middleware as rate_limit, state as rate_limit_state};
 pub use registry::{RpcEntry, RpcHandler, check_rpc_names, dispatch as dispatch_registered};
 pub use rpc::{
     RpcBody, RpcCall, RpcResponse, RpcSender, RpcStream, csrf, rpc_failed, rpc_name, rpc_ok,
     rpc_panic_response, rpc_stream, rpc_unknown,
 };
+pub use security::middleware as security_headers;
 pub use shutdown::{
     Shutdown, begin as begin_shutdown, signal as shutdown_signal, watch as watch_shutdown,
+};
+pub use static_export::{
+    StaticExportError, StaticExportReport, StaticExportSkip, StaticRoute, export_static,
+    static_output,
 };
 pub use statics::{PUBLIC_DIR_ENV, public_dir};
 pub use upload::{
@@ -76,6 +98,7 @@ pub use upload::{
     RpcFile, RpcFileReader, RpcUpload, SPILL_DIR_ENV, SPILL_THRESHOLD_ENV, max_file, max_upload,
     spill_dir, spill_threshold,
 };
+pub use validation::{VALIDATION_STATUS, Validate, ValidationErrors, ValidationResult, Validator};
 
 /// Serialization, for the values an `#[rpc]` sends back.
 ///

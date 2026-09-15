@@ -76,6 +76,9 @@ fn entries(files: &[(Kind, &str, &[&str])]) -> Vec<Entry> {
                 auth_rpcs: Vec::new(),
                 sockets: Vec::new(),
                 auth_sockets: Vec::new(),
+                metadata: false,
+                static_paths: false,
+                page_cache: false,
                 // What the scan derives: `app/layout.rs` is a document root
                 // because nothing sits above it. A layout that declares
                 // itself one is built with `as_root`.
@@ -104,6 +107,17 @@ fn with_rpcs(mut entries: Vec<Entry>, file: &str, rpcs: &[&str]) -> Vec<Entry> {
         .find(|e| e.file == file)
         .unwrap_or_else(|| panic!("no entry for {file}"));
     entry.rpcs = rpcs.iter().map(|name| (*name).to_string()).collect();
+    entries
+}
+
+fn with_metadata(mut entries: Vec<Entry>, files: &[&str]) -> Vec<Entry> {
+    for file in files {
+        entries
+            .iter_mut()
+            .find(|entry| entry.file == *file)
+            .unwrap_or_else(|| panic!("no entry for {file}"))
+            .metadata = true;
+    }
     entries
 }
 
@@ -312,6 +326,131 @@ fn layouts_are_layered_innermost_first() {
     assert!(
         at(&out, "l_marketing::layout") < at(&out, "l_root::layout"),
         "{out}"
+    );
+}
+
+#[test]
+fn metadata_is_layered_from_root_to_page() {
+    let entries = with_metadata(
+        entries(&[
+            (LAYOUT, "src/app/layout.rs", &[]),
+            (LAYOUT, "src/app/docs/layout.rs", &[]),
+            (PAGE, "src/app/docs/page.rs", &[]),
+        ]),
+        &[
+            "src/app/layout.rs",
+            "src/app/docs/layout.rs",
+            "src/app/docs/page.rs",
+        ],
+    );
+    let out = gen_routes(&entries, &[], &config());
+    let group = group_for(&out, "/docs");
+
+    assert!(
+        group.contains("apply_metadata(p_docs::metadata(), res)"),
+        "{group}"
+    );
+    assert!(
+        group.contains("apply_layout_metadata(l_docs::layout, l_docs::metadata(), res)"),
+        "{group}"
+    );
+    assert!(
+        group.contains("apply_root_layout_metadata(l_root::layout, \"layout_"),
+        "{group}"
+    );
+    assert!(
+        at(group, "apply_metadata") < at(group, "apply_layout_metadata"),
+        "the page metadata is inside the layouts: {group}"
+    );
+    assert!(
+        at(group, "apply_layout_metadata") < at(group, "apply_root_layout_metadata"),
+        "the root metadata merges last as a parent: {group}"
+    );
+}
+
+#[test]
+fn metadata_is_reported_in_the_manifest() {
+    let entries = with_metadata(app(), &["src/app/layout.rs", "src/app/page.rs"]);
+    let out = gen_manifest(&entries, &[], &[], None, &config());
+    let page = out
+        .lines()
+        .find(|line| line.contains("src/app/page.rs"))
+        .unwrap();
+    let layout = out
+        .lines()
+        .find(|line| line.contains("src/app/layout.rs"))
+        .unwrap();
+    assert!(page.contains("\"metadata\": true"), "{page}");
+    assert!(layout.contains("\"metadata\": true"), "{layout}");
+}
+
+#[test]
+fn page_caching_is_reported_in_the_manifest() {
+    let mut entries = app();
+    entries
+        .iter_mut()
+        .find(|entry| entry.file == "src/app/page.rs")
+        .unwrap()
+        .page_cache = true;
+    let out = gen_manifest(&entries, &[], &[], None, &config());
+    let page = out
+        .lines()
+        .find(|line| line.contains("src/app/page.rs"))
+        .unwrap();
+    assert!(page.contains("\"pageCache\": true"), "{page}");
+}
+
+#[test]
+fn static_export_lists_fixed_and_declared_dynamic_pages() {
+    let mut entries = entries(&[
+        (PAGE, "src/app/page.rs", &[]),
+        (PAGE, "src/app/posts/[id]/page.rs", &[]),
+        (PAGE, "src/app/docs/[...slug]/page.rs", &[]),
+        (ROUTE, "src/app/api/route.rs", &["get"]),
+    ]);
+    entries
+        .iter_mut()
+        .find(|entry| entry.file == "src/app/posts/[id]/page.rs")
+        .unwrap()
+        .static_paths = true;
+    let out = gen_routes(&entries, &[], &config());
+
+    assert!(out.contains("pub async fn static_routes()"), "{out}");
+    assert!(out.contains("StaticRoute::fixed(\"/\")"), "{out}");
+    assert!(
+        out.contains("StaticRoute::dynamic(&[\"/posts/{id}\"], p_posts_id::static_paths().await)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("StaticRoute::undeclared(&[\"/docs/{*slug}\"]"),
+        "{out}"
+    );
+    assert!(!out.contains("StaticRoute::fixed(\"/api\")"), "{out}");
+}
+
+#[test]
+fn a_cached_page_gets_its_own_complete_document_layer() {
+    let mut entries = entries(&[
+        (LAYOUT, "src/app/layout.rs", &[]),
+        (PAGE, "src/app/page.rs", &[]),
+        (PAGE, "src/app/news/page.rs", &[]),
+    ]);
+    entries
+        .iter_mut()
+        .find(|entry| entry.file == "src/app/news/page.rs")
+        .unwrap()
+        .page_cache = true;
+    let out = gen_routes(&entries, &[], &config());
+
+    assert_eq!(out.matches("let group_").count(), 2, "{out}");
+    let cached = group_for(&out, "/news");
+    let root = cached.find("apply_root_layout").unwrap();
+    let cache = cached.find("p_news::cache()").unwrap();
+    let auth = cached.find("auth_guard").unwrap();
+    assert!(root < cache && cache < auth, "{cached}");
+    assert!(
+        cached.contains("::rahti::cache::page_middleware"),
+        "{cached}"
     );
 }
 
@@ -532,7 +671,9 @@ fn the_not_found_page_names_its_root_layout() {
     let out = gen_routes(&app(), &[], &config());
     let id = route::component_id(Kind::Layout, "layout.rs");
     assert!(
-        out.contains(&format!("::rahti::root_document(\"{id}\", l_root::layout(")),
+        out.contains(&format!(
+            "::rahti::root_document_metadata(\"{id}\", l_root::layout("
+        )),
         "{out}"
     );
 }
@@ -881,6 +1022,36 @@ fn an_app_with_rpcs_issues_csrf_tokens() {
     );
 }
 
+#[test]
+fn security_headers_wrap_the_complete_router() {
+    let with_rpc = gen_routes(
+        &with_rpcs(app(), "src/app/users/page.rs", &["greet"]),
+        &[],
+        &config(),
+    );
+    let without_rpc = gen_routes(&app(), &[], &config());
+    let security = ".layer(axum::middleware::from_fn(::rahti::security_headers))";
+    let rate = "::rahti::rate_limit_state(::rahti::public_dir(PUBLIC_DIR))";
+    let observability = "::rahti::observability::middleware";
+    let probes = "::rahti::observability::routes(observability.clone())";
+
+    for out in [&with_rpc, &without_rpc] {
+        assert_eq!(out.matches(security).count(), 1, "{out}");
+        assert_eq!(out.matches(rate).count(), 1, "{out}");
+        assert_eq!(out.matches(observability).count(), 1, "{out}");
+        assert_eq!(out.matches(probes).count(), 1, "{out}");
+    }
+
+    let csrf = with_rpc.rfind("::rahti::csrf").unwrap();
+    let rate = with_rpc.rfind("::rahti::rate_limit,").unwrap();
+    let security = with_rpc.rfind("::rahti::security_headers").unwrap();
+    let observability = with_rpc.rfind(observability).unwrap();
+    assert!(
+        csrf < rate && rate < security && security < observability,
+        "{with_rpc}"
+    );
+}
+
 /// The auth layer goes over every page group, so a private route is refused
 /// before its handler runs — and over the rpc router, so `#[rpc(auth)]` has a
 /// session to check and `auth::sign_in` has somewhere to write its cookie.
@@ -905,6 +1076,41 @@ fn every_group_and_the_rpc_router_carry_the_auth_layer() {
         .and_then(|rest| rest.split(";").next())
         .unwrap_or_else(|| panic!("{out}"));
     assert!(group.trim_end().ends_with(layer.trim()), "{group}");
+}
+
+#[test]
+fn every_dynamic_router_carries_the_application_pipeline_inside_auth() {
+    let out = gen_routes(
+        &with_rpcs(app(), "src/app/users/page.rs", &["greet"]),
+        &[],
+        &config(),
+    );
+    let pipeline = "::rahti::request_pipeline::middleware";
+    let auth = "::rahti::auth_guard";
+    let groups = out.matches("let group_").count();
+
+    // Once per page/API group, plus the separate RPC router.
+    assert_eq!(out.matches(pipeline).count(), groups + 1, "{out}");
+
+    for dynamic in out
+        .split("let group_")
+        .skip(1)
+        .take(groups)
+        .chain(out.split("let rpc = Router::new()").nth(1).into_iter())
+    {
+        let dynamic = dynamic.split(';').next().unwrap();
+        let pipeline_at = dynamic
+            .find(pipeline)
+            .unwrap_or_else(|| panic!("{dynamic}"));
+        let auth_at = dynamic.find(auth).unwrap_or_else(|| panic!("{dynamic}"));
+        // Later Axum layers run first on the request, so source order here
+        // means auth encloses and cannot be bypassed by the application chain.
+        assert!(pipeline_at < auth_at, "{dynamic}");
+    }
+
+    // Framework fallbacks and endpoints are merged outside the dynamic groups.
+    let complete_router = out.split("    Router::new()\n").last().unwrap();
+    assert!(!complete_router.contains(pipeline), "{complete_router}");
 }
 
 /// Unlike the CSRF layer, which exists only when there is an rpc to protect:

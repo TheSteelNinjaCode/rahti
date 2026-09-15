@@ -149,6 +149,71 @@ fn layouts_and_boundaries_claim_no_url() {
     assert!(scanned.entry("error.rs").urls.is_empty());
 }
 
+#[test]
+fn pages_and_layouts_report_static_metadata() {
+    let tree = Tree::new("metadata");
+    tree.file(
+        "layout.rs",
+        "pub fn metadata() -> Metadata { todo!() }\npub fn layout(children: Html) -> Html { children }",
+    )
+    .file(
+        "page.rs",
+        "pub fn metadata() -> Metadata { todo!() }\npub async fn page() -> Html { todo!() }",
+    )
+    .file(
+        "plain/page.rs",
+        "/// `pub fn metadata()` is only an example.\npub async fn page() -> Html { todo!() }",
+    );
+
+    let scanned = walk_tree(&tree);
+    assert!(scanned.entry("layout.rs").metadata);
+    assert!(scanned.entry("page.rs").metadata);
+    assert!(!scanned.entry("plain/page.rs").metadata);
+}
+
+#[test]
+fn a_dynamic_page_reports_its_static_paths_provider() {
+    let tree = Tree::new("static-paths");
+    tree.file(
+        "posts/[id]/page.rs",
+        "pub async fn static_paths() -> Vec<&'static str> { vec![\"/posts/1\"] }\npub async fn page() -> Html { todo!() }",
+    );
+    assert!(walk_tree(&tree).entry("posts/[id]/page.rs").static_paths);
+}
+
+#[test]
+#[should_panic(expected = "not a dynamic page")]
+fn a_static_page_does_not_take_static_paths() {
+    let tree = Tree::new("unneeded-static-paths");
+    tree.file(
+        "about/page.rs",
+        "pub async fn static_paths() -> Vec<&'static str> { vec![] }\npub async fn page() -> Html { todo!() }",
+    );
+    scan(tree.path());
+}
+
+#[test]
+fn a_page_can_declare_its_cache_policy() {
+    let tree = Tree::new("page-cache");
+    tree.file(
+        "news/page.rs",
+        "pub fn cache() -> PageCache { PageCache::seconds(60) }\npub async fn page() -> Html { todo!() }",
+    );
+    assert!(walk_tree(&tree).entry("news/page.rs").page_cache);
+}
+
+#[test]
+#[should_panic(expected = "page caching belongs only")]
+fn a_layout_cannot_declare_a_page_cache() {
+    let tree = Tree::new("layout-cache");
+    tree.file(
+        "layout.rs",
+        "pub fn cache() -> PageCache { PageCache::seconds(60) }\npub fn layout(children: Html) -> Html { children }",
+    )
+    .file("page.rs", "pub async fn page() -> Html { todo!() }");
+    scan(tree.path());
+}
+
 // ------------------------------------------------------------------ methods
 
 #[test]

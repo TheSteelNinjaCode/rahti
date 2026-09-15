@@ -160,10 +160,11 @@ pub fn routes(public_dir: PathBuf) -> Router {
 /// conditional request still gets a 304 when nothing changed, so this costs
 /// a header and buys a stylesheet that is never stale.
 ///
-/// Dev only: a production build wants those heuristics.
+/// Dev only: a production build wants those heuristics. An explicit response
+/// policy such as a probe's `no-store` is stricter and remains authoritative.
 pub async fn revalidate(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let mut response = next.run(request).await;
-    if enabled() {
+    if enabled() && !response.headers().contains_key(header::CACHE_CONTROL) {
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
@@ -346,10 +347,15 @@ fn now_millis() -> u128 {
 /// browser bridge uses. Application logging remains the application's choice;
 /// this covers the failures Rahti itself turns into page or RPC responses.
 pub(crate) fn record_server(level: &str, target: &str, message: &str) {
-    eprintln!("{message}");
     if !DIAGNOSTICS_ACTIVE.load(Ordering::Acquire) {
+        if crate::observability::enabled() {
+            crate::observability::record(level, target, message);
+        } else {
+            eprintln!("{message}");
+        }
         return;
     }
+    eprintln!("{message}");
     append_diagnostic(json!({
         "kind": "server",
         "receivedAtMs": now_millis(),
