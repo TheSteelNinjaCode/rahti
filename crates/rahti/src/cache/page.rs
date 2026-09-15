@@ -149,6 +149,7 @@ fn request_is_cacheable(request: &Request) -> bool {
         || crate::auth::is_authenticated()
         || request.headers().contains_key(header::AUTHORIZATION)
         || request.headers().contains_key(header::RANGE)
+        || !crate::i18n::request_cache_safe(request)
     {
         return false;
     }

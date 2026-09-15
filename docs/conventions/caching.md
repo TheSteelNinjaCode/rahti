@@ -144,6 +144,11 @@ The key contains the request host and complete path plus query string, so
 contain arbitrary cookies, locale headers, or application-defined request
 state. A page that varies on any of those values must not export `cache()`.
 
+Localized cacheable pages use explicit locale-prefixed URLs, so the complete
+path separates `/en/products` from `/es/products`. An unprefixed i18n request
+whose locale came from `Accept-Language` bypasses page caching; redirect it to
+the explicit locale URL first. See `localization.md`.
+
 `X-Rahti-Cache` reports `MISS` when Rahti rendered and stored a page, `HIT`
 when it reused one, and `BYPASS` when a declared cache policy was unsafe or
 unavailable for that request or response. A `HEAD` request can reuse an

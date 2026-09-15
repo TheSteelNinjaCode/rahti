@@ -446,7 +446,35 @@ pub fn routes_rs(
                 .map(|url| format!("\"{url}\""))
                 .collect::<Vec<_>>()
                 .join(", ");
-            if page.static_paths {
+            let locale_only = config.i18n.as_ref().is_some_and(|_| {
+                page.urls.iter().all(|url| {
+                    let without_locale = url.replace("{locale}", "").replace("{lang}", "");
+                    !without_locale.contains('{')
+                }) && page.urls.iter().any(|url| {
+                    url == "/{locale}"
+                        || url.starts_with("/{locale}/")
+                        || url == "/{lang}"
+                        || url.starts_with("/{lang}/")
+                })
+            });
+            if locale_only {
+                let paths = page
+                    .urls
+                    .iter()
+                    .flat_map(|url| {
+                        config.i18n.iter().flat_map(move |i18n| {
+                            i18n.locales.iter().map(move |locale| {
+                                url.replace("{locale}", locale).replace("{lang}", locale)
+                            })
+                        })
+                    })
+                    .map(|path| format!("{path:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!(
+                    "        ::rahti::StaticRoute::dynamic(&[{patterns}], vec![{paths}]),\n"
+                ));
+            } else if page.static_paths {
                 out.push_str(&format!(
                     "        ::rahti::StaticRoute::dynamic(&[{patterns}], {}::static_paths().await),\n",
                     page.module
@@ -569,6 +597,38 @@ pub fn routes_rs(
          env!(\"CARGO_PKG_NAME\"),\n        \
          ::rahti::public_dir(PUBLIC_DIR),\n    );\n\n",
     );
+
+    if let Some(i18n) = &config.i18n {
+        let locales = i18n
+            .locales
+            .iter()
+            .map(|locale| format!("{locale:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str("    // Validated Fluent catalogs embedded by rahti-build.\n");
+        out.push_str(&format!(
+            "    let i18n = ::rahti::i18n::state({:?}, &[{}], &[\n",
+            i18n.default, locales
+        ));
+        for (locale, fallbacks) in &i18n.fallbacks {
+            let fallbacks = fallbacks
+                .iter()
+                .map(|fallback| format!("{fallback:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "        ::rahti::i18n::FallbackSource {{ locale: {locale:?}, fallbacks: &[{fallbacks}] }},\n"
+            ));
+        }
+        out.push_str("    ], &[\n");
+        for resource in &i18n.resources {
+            out.push_str(&format!(
+                "        ::rahti::i18n::ResourceSource {{ locale: {:?}, source: {:?} }},\n",
+                resource.locale, resource.source
+            ));
+        }
+        out.push_str("    ]);\n\n");
+    }
 
     for (i, group) in groups.iter().enumerate() {
         let mut wrapping: Vec<&str> = group.chain.iter().map(|l| l.file.as_str()).collect();
@@ -693,6 +753,13 @@ pub fn routes_rs(
         // all-private app whose stylesheet redirected to the sign-in page
         // would render that page unstyled.
         out.push_str(&auth_layer());
+        if config.i18n.is_some() {
+            out.push_str(
+                "        .layer(axum::middleware::from_fn_with_state(\n            \
+                 i18n.clone(),\n            \
+                 ::rahti::i18n::middleware,\n        ))\n",
+            );
+        }
         out.push_str("        ;\n\n");
     }
 
@@ -748,6 +815,13 @@ pub fn routes_rs(
         // that verifies a password — the cookie it asks for is written by
         // this layer on the way back out.
         out.push_str(&auth_layer());
+        if config.i18n.is_some() {
+            out.push_str(
+                "        .layer(axum::middleware::from_fn_with_state(\n            \
+                 i18n.clone(),\n            \
+                 ::rahti::i18n::middleware,\n        ))\n",
+            );
+        }
         out.push_str("        ;\n\n");
     }
 
@@ -992,6 +1066,34 @@ pub fn manifest_json(
         ));
     }
     out.push_str("  ],\n");
+
+    if let Some(i18n) = &config.i18n {
+        let json_list = |values: &[String]| {
+            values
+                .iter()
+                .map(|value| serde_json::to_string(value).unwrap())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let files = i18n
+            .resources
+            .iter()
+            .map(|resource| resource.path.clone())
+            .collect::<Vec<_>>();
+        out.push_str("  \"i18n\": {\n");
+        out.push_str(&format!(
+            "    \"default\": {},\n",
+            serde_json::to_string(&i18n.default).unwrap()
+        ));
+        out.push_str(&format!(
+            "    \"locales\": [{}],\n",
+            json_list(&i18n.locales)
+        ));
+        out.push_str(&format!("    \"catalogs\": [{}]\n", json_list(&files)));
+        out.push_str("  },\n");
+    } else {
+        out.push_str("  \"i18n\": null,\n");
+    }
 
     // What the project's database looks like from the outside: which backend,
     // which entities exist, and the migrations in the order they are applied.

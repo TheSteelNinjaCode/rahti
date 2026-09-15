@@ -56,6 +56,8 @@ sha2 = "0.11"
 getrandom = "0.3"
 # Async middleware panic handling and concurrent readiness checks.
 futures-util = "0.3"
+fluent-bundle = "0.16"
+unic-langid = "0.9"
 # The streaming half of the upload wire. `axum::extract::Multipart` hands out
 # a `Field` borrowed from it, which cannot be given to a handler; multer — the
 # crate axum's own multipart is built on, so this adds nothing to the tree —

@@ -8,7 +8,7 @@ use super::*;
 use crate::Engine;
 use crate::route::Kind;
 use crate::scanner::Entry;
-use crate::{Css, DEFAULT_TAILWIND};
+use crate::{Css, DEFAULT_TAILWIND, I18n, I18nResource};
 
 fn config() -> Config {
     Config {
@@ -17,6 +17,7 @@ fn config() -> Config {
         host: "0.0.0.0".to_string(),
         port: 3000,
         mcp: false,
+        i18n: None,
         // The router is the same with a database and without one — the
         // connection is reached from a page, not routed to.
         db: None,
@@ -46,6 +47,38 @@ fn mcp_is_merged_only_when_configured() {
 
     let without_mcp = gen_routes(&app(), &[], &config());
     assert!(!without_mcp.contains("rahti::mcp"), "{without_mcp}");
+}
+
+#[test]
+fn localization_catalogs_and_layers_are_generated_only_when_configured() {
+    let mut enabled = config();
+    enabled.i18n = Some(I18n {
+        default: "en".into(),
+        locales: vec!["en".into(), "es".into()],
+        fallbacks: vec![("es".into(), vec!["en".into()])],
+        dir: "lang".into(),
+        resources: vec![I18nResource {
+            locale: "en".into(),
+            path: "lang/en/app.ftl".into(),
+            source: "hello = Hello".into(),
+        }],
+    });
+    let generated = gen_routes(&app(), &[], &enabled);
+    assert!(
+        generated.contains("let i18n = ::rahti::i18n::state"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("ResourceSource { locale: \"en\", source: \"hello = Hello\" }"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("::rahti::i18n::middleware"),
+        "{generated}"
+    );
+
+    let plain = gen_routes(&app(), &[], &config());
+    assert!(!plain.contains("::rahti::i18n"), "{plain}");
 }
 
 /// Build the entries a scan of these files would produce.

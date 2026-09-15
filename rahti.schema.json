@@ -108,6 +108,40 @@
       "type": "boolean",
       "description": "The project opts into MCP. When true, the scaffold owns .mcp.json for local stdio, enables rahti's optional mcp Cargo feature, publishes an editable public/llms.txt, and mounts a bearer-protected Streamable HTTP endpoint at /mcp/. Absent or false means none of those application routes or dependencies are generated."
     },
+    "i18n": {
+      "type": "object",
+      "description": "Optional server-side localization. Fluent catalogs under dir/<locale> are validated and embedded at build time; [locale] and [lang] route segments are restricted to the configured locale list.",
+      "required": ["locales", "default"],
+      "properties": {
+        "locales": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Supported Unicode locale identifiers, such as en, es-NI, or ar."
+        },
+        "default": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Fallback locale and the locale used on routes without a locale segment. Must also appear in locales."
+        },
+        "fallbacks": {
+          "type": "object",
+          "description": "Ordered per-locale fallback chains. Every key and value must appear in locales.",
+          "additionalProperties": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "dir": {
+          "type": "string",
+          "default": "lang",
+          "description": "Catalog root relative to the project. Each configured locale owns a subdirectory containing .ftl files."
+        }
+      },
+      "additionalProperties": false
+    },
     "db": {
       "type": ["object", "null"],
       "description": "The database wiring. Absent — or null — means the project has no database: no directories are created, no modules are generated, and nothing in the build mentions SeaORM. Note what is *not* here: the connection string. It carries credentials and this file is committed, so the URL is read from DATABASE_URL at runtime and lives in an ignored .env.",

@@ -75,6 +75,10 @@ flag out and the project carries nothing of the feature.
 - **Typed RPC.** `#[rpc]` beside its caller, CSRF protection by default,
   `rahti::Result<T>` error propagation, server streaming, and uploads with
   progress.
+- **Localization** (optional): build-validated Fluent catalogs embedded in the
+  binary, request-local locale and fallback selection, plural rules,
+  locale-prefixed routes, language direction, localized auth redirects, and
+  static export per locale.
 - **WebSockets** (optional `ws` feature): `#[socket]` functions beside their
   pages, arguments as the connection's first frame, a same-origin handshake
   check, `#[socket(auth)]` refusing the upgrade without a session, and

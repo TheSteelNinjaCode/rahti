@@ -33,6 +33,7 @@ application, which is the perspective every rule below serves.
 | Page titles, descriptions, social cards, canonical URLs, robots | `docs/conventions/metadata-and-seo.md` |
 | Static HTML builds, dynamic export paths, output safety | `docs/conventions/static-generation.md` |
 | Cache stores, page caching, expiration, invalidation | `docs/conventions/caching.md` |
+| Locales, Fluent catalogs, fallback, localized routes, language direction | `docs/conventions/localization.md` |
 | Typed input rules, field errors, HTTP 422 validation failures | `docs/conventions/validation.md` |
 | Browser state, hooks, bindings, events, lists, refs, SPA navigation | `docs/conventions/pulsepoint.md` |
 | Browser/backend development diagnostics and `.rahti/dev.log` | `docs/conventions/diagnostics.md` |
@@ -243,13 +244,21 @@ preserve them, and documentation or scaffold changes must teach them.
 39. Application calendar interpretation is installed once from the validated
     IANA `APP_TIMEZONE`. Local schedules and calendar queries use it; session
     expiry, cache TTLs, retries, and stored instants remain absolute/UTC.
+40. Localization is opt-in through `rahti.config.json`. Catalogs live under
+    the configured `i18n.dir` as `<locale>/**/*.ftl`, are validated and
+    embedded at build time, and are read through request-task-local
+    `rahti::i18n` state. A root `[locale]` or `[lang]` segment is authoritative
+    and rejects unsupported values. Translation results are escaped text, not
+    trusted markup; keep explicit locale prefixes in localized links and never
+    replace a URL locale from `Accept-Language`.
 
 ## Repository Map
 
 - `crates/rahti/` - server runtime: HTML values, layouts, metadata, errors,
   RPC, streaming, uploads, authentication/authorization, caching, validation,
   security, rate limiting, request middleware, observability, jobs,
-  scheduling, application time, sockets, statics, live reload, and shutdown.
+  scheduling, application time, localization, sockets, statics, live reload,
+  and shutdown.
 - `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[socket]`.
 - `crates/rahti-build/` - configuration, filesystem scan, router/component
   generation, manifest, and CSS.

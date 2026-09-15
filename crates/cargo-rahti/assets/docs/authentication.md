@@ -190,6 +190,12 @@ Two ways round, and the choice is the application's:
 `auth_routes` is never private under either mode. A login you must be logged in
 to reach is a locked-out application.
 
+In a localized application these paths stay application-relative: `/account`
+matches `/en/account` and `/es/account`. The guard removes the active locale
+before policy matching and adds it to configured sign-in and landing targets
+on redirects. The concrete `next=` URL retains its locale. See
+`localization.md`.
+
 ### How a route is matched
 
 A listed route **covers its subtree**: `/account` protects `/account/billing`

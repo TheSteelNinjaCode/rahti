@@ -88,6 +88,9 @@ The server runtime exports:
 - `time`: validated IANA application time, aware local `now`/`today`, UTC
   conversion and half-open local-day query bounds, kept deliberately separate
   from absolute expiry and duration clocks;
+- `i18n`: immutable embedded Fluent catalogs, request-task-local locale
+  selection, fallback lookup, plural/select formatting, localized path
+  construction, document direction, and `Content-Language`;
 - `cache`: typed JSON caching over a replaceable asynchronous byte-store
   contract, with expiration and invalidation plus a bounded process-local LRU
   default; pages can opt into anonymous complete-document caching with TTL,
@@ -161,6 +164,8 @@ On every relevant Cargo build it:
   `src/migrations/mod.rs` — including the `Migrator` — without depending on
   SeaORM or reading any of its code;
 - compiles or copies CSS;
+- validates configured locale identifiers and Fluent catalogs, then embeds
+  their sources into the generated router;
 - emits Cargo watch directives for every relevant path.
 
 ### `cargo-rahti`
@@ -259,6 +264,13 @@ the project workspace, and `cargo-rahti-native` is a separate install.
 ## Implemented Feature Inventory
 
 The current implementation covers:
+
+- optional server-side localization with configured Unicode locale
+  identifiers, build-validated and binary-embedded Fluent catalogs,
+  request-local lookup and fallback, named arguments, locale plural rules,
+  `[locale]`/`[lang]` route validation, language direction, localized auth
+  policy matching and redirects, `Content-Language`, and automatic static
+  expansion when locale is a page's only dynamic segment;
 
 - static, dynamic, catch-all, optional catch-all, and route-group paths;
 - static site generation through the application's real startup and generated

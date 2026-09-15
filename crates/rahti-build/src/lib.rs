@@ -13,6 +13,7 @@ mod codegen;
 mod components;
 mod css;
 mod db;
+mod i18n;
 mod route;
 mod scanner;
 pub mod sha256;
@@ -37,12 +38,30 @@ pub struct Config {
     pub port: u16,
     /// The optional authenticated HTTP MCP endpoint.
     pub mcp: bool,
+    /// Optional server-side localization and its embedded catalogs.
+    pub i18n: Option<I18n>,
     pub css: Css,
     /// The database wiring, when the project has one.
     ///
     /// `None` is the ordinary case and costs nothing: no directories, no
     /// generated modules, no mention of SeaORM anywhere in the build.
     pub db: Option<Db>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct I18n {
+    pub default: String,
+    pub locales: Vec<String>,
+    pub fallbacks: Vec<(String, Vec<String>)>,
+    pub dir: String,
+    pub resources: Vec<I18nResource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct I18nResource {
+    pub locale: String,
+    pub path: String,
+    pub source: String,
 }
 
 /// How `entry` becomes `output`.
@@ -176,7 +195,10 @@ pub fn run() {
     // already treats as a reason to rerun it.
     println!("cargo:rerun-if-changed={CONFIG_PATH}");
 
-    let config = load_config();
+    let mut config = load_config();
+    if let Some(localization) = config.i18n.as_mut() {
+        i18n::scan(localization);
+    }
 
     // `html!` reads this during expansion to work out which part of a file
     // path is the route, so `pp-component` names survive a moved app dir.
@@ -213,6 +235,12 @@ pub fn run() {
         .chain(watched_db.into_iter().flatten())
     {
         println!("cargo:rerun-if-changed={path}");
+    }
+    if let Some(localization) = &config.i18n {
+        println!("cargo:rerun-if-changed={}", localization.dir);
+        for resource in &localization.resources {
+            println!("cargo:rerun-if-changed={}", resource.path);
+        }
     }
 
     // After the scan, because a stylesheet is compiled against the classes
@@ -385,6 +413,7 @@ fn parse_config(raw: &str) -> Config {
             .get("mcp")
             .and_then(|value| value.as_bool())
             .unwrap_or(false),
+        i18n: i18n::parse(&value),
         css,
     }
 }

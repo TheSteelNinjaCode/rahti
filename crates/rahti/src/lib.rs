@@ -20,6 +20,7 @@ mod dev;
 mod env;
 mod error;
 mod html;
+pub mod i18n;
 pub mod jobs;
 mod layout;
 mod listen;

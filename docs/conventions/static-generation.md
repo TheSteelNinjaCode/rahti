@@ -64,6 +64,11 @@ Do not declare `static_paths()` on a non-dynamic page, layout, API route, or
 other convention file. The build rejects that shape because only a dynamic
 page needs concrete URLs.
 
+With localization configured, a page whose only dynamic segment is a root
+`[locale]` or `[lang]` is expanded once per configured locale automatically.
+A page with locale plus another dynamic segment still declares complete URLs,
+including the locale, in `static_paths()`. See `localization.md`.
+
 ## What Is Exportable
 
 The exporter writes a response only when the router returns `200 OK` with a

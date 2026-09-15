@@ -28,6 +28,40 @@ fn everything_has_a_default() {
     assert_eq!(config.host, "0.0.0.0");
     assert_eq!(config.port, 3000);
     assert!(!config.mcp);
+    assert!(config.i18n.is_none());
+}
+
+#[test]
+fn localization_configuration_is_canonical_and_ordered() {
+    let config = parse_config(
+        r#"{"i18n":{"locales":["en-us","es","es-NI"],"default":"en-US","dir":"translations","fallbacks":{"es-NI":["es","en-US"],"es":["en-US"]}}}"#,
+    );
+    let i18n = config.i18n.unwrap();
+    assert_eq!(i18n.locales, ["en-US", "es", "es-NI"]);
+    assert_eq!(i18n.default, "en-US");
+    assert_eq!(i18n.dir, "translations");
+    assert_eq!(
+        i18n.fallbacks,
+        [
+            ("es".to_string(), vec!["en-US".to_string()]),
+            (
+                "es-NI".to_string(),
+                vec!["es".to_string(), "en-US".to_string()]
+            )
+        ]
+    );
+}
+
+#[test]
+#[should_panic(expected = "is not listed in i18n.locales")]
+fn localization_default_must_be_supported() {
+    parse_config(r#"{"i18n":{"locales":["es"],"default":"en"}}"#);
+}
+
+#[test]
+#[should_panic(expected = "falls back to itself")]
+fn localization_fallback_cannot_cycle_to_itself() {
+    parse_config(r#"{"i18n":{"locales":["en","es"],"default":"en","fallbacks":{"es":["es"]}}}"#);
 }
 
 #[test]

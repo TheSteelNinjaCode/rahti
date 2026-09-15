@@ -20,7 +20,7 @@ pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js
 /// does — a published crate cannot read a file outside its own directory —
 /// and a test holds each one byte-identical to its canonical original.
 ///
-/// These twenty-three are unconditional. The two that depend on a scaffold choice —
+/// These twenty-four are unconditional. The two that depend on a scaffold choice —
 /// `database.md` and `websockets.md` — are below, written only when the
 /// choice was made: a guide that documents a feature the project does not
 /// have teaches an agent to reach for it.
@@ -30,7 +30,7 @@ pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js
 /// by installing a separate tool, and the document is what tells the reader
 /// that the option exists and what it costs. Withholding it would leave
 /// somebody reaching for a Tauri tutorial and wiring the framework up by hand.
-pub const CORE_DOCS: [(&str, &str); 23] = [
+pub const CORE_DOCS: [(&str, &str); 24] = [
     ("routing.md", include_str!("../assets/docs/routing.md")),
     (
         "rendering-and-components.md",
@@ -45,6 +45,10 @@ pub const CORE_DOCS: [(&str, &str); 23] = [
         include_str!("../assets/docs/static-generation.md"),
     ),
     ("caching.md", include_str!("../assets/docs/caching.md")),
+    (
+        "localization.md",
+        include_str!("../assets/docs/localization.md"),
+    ),
     (
         "validation.md",
         include_str!("../assets/docs/validation.md"),
@@ -1658,6 +1662,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/caching.md` |\n",
     );
     out.push_str(
+        "| Locales, Fluent catalogs, fallback, localized routes, language direction | \
+         `docs/conventions/localization.md` |\n",
+    );
+    out.push_str(
         "| Typed input rules, field errors, HTTP 422 validation failures | \
          `docs/conventions/validation.md` |\n",
     );
@@ -1910,6 +1918,15 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          controls stored instants, sessions, cache TTLs, request budgets,\n\
          retry delays, or signatures. Store instants in UTC and query local\n\
          dates with `rahti::time::day_bounds_utc`."
+            .to_string(),
+    );
+    rules.push(
+        "Localization is opt-in through `rahti.config.json`. Fluent catalogs\n\
+         live under `<i18n.dir>/<locale>/`, are validated and embedded at build\n\
+         time, and are read through request-task-local `rahti::i18n` state. A\n\
+         root `[locale]` or `[lang]` segment is authoritative and rejects\n\
+         unsupported values. Translation results are escaped text, not trusted\n\
+         markup, and localized links keep an explicit locale prefix."
             .to_string(),
     );
     rules.push(

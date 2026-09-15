@@ -716,6 +716,7 @@ pub fn require() -> Result<Session, Response> {
 pub async fn guard(req: Request, next: Next) -> Response {
     let settings = settings();
     let path = req.uri().path().to_string();
+    let policy_path = crate::i18n::policy_path(&path);
     let is_rpc = req.headers().get(FUNCTION_HEADER).is_some();
 
     let session = read_cookie(req.headers(), &settings.cookie)
@@ -727,7 +728,7 @@ pub async fn guard(req: Request, next: Next) -> Response {
     // instead. The rpc's own `#[rpc(auth)]` is the finer check; this is the
     // one that covers a page-wide policy.
     if is_rpc {
-        if session.is_none() && settings.is_private_route(&path) {
+        if session.is_none() && settings.is_private_route(&policy_path) {
             return super::rpc::json_error(
                 StatusCode::UNAUTHORIZED,
                 format!(
@@ -738,16 +739,16 @@ pub async fn guard(req: Request, next: Next) -> Response {
                 ),
             );
         }
-    } else if session.is_some() && settings.is_auth_route(&path) {
+    } else if session.is_some() && settings.is_auth_route(&policy_path) {
         // Already signed in, and asking for the sign-in page. `next=` is
         // honoured here so a visitor who was bounced to `/signin`, and turns
         // out to have a session already, still lands where they were going.
         let target = query_param(req.uri().query(), "next")
             .map(|next| safe_target(&next, &settings.after_signin))
             .unwrap_or_else(|| safe_target(&settings.after_signin, "/"));
-        return redirect(&target);
-    } else if session.is_none() && settings.is_private_route(&path) {
-        let signin = safe_target(&settings.signin, "/");
+        return redirect(&crate::i18n::scoped_path(&target));
+    } else if session.is_none() && settings.is_private_route(&policy_path) {
+        let signin = crate::i18n::scoped_path(&safe_target(&settings.signin, "/"));
         return redirect(&format!("{signin}?next={}", encode_query(&path)));
     }
 

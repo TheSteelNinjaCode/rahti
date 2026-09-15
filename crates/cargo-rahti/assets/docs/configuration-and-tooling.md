@@ -43,6 +43,10 @@
   its optional `mcp` Cargo feature, the generated router mounts `/mcp/` and
   `/.well-known/mcp.json`, and the scaffold writes `.mcp.json` plus an editable
   `public/llms.txt`. False or absent compiles and mounts none of it.
+- `i18n` is absent unless the project uses localization. When present it names
+  the supported/default locales, fallback chains, and the Fluent catalog
+  directory. Catalog contents are application data embedded at build time;
+  see `localization.md`.
 - The active Rahti version comes from `Cargo.toml`.
 
 All operational keys default, but keep the file valid JSON and update the

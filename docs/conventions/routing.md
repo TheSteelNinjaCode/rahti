@@ -23,6 +23,11 @@ concrete URLs rendered by `cargo rahti build --static`. Static pages are
 included automatically. The provider and exporter contract are documented in
 `static-generation.md`.
 
+When localization is configured, a root dynamic segment named `[locale]` or
+`[lang]` has framework meaning: only configured locales match, and its value
+selects the request's Fluent catalog. Other dynamic names remain ordinary path
+parameters. See `localization.md`.
+
 A public, deterministic page may export `pub fn cache() -> PageCache` to
 cache its complete HTML response. This is opt-in, anonymous-only, and separate
 from static generation. TTL, tags, bypass rules, and path/tag revalidation are
