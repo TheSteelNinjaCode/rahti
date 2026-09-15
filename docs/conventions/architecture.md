@@ -179,12 +179,13 @@ On every relevant Cargo build it:
 - Every scaffolded project also carries a `.cargo/config.toml` whose `dev`
   alias makes `cargo dev` rebuild and restart the server on Rust edits via
   cargo-watch — the half of live reload the running server cannot do itself.
-- Every scaffolded project starts with a passing test suite:
-  `src/tests/app.rs` drives the generated router in-process, included from
-  `src/lib.rs` and run by `cargo test`. A database project's suite connects
-  a file SQLite database and runs the migrations; the dev-dependencies the
-  harness needs are written into the manifest. `testing.md` is the shipped
-  document for it.
+- Every scaffolded project starts with a passing, area-organized test suite:
+  `src/tests/mod.rs` collects focused modules, while `support.rs` drives the
+  generated router in-process. The suite is included from `src/lib.rs` and
+  run by `cargo test`. A database project also gets `database.rs`; its shared
+  setup connects a file SQLite database and runs the migrations. The
+  dev-dependencies the harness needs are written into the manifest, and
+  `testing.md` is the shipped document for the structure.
 - `cargo rahti upgrade` replaces only scaffold files whose recorded hashes
   still match, preserving user-edited files.
 - `cargo rahti upgrade --force` takes edited files back: bare, the framework's

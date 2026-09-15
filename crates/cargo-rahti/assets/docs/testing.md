@@ -1,9 +1,10 @@
 # Testing Conventions
 
-Every Rahti application starts with a working test suite: `cargo rahti new`
-writes `src/tests/app.rs` with a request harness and the first passing
-tests. Grow that suite with the application — a feature is not finished
-until a test drives it the way a browser would.
+Every Rahti application starts with a working, area-organized test suite:
+`cargo rahti new` writes a collector, a shared request harness, and the first
+page and RPC test modules under `src/tests/`. Grow that suite with the
+application — a feature is not finished until a test drives it the way a
+browser would.
 
 Run it with:
 
@@ -13,17 +14,31 @@ cargo test
 
 ## Where Tests Live
 
-- `src/tests/` holds the application's tests, one file per area, starting
-  with `app.rs`. Each file is included from `src/lib.rs`:
+- `src/tests/` holds the application's tests, grouped by cohesive area rather
+  than one file per individual test. `src/lib.rs` includes one collector:
 
   ```rust
   #[cfg(test)]
-  #[path = "tests/app.rs"]
+  #[path = "tests/mod.rs"]
   mod app_tests;
   ```
 
-  Adding a second file is one more pair of lines there, with its own module
-  name.
+  `src/tests/mod.rs` declares the area modules, while `support.rs` owns only
+  the setup and request helpers genuinely shared by several areas:
+
+  ```text
+  src/tests/
+  ├── mod.rs
+  ├── support.rs
+  ├── pages.rs
+  ├── rpc.rs
+  └── database.rs  # only when the project has a database
+  ```
+
+  The files remain modules in one library test binary. They retain
+  crate-private access, share one-time setup, and do not relink the
+  application once per area. Keep feature-specific helpers in their area
+  file so `support.rs` does not become another oversized test file.
 
 - A small unit test may sit beside the code it tests in an ordinary
   `#[cfg(test)] mod tests` block, as anywhere in Rust.
@@ -38,6 +53,25 @@ sees everything and builds once.
 
 `src/tests/` is not a route segment: it sits outside `src/app/`, so the
 router never sees it.
+
+## Running a Focused Area
+
+The collector gives every test a module-qualified name. Run one area without
+running the rest of the application suite:
+
+```text
+cargo test --lib app_tests::rpc
+```
+
+Run one test exactly when diagnosing a single behavior:
+
+```text
+cargo test --lib app_tests::rpc::the_rename_rpc_answers -- --exact
+```
+
+Splitting files organizes source and produces stable area filters; it does
+not create process isolation. The modules still share globals, database
+connections, and parallel test execution inside the same binary.
 
 ## Driving the Router
 
@@ -65,7 +99,7 @@ async fn get(url: &str) -> (StatusCode, String) {
 }
 ```
 
-The scaffolded `src/tests/app.rs` carries this helper, and the
+The scaffolded `src/tests/support.rs` carries this helper, and the
 dev-dependencies it needs — `tower` with the `util` feature, and
 `http-body-util` — are already in the scaffolded `Cargo.toml`.
 

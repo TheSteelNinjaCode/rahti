@@ -126,13 +126,22 @@ pub fn project_files(
         (".gitignore".into(), t::gitignore(db.is_some()).into_bytes()),
         ("src/lib.rs".into(), t::lib_rs(db.is_some()).into_bytes()),
         ("src/main.rs".into(), t::main_rs(name).into_bytes()),
-        // Born passing: the harness, and the first tests against the routes
-        // the scaffold just wrote. A project that starts with a suite hands
-        // the next coding agent a place to put the second test.
+        // Born passing: one collector, a shared harness, and focused page and
+        // RPC areas. New features gain area modules rather than growing one
+        // application test file without bound.
         (
-            "src/tests/app.rs".into(),
-            t::tests_rs(name, db.is_some()).into_bytes(),
+            "src/tests/mod.rs".into(),
+            t::tests_mod_rs(db.is_some()).into_bytes(),
         ),
+        (
+            "src/tests/support.rs".into(),
+            t::test_support_rs(name, db.is_some()).into_bytes(),
+        ),
+        (
+            "src/tests/pages.rs".into(),
+            t::page_tests_rs(name).into_bytes(),
+        ),
+        ("src/tests/rpc.rs".into(), t::rpc_tests_rs().into_bytes()),
         ("src/app/layout.rs".into(), t::layout_rs(name).into_bytes()),
         (
             "src/app/page.rs".into(),
@@ -190,6 +199,10 @@ pub fn project_files(
     }
 
     if db.is_some() {
+        files.push((
+            "src/tests/database.rs".into(),
+            t::database_tests_rs().into_bytes(),
+        ));
         files.push((
             "docs/conventions/database.md".into(),
             t::DOC_DATABASE.into(),

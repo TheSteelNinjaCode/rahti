@@ -443,7 +443,7 @@ fn the_library_only_names_modules_it_declares() {
         let lib = tree.read("src/lib.rs");
 
         // What it declares — and where a `#[path]` attribute says a module
-        // actually lives, because `mod app_tests;` is `src/tests/app.rs`.
+        // actually lives, because `mod app_tests;` is `src/tests/mod.rs`.
         let mut declared: Vec<&str> = Vec::new();
         let mut redirected: std::collections::HashMap<&str, &str> =
             std::collections::HashMap::new();
@@ -730,7 +730,8 @@ fn a_database_changes_only_what_it_must() {
     let differ = [
         "Cargo.toml",
         "src/lib.rs",
-        "src/tests/app.rs",
+        "src/tests/mod.rs",
+        "src/tests/support.rs",
         ".gitignore",
         "AGENTS.md",
     ];
@@ -755,21 +756,42 @@ fn every_project_starts_with_a_test_suite() {
     let tree = Tree::new("suite");
     let ledger = scaffold(&tree, false);
 
-    assert!(ledger.contains_key("src/tests/app.rs"));
+    for path in [
+        "src/tests/mod.rs",
+        "src/tests/support.rs",
+        "src/tests/pages.rs",
+        "src/tests/rpc.rs",
+    ] {
+        assert!(ledger.contains_key(path), "{path} is not scaffold-owned");
+    }
 
-    let tests = tree.read("src/tests/app.rs");
-    assert!(tests.contains("oneshot"), "{tests}");
+    let collector = tree.read("src/tests/mod.rs");
+    assert!(collector.contains("mod support;"), "{collector}");
+    assert!(collector.contains("mod pages;"), "{collector}");
+    assert!(collector.contains("mod rpc;"), "{collector}");
+
+    let support = tree.read("src/tests/support.rs");
+    assert!(support.contains("oneshot"), "{support}");
     assert!(
-        tests.contains("x-pp-function"),
-        "the browser's rpc flow: {tests}"
+        support.contains("x-pp-function"),
+        "the browser's rpc flow: {support}"
     );
     assert!(
-        tests.contains("rahti::auth::configure"),
-        "the setup hook names where the policy goes: {tests}"
+        support.contains("rahti::auth::configure"),
+        "the setup hook names where the policy goes: {support}"
+    );
+
+    assert!(
+        tree.read("src/tests/pages.rs")
+            .contains("the_home_page_renders")
+    );
+    assert!(
+        tree.read("src/tests/rpc.rs")
+            .contains("the_hello_rpc_answers")
     );
 
     let lib = tree.read("src/lib.rs");
-    assert!(lib.contains("#[path = \"tests/app.rs\"]"), "{lib}");
+    assert!(lib.contains("#[path = \"tests/mod.rs\"]"), "{lib}");
     assert!(lib.contains("mod app_tests;"), "{lib}");
 
     let manifest = tree.read("Cargo.toml");
@@ -788,16 +810,26 @@ fn every_project_starts_with_a_test_suite() {
 fn the_suite_tests_against_the_database_only_when_there_is_one() {
     let with = Tree::new("suite-db");
     scaffold_with(&with, false, Some(Backend::Sqlite));
-    let tests = with.read("src/tests/app.rs");
-    assert!(tests.contains("crate::db::connect_to"), "{tests}");
-    assert!(tests.contains("crate::db::migrate"), "{tests}");
-    assert!(tests.contains("mode=rwc"), "a file, not :memory:: {tests}");
+    let support = with.read("src/tests/support.rs");
+    assert!(support.contains("crate::db::connect_to"), "{support}");
+    assert!(support.contains("crate::db::migrate"), "{support}");
+    assert!(
+        support.contains("mode=rwc"),
+        "a file, not :memory:: {support}"
+    );
+    assert!(with.read("src/tests/mod.rs").contains("mod database;"));
+    assert!(
+        with.read("src/tests/database.rs")
+            .contains("the_todo_table_round_trips")
+    );
 
     let without = Tree::new("suite-no-db");
     scaffold_with(&without, false, None);
-    let tests = without.read("src/tests/app.rs");
-    assert!(!tests.contains("crate::db"), "{tests}");
-    assert!(!tests.contains("crate::models"), "{tests}");
+    let support = without.read("src/tests/support.rs");
+    assert!(!support.contains("crate::db"), "{support}");
+    assert!(!support.contains("crate::models"), "{support}");
+    assert!(!without.read("src/tests/mod.rs").contains("mod database;"));
+    assert!(!without.0.join("src/tests/database.rs").exists());
 }
 
 // ------------------------------------------------------------ documentation

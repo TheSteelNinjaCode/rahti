@@ -227,7 +227,7 @@ serde = {{ version = "1", features = ["derive"] }}
 tokio = {{ version = "1", features = ["full"] }}
 tower-http = {{ version = "0.7", features = ["catch-panic", "fs"] }}
 {database}
-# What `src/tests/app.rs` needs to drive the generated router in-process:
+# What `src/tests/support.rs` needs to drive the generated router in-process:
 # a request in, a response out, no port bound. See docs/conventions/testing.md.
 [dev-dependencies]
 {dev}
@@ -247,7 +247,7 @@ rahti-build = {build}
     )
 }
 
-/// The two dev-dependencies `src/tests/app.rs` drives the router with.
+/// The two dev-dependencies `src/tests/support.rs` drives the router with.
 ///
 /// One list for both writers: the scaffold's manifest template above, and
 /// `upgrade`'s wiring — which appends the same lines to a manifest the author
@@ -700,12 +700,10 @@ pub mod routes;
     out.push_str(modules);
     out.push_str(
         r#"
-/// This application's tests — `src/tests/app.rs`, driven through the
-/// generated router. `#[path]` because `src/tests/` is not a module tree:
-/// it is a directory of test files, each included here by name. See
-/// docs/conventions/testing.md.
+/// This application's tests, grouped by area under `src/tests/` and driven
+/// through the generated router. See docs/conventions/testing.md.
 #[cfg(test)]
-#[path = "tests/app.rs"]
+#[path = "tests/mod.rs"]
 mod app_tests;
 
 /// A started application: the router, and the address a web deployment binds
@@ -1219,32 +1217,40 @@ pub async fn hello() -> String {{
     )
 }
 
-/// `src/tests/app.rs` — the application's test suite, born passing.
-///
-/// A scaffold with no tests teaches that tests are someone else's problem:
-/// the next coding agent opened inside the project sees no suite, no harness,
-/// and no place to put one, and ships features accordingly. So the scaffold
-/// writes the harness — the router driven in-process, the browser's RPC flow
-/// with its CSRF pair, the setup hook where the auth policy and the test
-/// database go — and the first tests, green on the first `cargo test`.
+/// `src/tests/mod.rs` — one collector for the application's test areas.
+pub fn tests_mod_rs(db: bool) -> String {
+    let database = if db { "mod database;\n" } else { "" };
+
+    format!(
+        r#"//! This application, driven through its generated router.
+//!
+//! Add one module per cohesive feature area, not one file per test. Shared
+//! setup and request helpers stay in `support.rs`. See
+//! docs/conventions/testing.md.
+
+mod support;
+use support::*;
+
+{database}mod pages;
+mod rpc;
+"#
+    )
+}
+
+/// `src/tests/support.rs` — setup and request helpers shared by test areas.
 ///
 /// Concatenated rather than one `format!`, like `lib_rs` and for the same
 /// reason: the body is Rust that uses `format!` and braces of its own.
-pub fn tests_rs(name: &str, db: bool) -> String {
+pub fn test_support_rs(name: &str, db: bool) -> String {
     let mut out = String::from(
-        r#"//! This application, driven through its generated router.
+        r#"//! Shared infrastructure for the application test areas.
 //!
-//! `rahti-build` scanned `src/app/` and wrote `src/routes.rs`; every test
-//! here sends a request into that router and reads the finished response.
-//! No server starts and no port binds — `oneshot` drives the same
+//! No server starts and no port binds: `oneshot` drives the same
 //! `axum::Router` the binary serves.
-//!
-//! Grow this file with the application: a new page gets a rendering test, a
-//! new `#[rpc]` gets a success and a malformed-payload test, anything
-//! private gets a no-session test. See docs/conventions/testing.md.
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::Request;
+pub(super) use axum::http::StatusCode;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -1263,7 +1269,7 @@ use tower::ServiceExt;
 /// rahti::auth::configure(crate::auth::settings());
 /// rahti::authorization::configure(crate::auth::authorization());
 /// ```
-async fn setup() {
+pub(super) async fn setup() {
     static READY: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
     READY
@@ -1302,7 +1308,7 @@ async fn setup() {
 }
 
 /// GET a URL through the real router.
-async fn get(url: &str) -> (StatusCode, String) {
+pub(super) async fn get(url: &str) -> (StatusCode, String) {
     setup().await;
 
     let res = crate::routes::router()
@@ -1318,7 +1324,11 @@ async fn get(url: &str) -> (StatusCode, String) {
 /// Call an `#[rpc]` the way the browser does: load its page, keep the CSRF
 /// cookie the response hands out, then POST back to the same URL with the
 /// function's name in `x-pp-function` and the token sent both ways.
-async fn rpc(url: &str, name: &str, payload: &str) -> (StatusCode, String) {
+pub(super) async fn rpc(
+    url: &str,
+    name: &str,
+    payload: &str,
+) -> (StatusCode, String) {
     setup().await;
 
     let router = crate::routes::router();
@@ -1370,8 +1380,15 @@ async fn rpc(url: &str, name: &str, payload: &str) -> (StatusCode, String) {
 "#,
     );
 
-    out.push_str(&format!(
-        r#"/// The scaffolded home page, inside the root layout's document.
+    out
+}
+
+/// `src/tests/pages.rs` — the first page and routing tests.
+pub fn page_tests_rs(name: &str) -> String {
+    format!(
+        r#"use super::*;
+
+/// The scaffolded home page, inside the root layout's document.
 #[tokio::test]
 async fn the_home_page_renders() {{
     let (status, body) = get("/").await;
@@ -1380,17 +1397,21 @@ async fn the_home_page_renders() {{
     assert!(body.contains("<!DOCTYPE html>"), "{{body}}");
     assert!(body.contains("{name}"), "{{body}}");
 }}
-"#
-    ));
 
-    out.push_str(
-        r#"
 /// A URL no `page.rs` claims: the 404 page, not a panic.
 #[tokio::test]
-async fn an_unknown_url_is_a_404() {
+async fn an_unknown_url_is_a_404() {{
     let (status, _) = get("/this-page-does-not-exist").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}}
+"#
+    )
 }
+
+/// `src/tests/rpc.rs` — the first RPC tests.
+pub fn rpc_tests_rs() -> String {
+    String::from(
+        r#"use super::*;
 
 /// `pp.rpc("hello", {})` from the scaffolded page, end to end: the CSRF
 /// pair accepted, the function found, the return value serialized.
@@ -1409,11 +1430,14 @@ async fn an_unknown_rpc_name_is_refused() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 "#,
-    );
+    )
+}
 
-    if db {
-        out.push_str(
-            r#"
+/// `src/tests/database.rs` — generated only when the project has a database.
+pub fn database_tests_rs() -> String {
+    String::from(
+        r#"use super::*;
+
 /// The migrations that ran in `setup` created a real schema: a row goes in
 /// through the entity and comes back. A disagreement between the entity and
 /// its migration fails here, on the first query.
@@ -1441,10 +1465,7 @@ async fn the_todo_table_round_trips() {
     assert_eq!(found.text, "write a test");
 }
 "#,
-        );
-    }
-
-    out
+    )
 }
 
 /// `main.js`, with the Tailwind helper only where there is Tailwind.
@@ -1979,7 +2000,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
                 .to_string(),
         );
         rules.push(
-            "Tests reach the database the way `setup()` in `src/tests/app.rs`\n\
+            "Tests reach the database the way `setup()` in `src/tests/support.rs`\n\
              shows: a *file* SQLite database, never `:memory:`, deleted on\n\
              the way in, with `db::migrate()` run against it. An in-memory\n\
              database vanishes between `#[tokio::test]` runtimes, and the\n\
