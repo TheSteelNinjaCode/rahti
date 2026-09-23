@@ -124,11 +124,25 @@ field message:
 }
 ```
 
-PulsePoint's `pp.rpc` rejection uses the `error` summary as its `Error.message`.
-Code that needs individual field messages can expose validation as a normal
-successful RPC value or use an ordinary `route.rs` endpoint and read the 422
-JSON contract directly. Never place secrets, password values, tokens, query
-text, or database diagnostics in validation messages.
+PulsePoint rejects with a `RpcError`. Its `message` is the `error` summary,
+`status` is `422`, and `errors` is the field map. Read a field directly in
+the caller:
+
+```javascript
+try {
+    await pp.rpc("save_profile", { email });
+} catch (error) {
+    if (error.status === 422) {
+        setEmailError(error.errors.email?.[0] ?? "Check the email field.");
+    } else {
+        setStatus(error.message);
+    }
+}
+```
+
+The same shape is available for file uploads made with `onUploadProgress`.
+Never place secrets, password values, tokens, query text, or database
+diagnostics in validation messages.
 
 Malformed JSON and values that cannot deserialize remain HTTP 400 RPC wire
 errors. HTTP 422 means the payload was structurally readable and business

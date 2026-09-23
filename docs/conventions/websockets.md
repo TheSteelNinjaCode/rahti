@@ -96,10 +96,13 @@ socket never holds Ctrl+C.
 
 ```javascript
 const sock = pp.socket("chat", { room: "lobby" }, {
-    onOpen: () => …,
+    onOpen: ({ reconnected }) => {
+        if (reconnected) refreshRoom();
+    },
     onMessage: value => …,
     onError: error => …,
-    onClose: ({ code, reason, wasClean }) => …,
+    onClose: ({ code, reason, wasClean, willReconnect }) => …,
+    onReconnecting: ({ attempt, delay }) => …,
 });
 
 sock.send({ text: "hello" });
@@ -107,9 +110,41 @@ sock.close();
 ```
 
 `pp.socket` returns its handle synchronously. Frames sent before the
-connection opens are buffered and flushed after the argument frame, so
-opening and sending on consecutive lines works. `sock.send` returns `false`
-once the connection is closed.
+connection opens, or while reconnecting, are buffered and flushed after the
+argument frame. The buffer holds at most 256 frames; `sock.send` returns
+`false` if it is full or the handle is permanently closed. `sock.close()`
+ends the handle without reconnecting. Its `readyState` reports `CONNECTING`
+while a reconnect is waiting.
+
+A quiet connection sends `{"__pp":"ping"}` every 25 seconds by default.
+Rahti answers with `{"__pp":"pong"}` before the ping reaches a `#[socket]`
+handler. If no frame arrives within 20 seconds of a ping, the browser replaces
+the connection. These single-key `__pp` objects are reserved control frames;
+neither side delivers them to application message handlers. A payload with
+other keys alongside `__pp` is an ordinary application frame.
+
+An unexpected close reconnects with exponential backoff and jitter. The
+browser's `online` event or a hidden tab becoming visible skips a pending
+delay; a newly visible tab also pings an open connection. Each new connection
+sends the original arguments again and runs the Rust handler from the top.
+`onOpen` receives `{ reconnected }`, which is `false` for the first open and
+`true` after a successful reconnect. `onClose` runs for every closed
+connection and reports whether another attempt follows. `onReconnecting`
+reports the attempt number and scheduled delay in milliseconds.
+
+No reconnect follows an explicit `sock.close()`, a server error frame, a
+normal 1000 close, or a policy close (1003, 1007, 1008, 1009, or 1010).
+An HTTP handshake refusal happens before any WebSocket close code can be
+delivered to browser JavaScript. The client may retry that opaque failure
+with backoff. Use `reconnect: false` for a one-shot conversation or when an
+expected refusal should end the attempt immediately. The options
+`reconnectDelay` (default 1000 ms), `reconnectDelayMax` (30000 ms),
+`maxReconnectAttempts` (unlimited), `heartbeatInterval` (25000 ms; `0`
+disables it), and `heartbeatTimeout` (20000 ms) tune the behavior.
+
+Messages sent by the server during a disconnect are not replayed. A page
+that must recover missed state should fetch it in `onOpen` when
+`reconnected` is true; the socket transport does not persist messages.
 
 ## The Wire
 
@@ -119,6 +154,8 @@ once the connection is closed.
   posted — because a URL is logged by every proxy on the way and an argument
   is data.
 - Every frame after that is one JSON value, in either direction.
+- Single-key `__pp` objects are reserved for heartbeat control. A client
+  `ping` receives a server `pong`; neither is passed to application code.
 - A frame of the shape `{"error": "…"}` — that key alone — is reserved: it is
   how the server reports failure inside an open connection, where no HTTP
   status line exists any more. The client routes it to `onError`, not

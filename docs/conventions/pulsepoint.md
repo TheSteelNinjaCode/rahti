@@ -287,8 +287,13 @@ Returns a stable component-local identifier for `id`, `for`, and ARIA pairs.
 ### `pp.errorBoundary()`
 
 Returns `[error, reset]`. It catches descendant render/effect failures. Call
-`reset()` to re-arm it. This is a client boundary, distinct from Rahti's
-server-side `error.rs`.
+`reset()` to clear the latched error and re-arm it. It also catches the
+declaring component's own render and effect failures; without a boundary,
+errors walk to the nearest ancestor boundary. After five failures without a
+reset, a boundary stops catching to avoid a render loop and logs the error.
+Event-handler exceptions are logged by the event system, so handle expected
+async failures in the event handler itself. This is a client boundary,
+distinct from Rahti's server-side `error.rs`.
 
 ### `pp.syncExternalStore(subscribe, getSnapshot)`
 
@@ -327,7 +332,9 @@ the script. Do not assume a Rust function argument automatically appears in
 - `pp.rpc(name, data?, optionsOrAbort?)` calls Rahti; see
   `rpc-and-uploads.md`.
 - `pp.socket(name, args?, handlers?)` opens a WebSocket to a `#[socket]`
-  function and returns `{ send, close, readyState }`; see `websockets.md`.
+  function and returns `{ send, close, readyState }`. It keeps quiet
+  connections alive and reconnects after unexpected closes; see
+  `websockets.md` for recovery and callback rules.
   The server half exists only when the app enables rahti's `ws` feature.
 - `pp.enablePerf()` / `pp.disablePerf()` toggle runtime performance sampling.
 - `pp.getPerfStats()` returns per-component render-phase aggregates.

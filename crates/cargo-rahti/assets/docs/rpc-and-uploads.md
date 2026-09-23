@@ -51,12 +51,18 @@ const result = await pp.rpc("greet", { name });
 ```
 
 Successful values resolve from JSON. `Err(Error)` becomes an HTTP status plus
-JSON error message and causes the Promise to reject. Expected messages remain
-public; unexpected 5xx diagnostics are generic in production and stay in
-server telemetry. The optional `requestId` correlates the response with that
-telemetry. A
-`ValidationErrors`-backed error uses status 422 and also returns its named
-`errors` map; see `validation.md` and `error-handling.md`.
+JSON error message and rejects with a PulsePoint `RpcError`. Its `message` is
+the server's `error` text; `status`, `errors`, `requestId`, and `body` expose
+the HTTP status, validation field map, optional correlation id, and full parsed
+JSON response. `errors` is `{}` and `requestId` is `null` when absent. Expected
+messages remain public; unexpected 5xx diagnostics are generic in production
+and stay in server telemetry. A `ValidationErrors`-backed error uses status
+422 and named field messages; see `validation.md` and `error-handling.md`.
+
+For 401 and 403, PulsePoint keeps its stable messages `Authentication
+required` and `Permission denied` while preserving the response in `body`.
+When `onStreamError` is supplied, PulsePoint calls it for a failed request or
+stream instead of rejecting the outer Promise; handle the error there.
 
 ## Database Errors
 

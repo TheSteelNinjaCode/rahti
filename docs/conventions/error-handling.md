@@ -108,6 +108,13 @@ structured RPC context. Object fields are merged beside `error`, except that
 neither `error` nor `requestId` can be overwritten. A non-object value is put
 under `details`.
 
+The browser receives a PulsePoint `RpcError`: `message` contains `error`,
+`status` contains the HTTP status, `errors` contains the validation field map
+or `{}`, `requestId` contains the correlation id or `null`, and `body` contains
+the parsed JSON response. The 401 and 403 messages are normalized to
+`Authentication required` and `Permission denied`; the original response is
+still available in `body`.
+
 Structured details follow the same exposure rule as the message: unexpected
 production failures suppress them. Do not put a credential, raw session,
 password material, token, connection string, or unapproved personal data in

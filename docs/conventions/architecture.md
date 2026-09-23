@@ -101,7 +101,8 @@ The server runtime exports:
 - link-time component RPC registration;
 - behind the optional `ws` cargo feature: `rahti::ws` — the socket endpoint,
   the `Socket`/`SocketSender` conversation types, link-time socket
-  registration, and the same-origin handshake check (see `websockets.md`);
+  registration, same-origin handshake check, and PulsePoint heartbeat
+  replies (see `websockets.md`);
 - behind the optional `mcp` cargo feature: the bearer-protected Streamable
   HTTP endpoint, its relative canonical redirect, and public discovery;
 - public-directory resolution;
@@ -349,7 +350,9 @@ The current implementation covers:
 - error handling that sends page failures and panics to the nearest boundary,
   preserves the RPC error wire format, emits Problem Details for unbounded HTTP
   failures, redacts private server diagnostics in production, correlates the
-  response with its request, and prevents failures from being cached;
+  response with its request, and prevents failures from being cached; the
+  bundled PulsePoint client exposes structured `RpcError` fields and client
+  component error boundaries;
 - deterministic typed-input validation through `Validator`, including common
   rules, custom checks, named field messages, and structured HTTP 422 RPC
   failures while malformed or mistyped payloads remain HTTP 400;

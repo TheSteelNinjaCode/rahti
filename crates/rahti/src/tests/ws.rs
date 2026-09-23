@@ -62,6 +62,15 @@ fn arg_error_names_the_function_and_parameter() {
     assert!(message.contains("pp.socket"), "{message}");
 }
 
+#[test]
+fn only_single_key_pp_objects_are_control_frames() {
+    assert_eq!(control_frame(r#"{"__pp":"ping"}"#), Some(true));
+    assert_eq!(control_frame(r#"{"__pp":"pong"}"#), Some(false));
+    assert_eq!(control_frame(r#"{"__pp":17}"#), Some(false));
+    assert_eq!(control_frame(r#"{"__pp":"ping","text":"hi"}"#), None);
+    assert_eq!(control_frame(r#""{\"__pp\":\"ping\"}""#), None);
+}
+
 fn headers(origin: Option<&str>, host: Option<&str>) -> HeaderMap {
     let mut map = HeaderMap::new();
     if let Some(origin) = origin {
@@ -172,6 +181,24 @@ async fn echo_roundtrip() {
     assert_eq!(frame.into_text().unwrap().as_str(), r#""you: hello""#);
 
     // Closing from the browser side ends the conversation cleanly.
+    ws.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn heartbeat_is_answered_without_reaching_the_typed_handler() {
+    let addr = serve().await;
+    let (mut ws, _) = connect_async(format!("ws://{addr}{WS_PATH}?name=test_ws_echo"))
+        .await
+        .expect("handshake");
+
+    ws.send(Frame::text(r#"{"label":"you"}"#)).await.unwrap();
+    ws.send(Frame::text(r#"{"__pp":"ping"}"#)).await.unwrap();
+    ws.send(Frame::text(r#""hello""#)).await.unwrap();
+
+    let pong = ws.next().await.unwrap().unwrap();
+    assert_eq!(pong.into_text().unwrap().as_str(), r#"{"__pp":"pong"}"#);
+    let echo = ws.next().await.unwrap().unwrap();
+    assert_eq!(echo.into_text().unwrap().as_str(), r#""you: hello""#);
     ws.close(None).await.unwrap();
 }
 

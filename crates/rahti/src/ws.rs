@@ -35,6 +35,9 @@
 //! is logged by every proxy on the way — but as the first text frame, one
 //! JSON object, exactly the payload `pp.rpc` would have posted. Every frame
 //! after that is one JSON value, in either direction.
+//! The browser sends `{"__pp":"ping"}` to check a quiet connection. The
+//! socket pump answers `{"__pp":"pong"}` before application code sees it;
+//! single-key `__pp` control frames are reserved by the wire.
 //!
 //! One endpoint rather than one per page because an upgrade is a GET, and the
 //! page already owns GET on its own URL. The names are therefore
@@ -92,6 +95,18 @@ mod tests;
 // client half is the same `pp.socket(…)` whichever backend serves it, so
 // every backend answers on the same endpoint.
 pub const WS_PATH: &str = "/__pulsepoint/ws";
+
+/// PulsePoint control frames have exactly one `__pp` key. Other objects,
+/// including application values that happen to contain `__pp`, pass through.
+fn control_frame(text: &str) -> Option<bool> {
+    let Value::Object(map) = serde_json::from_str::<Value>(text).ok()? else {
+        return None;
+    };
+    if map.len() != 1 {
+        return None;
+    }
+    Some(map.get("__pp")?.as_str() == Some("ping"))
+}
 
 /// How long the server waits for the first frame — the arguments — before
 /// giving up on a connection that opened and said nothing.
@@ -429,6 +444,14 @@ impl Socket {
                     },
                     msg = ws.recv() => match msg {
                         Some(Ok(Message::Text(text))) => {
+                            if let Some(is_ping) = control_frame(&text) {
+                                if is_ping
+                                    && ws.send(Message::Text(r#"{"__pp":"pong"}"#.into())).await.is_err()
+                                {
+                                    break;
+                                }
+                                continue;
+                            }
                             // A handler that stopped reading is not an error;
                             // the frame simply has nowhere to go.
                             let _ = in_tx.send(text.to_string()).await;
