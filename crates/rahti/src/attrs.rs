@@ -278,8 +278,13 @@ impl<K: AsRef<str>, V: AsRef<str>> Attributes for HashMap<K, V> {
 pub struct AttrList {
     entries: Vec<(String, String)>,
     /// Whether the writes arriving now came out of a spread rather than off
-    /// the tag. Only [`COMPONENT_ATTR`] cares, and only to refuse them.
+    /// the tag. Only [`COMPONENT_ATTR`] and, on a root that owns its events,
+    /// native event handlers care, and only to refuse them.
     spreading: bool,
+    /// The element is a block's root that handles its own events: `html!`
+    /// named the block as their owner (`pp-event-owner`), so every native
+    /// handler on it runs in the block's scope. See [`AttrList::own_events`].
+    owns_events: bool,
 }
 
 impl AttrList {
@@ -287,7 +292,20 @@ impl AttrList {
         AttrList {
             entries: Vec::new(),
             spreading: false,
+            owns_events: false,
         }
+    }
+
+    /// Mark this open tag as a root whose handlers belong to its own block.
+    ///
+    /// Written by `html!` first, on a root that carries both a handler of
+    /// its own (`onsubmit={save(event)}`) and a spread. One element has one
+    /// event owner, so a handler the spread brings — a caller's, forwarded
+    /// through `bindings` — would run in the wrong scope. It is refused the
+    /// way a spread `pp-component` is: loudly in development, dropped in a
+    /// release build rather than wired to the wrong function.
+    pub fn own_events(&mut self) {
+        self.owns_events = true;
     }
 
     /// Write an attribute whose value is already known as text. The value is
@@ -357,6 +375,16 @@ impl AttrList {
             );
             return;
         }
+        if self.spreading && self.owns_events && is_native_event_name(name) {
+            debug_assert!(
+                false,
+                "rahti: a spread brings `{name}` onto a root that handles its own events, \
+                 and one element has one event owner — the root's handlers run in its own \
+                 block's scope. Move `{name}` to an inner element, or call the caller's \
+                 handler from the block's own."
+            );
+            return;
+        }
         match self
             .entries
             .iter_mut()
@@ -366,6 +394,14 @@ impl AttrList {
             None => self.entries.push((name.to_string(), value)),
         }
     }
+}
+
+/// Does this attribute name a native DOM event handler? The client runtime's
+/// naming contract — lowercase, unhyphenated `on…`; `on-…` is a component
+/// callback prop. Mirrors `is_native_event_name` in `rahti-macros`.
+pub(crate) fn is_native_event_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.len() > 2 && lower.starts_with("on") && lower[2..].bytes().all(|b| b.is_ascii_lowercase())
 }
 
 /// Is this a name that can be written into an open tag?

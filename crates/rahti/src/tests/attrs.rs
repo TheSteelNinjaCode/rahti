@@ -386,3 +386,54 @@ fn an_empty_set_is_empty() {
     assert_eq!(attrs, Attrs::default());
     assert_eq!(list(|list| list.spread(&attrs)), "");
 }
+
+// -------------------------------------------------------- root event owner
+
+/// On a root that handles its own events, a spread that brings a caller's
+/// handler is refused: one element has one event owner, and the root's run
+/// in its own block's scope.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "one event owner")]
+fn a_spread_cannot_bring_a_handler_onto_a_root_that_owns_its_events() {
+    let _ = list(|list| {
+        list.own_events();
+        list.set("onsubmit", "{save(event)}");
+        list.spread(&Attrs::new().set("onclick", "{pick()}"));
+    });
+}
+
+#[test]
+#[cfg(not(debug_assertions))]
+fn a_spread_handler_is_dropped_on_an_owning_root_in_release() {
+    let out = list(|list| {
+        list.own_events();
+        list.spread(&Attrs::new().set("onclick", "{pick()}"));
+    });
+    assert_eq!(out, "");
+}
+
+/// Everything else a spread carries still lands — a class, an id, and a
+/// kebab-case callback prop, which is not a native event.
+#[test]
+fn an_owning_root_still_takes_the_rest_of_a_spread() {
+    let out = list(|list| {
+        list.own_events();
+        list.set("onsubmit", "{save(event)}");
+        list.spread(&Attrs::new().set("class", "wide").set("on-select", "{pick}"));
+    });
+    assert_eq!(
+        out,
+        " onsubmit=\"{save(event)}\" class=\"wide\" on-select=\"{pick}\""
+    );
+}
+
+/// Without the mark a spread's handler is written as always — forwarding a
+/// caller's `onclick` onto a root is the documented use of `bindings`.
+#[test]
+fn a_spread_handler_is_kept_on_a_root_that_does_not_own_its_events() {
+    assert_eq!(
+        list(|list| list.spread(&Attrs::new().set("onclick", "{pick()}"))),
+        " onclick=\"{pick()}\""
+    );
+}

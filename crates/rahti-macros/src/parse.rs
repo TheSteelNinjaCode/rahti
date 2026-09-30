@@ -59,6 +59,23 @@ pub const COMPONENT_ATTR: &str = "pp-component";
 /// which is what lets `<Card>{count}</Card>` read the page's `count` the way
 /// React children read the scope they were written in.
 pub const OWNER_ATTR: &str = "pp-owner";
+/// Names the block whose scope runs the native handlers on an element. The
+/// macro writes it beside `pp-component` on a root that handles its own
+/// events — see [`is_native_event_name`].
+pub const EVENT_OWNER_ATTR: &str = "pp-event-owner";
+
+/// Does this attribute name a native DOM event handler?
+///
+/// The client runtime's naming contract: a lowercase, unhyphenated `on…`
+/// (`onclick`, `onsubmit`) is a native event, and a kebab-case `on-…` is a
+/// component callback prop. Only the naming is checked, never a list of event
+/// names — the runtime decides what is native against the live element, and
+/// `pp-event-owner` only routes the handlers it binds, so a name that turns
+/// out not to be an event leaves the marker inert.
+pub fn is_native_event_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.len() > 2 && lower.starts_with("on") && lower[2..].bytes().all(|b| b.is_ascii_lowercase())
+}
 
 /// The markers a `<>…</>` fragment ships between.
 ///
@@ -237,6 +254,11 @@ pub enum TagAttr {
     /// `@{..extra}` — everything the expression carries, folded in at the
     /// point it was written.
     Spread(TokenStream),
+    /// Not an attribute: the block's root handles its own events, so a
+    /// spread on it must not bring in a handler of the caller's. Put first
+    /// in the list of a root that carries both; see
+    /// [`Parser::claim_root_events`].
+    OwnsEvents,
 }
 
 /// A component tag: `<Card title="…">…</Card>`.
@@ -303,6 +325,8 @@ pub struct ChildBlock {
     /// itself, and it keeps its own `pp-component` identity instead of an
     /// owner wrap.
     pub has_script: bool,
+    /// Same as [`Parsed::root_owns_events`], for the child block's root.
+    pub root_owns_events: bool,
 }
 
 /// Where a block's name lands, which decides how it is written there.
@@ -339,6 +363,16 @@ pub struct Parsed {
     /// The author wrote a `pp-component` somewhere in this block, so nothing
     /// gets injected — an explicit marker always wins.
     pub declares_component: bool,
+    /// The root element carries a native event handler written in this
+    /// block (`<form onsubmit={save(event)}>`), so the stamp names the block
+    /// as its event owner too.
+    ///
+    /// The client runtime evaluates a component root's attributes in the
+    /// PARENT's scope, because that is where forwarded props come from. A
+    /// handler the block wrote on its own root belongs to the block, as
+    /// `<form onSubmit={save}>` inside a React component does; without the
+    /// owner it resolves against the parent and throws before it can run.
+    pub root_owns_events: bool,
     /// The name a `#[component]` fn handed down, which beats the one derived
     /// from the file path. See [`component_directive`](Parser::component_directive).
     pub forced_component: Option<String>,
@@ -363,6 +397,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         roots: Vec::new(),
         component_slot: None,
         declares_component: false,
+        root_owns_events: false,
         slot_at: None,
         client_bindings: 0,
         scripts: 0,
@@ -386,6 +421,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         ops,
         component_slot: parser.component_slot,
         declares_component: parser.declares_component,
+        root_owns_events: parser.root_owns_events,
         forced_component,
         renders_document,
         slot_at: parser.slot_at,
@@ -491,6 +527,8 @@ struct Parser {
     roots: Vec<Root>,
     component_slot: Option<(usize, usize, SlotKind)>,
     declares_component: bool,
+    /// See [`Parsed::root_owns_events`].
+    root_owns_events: bool,
     slot_at: Option<usize>,
     /// Client `{…}` bindings seen in the block being parsed — text mustaches
     /// and element attribute values. Saved and reset around a component
@@ -738,12 +776,17 @@ impl Parser {
         // The open tag below lands in `ops` at the current length: the only
         // pushes between here and then come from attribute interpolation,
         // and the first of those flushes exactly this markup.
-        if self.depth == 0 && self.component_slot.is_none() {
+        let is_root = self.depth == 0 && self.component_slot.is_none();
+        if is_root {
             self.component_slot = Some((ops.len(), 1 + name.len(), SlotKind::Element));
         }
 
         let mut markup = format!("<{name}");
-        self.attributes(&mut markup, ops)?;
+        let mut attrs = self.tag_attributes()?;
+        if is_root {
+            self.claim_root_events(&mut attrs, &name, open)?;
+        }
+        emit_attributes(attrs, &mut markup, ops);
 
         let void = VOID.contains(&name.as_str());
         let self_closing = self.is_punct(0, '/');
@@ -1020,6 +1063,7 @@ impl Parser {
         let outer_roots = std::mem::take(&mut self.roots);
         let outer_slot = self.component_slot.take();
         let outer_declares = std::mem::replace(&mut self.declares_component, false);
+        let outer_owns_events = std::mem::replace(&mut self.root_owns_events, false);
         let outer_slot_at = self.slot_at.take();
         let outer_depth = std::mem::replace(&mut self.depth, 0);
         let outer_bindings = std::mem::replace(&mut self.client_bindings, 0);
@@ -1030,6 +1074,7 @@ impl Parser {
 
         let child_slot = self.component_slot;
         let child_declares = self.declares_component;
+        let child_owns_events = self.root_owns_events;
         // A deeper component tag inside these children saved and reset the
         // counters around its own child block, so what is left here counts
         // this block's markup alone.
@@ -1043,6 +1088,7 @@ impl Parser {
         self.roots = outer_roots;
         self.component_slot = outer_slot;
         self.declares_component = outer_declares;
+        self.root_owns_events = outer_owns_events;
         self.slot_at = outer_slot_at;
         self.depth = outer_depth;
         self.client_bindings = outer_bindings;
@@ -1079,6 +1125,7 @@ impl Parser {
                 declares_component: child_declares,
                 has_bindings: child_bindings > 0,
                 has_script: child_scripts > 0,
+                root_owns_events: child_owns_events && single_root,
             }),
         }));
         Ok(())
@@ -1199,9 +1246,53 @@ impl Parser {
         }
     }
 
-    fn attributes(&mut self, markup: &mut String, ops: &mut Vec<Op>) -> Result<(), Error> {
-        let attrs = self.tag_attributes()?;
-        emit_attributes(attrs, markup, ops);
+    /// Note whether the root element handles its own events.
+    ///
+    /// A handler written literally on the tag — `onsubmit={save(event)}` or
+    /// `onsubmit="save(event)"` — is this block's source, so the block owns
+    /// it. A caller's handler can only arrive at runtime, through a spread
+    /// or an `@{…}` value, and one element has one event owner:
+    ///
+    /// - an `on…=@{expr}` beside an owned handler is refused here, since
+    ///   nothing at compile time says whose it is;
+    /// - a spread beside one is marked, so the open tag built at runtime
+    ///   refuses an event handler the spread brings (see
+    ///   `rahti::AttrList::own_events`).
+    fn claim_root_events(
+        &mut self,
+        attrs: &mut Vec<TagAttr>,
+        tag: &str,
+        span: Span,
+    ) -> Result<(), Error> {
+        let owned: Vec<&str> = attrs
+            .iter()
+            .filter_map(|attr| match attr {
+                TagAttr::Literal { name, .. } if is_native_event_name(name) => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        if owned.is_empty() {
+            return Ok(());
+        }
+        if let Some(TagAttr::Value { name, .. }) = attrs
+            .iter()
+            .find(|attr| matches!(attr, TagAttr::Value { name, .. } if is_native_event_name(name)))
+        {
+            return Err(Error {
+                span,
+                msg: format!(
+                    "rahti: `<{tag}>` handles `{}` itself and also takes `{name}` from a Rust \
+                     value, and one element has one event owner.\n  The root's own handlers \
+                     run in this block's scope; move `{name}` to an inner element, or call the \
+                     caller's handler from this block's own.",
+                    owned.join("`, `")
+                ),
+            });
+        }
+        self.root_owns_events = true;
+        if attrs.iter().any(|attr| matches!(attr, TagAttr::Spread(_))) {
+            attrs.insert(0, TagAttr::OwnsEvents);
+        }
         Ok(())
     }
 
@@ -1423,6 +1514,8 @@ fn emit_attributes(attrs: Vec<TagAttr>, markup: &mut String, ops: &mut Vec<Op>) 
                     });
                 }
                 TagAttr::Spread(_) => unreachable!("checked above"),
+                // Only put in a list that carries a spread.
+                TagAttr::OwnsEvents => {}
             }
         }
         return;

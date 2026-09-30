@@ -41,6 +41,7 @@ fn show(ops: &[Op]) -> String {
                             out.push_str(&format!(" {name}=\"@{{{expr}}}\""));
                         }
                         TagAttr::Spread(expr) => out.push_str(&format!(" @{{..{expr}}}")),
+                        TagAttr::OwnsEvents => out.push_str(" @owns-events"),
                     }
                 }
             }
@@ -329,8 +330,14 @@ fn a_tag_without_a_spread_builds_nothing() {
 fn a_spread_may_stand_alone_or_beside_a_binding() {
     assert_eq!(render("<div @{..extra}>x</div>"), "<div @{..extra}>x</div>");
     assert_eq!(
+        render("<div><button onclick={save()} @{..extra}>x</button></div>"),
+        "<div><button onclick=\"{save()}\" @{..extra}>x</button></div>"
+    );
+    // As the block's root, the button owns its `onclick`, so the tag built at
+    // runtime is marked to refuse a handler the spread would bring.
+    assert_eq!(
         render("<button onclick={save()} @{..extra}>x</button>"),
-        "<button onclick=\"{save()}\" @{..extra}>x</button>"
+        "<button @owns-events onclick=\"{save()}\" @{..extra}>x</button>"
     );
 }
 
@@ -1246,4 +1253,14 @@ fn suggest_identifier_offers_something_usable() {
     assert!(crate::component::is_valid_js_identifier(
         &suggest_identifier("[[...slug]]")
     ));
+}
+
+/// A root cannot own one handler and take another from a Rust value: one
+/// element has one event owner, and nothing at compile time says whose the
+/// value's handler is.
+#[test]
+fn an_owned_root_handler_beside_a_rust_valued_one_is_refused() {
+    let msg = error("<form onsubmit={save(event)} onclick=@{handler}>x</form>");
+    assert!(msg.contains("one element has one event owner"), "{msg}");
+    assert!(msg.contains("onclick"), "{msg}");
 }

@@ -22,7 +22,7 @@ mod socket;
 #[path = "tests/emit.rs"]
 mod lib_tests;
 
-use parse::{COMPONENT_ATTR, OWNER_ATTR, Op, Parsed, SlotKind, TagAttr};
+use parse::{COMPONENT_ATTR, EVENT_OWNER_ATTR, OWNER_ATTR, Op, Parsed, SlotKind, TagAttr};
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -292,17 +292,32 @@ fn stamp(mut parsed: Parsed, file: &str) -> Vec<Op> {
     let Some(slot) = parsed.component_slot else {
         return parsed.ops;
     };
-    write_name(&mut parsed.ops, slot, &id);
+    write_name(&mut parsed.ops, slot, &id, parsed.root_owns_events);
     parsed.ops
 }
 
 /// Write a block's name where its slot says: as a `pp-component` attribute
 /// in a root element's open tag, or as the text of a fragment's open marker.
-fn write_name(ops: &mut [Op], (index, offset, kind): (usize, usize, SlotKind), id: &str) {
+///
+/// A root that handles its own events (`owns_events`, see
+/// [`Parsed::root_owns_events`]) is named as their owner too, so the client
+/// runtime runs `<form onsubmit={save(event)}>` in this block's scope rather
+/// than the caller's, where root attributes are otherwise evaluated.
+fn write_name(
+    ops: &mut [Op],
+    (index, offset, kind): (usize, usize, SlotKind),
+    id: &str,
+    owns_events: bool,
+) {
     if let Some(Op::Static(markup)) = ops.get_mut(index) {
         match kind {
             SlotKind::Element => {
-                markup.insert_str(offset, &format!(" {COMPONENT_ATTR}=\"{id}\""));
+                let owner = if owns_events {
+                    format!(" {EVENT_OWNER_ATTR}=\"{id}\"")
+                } else {
+                    String::new()
+                };
+                markup.insert_str(offset, &format!(" {COMPONENT_ATTR}=\"{id}\"{owner}"));
             }
             SlotKind::Fragment => {
                 markup.insert_str(offset, id);
@@ -386,7 +401,7 @@ fn stamp_component_children(ops: &mut [Op], file_id: Option<&str>, owner_id: Opt
         let (Some(id), Some(slot)) = (file_id, child.component_slot) else {
             continue;
         };
-        write_name(&mut child.ops, slot, id);
+        write_name(&mut child.ops, slot, id, child.root_owns_events);
     }
 }
 
@@ -437,6 +452,7 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                             boolean,
                         } => quote! { __rahti_attrs.value(#name, &(#expr), #boolean); },
                         TagAttr::Spread(expr) => quote! { __rahti_attrs.spread(&(#expr)); },
+                        TagAttr::OwnsEvents => quote! { __rahti_attrs.own_events(); },
                     });
                 }
                 body.extend(quote! {

@@ -201,6 +201,32 @@ Within an event expression PulsePoint exposes:
 
 Use native lowercase HTML event names, not JSX names such as `onClick`.
 
+A handler on a block's root element runs in that block's scope, as in React:
+
+```rust
+#[component]
+pub fn SubmitForm() -> Html {
+    html! {
+        <form onsubmit={handleSubmit(event)}>
+            …
+            <script>function handleSubmit(e) { e.preventDefault(); }</script>
+        </form>
+    }
+}
+```
+
+The runtime evaluates a root's attributes in the caller's scope, because that
+is where forwarded values come from, so `html!` names the block as the owner
+of the handlers written literally on its root: the tag ships with
+`pp-event-owner` beside `pp-component`. Each instance resolves to itself, even
+when several instances of one component share a `pp-component` name. A
+caller's handler forwarded through `bindings` keeps running in the caller's
+scope. One element has one event owner, so a root cannot combine its own
+handlers with a caller's: an `on…=@{…}` beside an owned handler is a compile
+error, and a spread that brings an event handler onto such a root is refused
+at render (a debug assertion; dropped in release). Put the caller's handler on
+an inner element, or call it from the block's own handler.
+
 ### Forms
 
 `value={state}` and `checked={state}` are controlled bindings. Default values

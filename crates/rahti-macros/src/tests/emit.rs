@@ -13,6 +13,7 @@ fn show_tag_attr(attr: &parse::TagAttr) -> String {
         },
         parse::TagAttr::Value { name, .. } => format!(" {name}=\"@{{}}\""),
         parse::TagAttr::Spread(expr) => format!(" @{{..{expr}}}"),
+        parse::TagAttr::OwnsEvents => " @owns-events".to_string(),
     }
 }
 
@@ -503,4 +504,91 @@ fn only_the_block_that_holds_the_binding_is_wrapped() {
         out.contains("<template pp-owner=") && out.contains("<p>{x}</p></template>"),
         "{out}"
     );
+}
+
+// ------------------------------------------------------ root event ownership
+
+/// A handler a block writes on its own root belongs to that block. The client
+/// runtime evaluates a root's attributes in the caller's scope — where
+/// forwarded props come from — so the root names its block as event owner,
+/// or `<form onsubmit={save(event)}>` throws before `preventDefault()` runs.
+#[test]
+fn a_root_that_handles_its_own_event_names_its_owner() {
+    let out = markup(
+        "@component \"form_12345678\" <form onsubmit={save(event)}><button>go</button></form>",
+        "src/components/form.rs",
+    );
+    assert_eq!(
+        out,
+        "<form pp-component=\"form_12345678\" pp-event-owner=\"form_12345678\" \
+         onsubmit=\"{save(event)}\"><button>go</button></form>"
+    );
+}
+
+/// A page root is a block root like any other.
+#[test]
+fn a_page_root_owns_its_own_handlers() {
+    let out = markup("<main onclick=\"count()\">x</main>", "src/app/page.rs");
+    let expected = component::identifier("src/app/page.rs").expect("page.rs is a convention file");
+    assert!(
+        out.starts_with(&format!(
+            "<main pp-component=\"{expected}\" pp-event-owner=\"{expected}\""
+        )),
+        "{out}"
+    );
+}
+
+/// Only the root: an inner element's handler already runs in the block that
+/// holds it, and a callback prop (`on-select`) is not a native event.
+#[test]
+fn inner_handlers_and_callback_props_leave_the_root_alone() {
+    let inner = markup(
+        "<main><button onclick={go()}>x</button></main>",
+        "src/app/page.rs",
+    );
+    assert!(!inner.contains("pp-event-owner"), "{inner}");
+
+    let prop = markup("<main on-select={pick}>x</main>", "src/app/page.rs");
+    assert!(!prop.contains("pp-event-owner"), "{prop}");
+}
+
+/// Any lowercase, unhyphenated `on…` counts — there is no list of events to
+/// keep current. The runtime decides what is native; for anything else the
+/// marker is inert.
+#[test]
+fn events_are_recognized_by_naming_not_a_list() {
+    let out = markup(
+        "@component \"x_12345678\" <div onsomefutureevent={react(event)}>x</div>",
+        "src/components/x.rs",
+    );
+    assert!(out.contains("pp-event-owner=\"x_12345678\""), "{out}");
+}
+
+/// A self-contained child block keeps its own identity, and its root's own
+/// handler is its own too.
+#[test]
+fn a_self_contained_child_block_owns_its_root_handler() {
+    let out = markup(
+        "<main><Card><div onclick={hit()}><script>function hit() {}</script></div></Card></main>",
+        "src/app/page.rs",
+    );
+    let owners = out.matches("pp-event-owner=").count();
+    assert_eq!(owners, 1, "{out}");
+    assert!(out.contains("<div pp-component="), "{out}");
+}
+
+/// A spread beside an owned handler is marked, so the tag built at runtime
+/// refuses a caller's handler the spread would bring.
+#[test]
+fn a_spread_beside_an_owned_handler_is_marked() {
+    let out = markup(
+        "@component \"f_12345678\" <form onsubmit={save(event)} @{..attrs}>x</form>",
+        "src/components/f.rs",
+    );
+    assert!(out.contains("pp-event-owner=\"f_12345678\""), "{out}");
+    assert!(out.contains(" @owns-events"), "{out}");
+
+    let plain = markup("<div @{..attrs}>x</div>", "src/app/page.rs");
+    assert!(!plain.contains("@owns-events"), "{plain}");
+    assert!(!plain.contains("pp-event-owner"), "{plain}");
 }
