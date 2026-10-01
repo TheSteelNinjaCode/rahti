@@ -386,12 +386,15 @@ written between component tags read the scope of the block that wrote them,
 the way React children close over the component that rendered them. Which
 serialization the children take is decided per child block:
 
-- **Children carrying a client `{…}` binding** — in text, or as an element
-  attribute value — and no `<script>` of their own ship as
-  `<template pp-owner="…">…</template>` inside the component's boundary. The
-  runtime renders the template in the owner's scope and re-renders it
-  whenever the owner's state changes, so `<Badge>{count}</Badge>` follows
-  the page's `count`. Owned content is inert markup until hydration.
+- **Children carrying a client `{…}` binding** — in text, as an element
+  attribute value, or as a prop on a component tag — and no `<script>` of
+  their own ship as `<template pp-owner="…">…</template>` inside the
+  component's boundary. The runtime renders the template in the owner's
+  scope and re-renders it whenever the owner's state changes, so
+  `<Badge>{count}</Badge>` follows the page's `count`, and so does
+  `<Card><Input value={query} /></Card>`: the inner component writes the
+  prop on its root, which is evaluated in the owner's scope. Owned content
+  is inert markup until hydration.
 - **Children carrying their own `<script>`** are a self-contained block: a
   single root is stamped `pp-component` — the same block a separate
   `html! { … }` child argument is — and its bindings resolve against state

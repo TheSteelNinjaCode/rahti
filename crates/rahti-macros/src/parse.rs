@@ -1289,6 +1289,12 @@ impl Parser {
                 // an expression and chooses where it lands.
                 Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {
                     self.next();
+                    // The expression lands on the component's root, which the
+                    // runtime evaluates in the scope that wrote the tag — so
+                    // it is this block's binding, the same as one written on
+                    // an element. Uncounted, `<Card><Input value={q} /></Card>`
+                    // passes for static children and loses its owner.
+                    self.client_bindings += 1;
                     let source = binding_source(&g);
                     let expr = source
                         .strip_prefix('{')

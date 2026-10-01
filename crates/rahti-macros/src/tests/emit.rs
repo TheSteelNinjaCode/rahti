@@ -451,6 +451,21 @@ fn an_attribute_binding_child_is_owned() {
     assert!(out.contains("<template pp-owner="), "{out}");
 }
 
+/// So does a `{…}` prop on a component tag inside the children: the inner
+/// component writes it on its root, which is evaluated in the owner's scope.
+#[test]
+fn a_component_prop_binding_child_is_owned() {
+    let out = markup(
+        "<main><Card><Input value={query} /></Card></main>",
+        "src/app/page.rs",
+    );
+    let expected = component::identifier("src/app/page.rs").expect("a convention file");
+    assert!(
+        out.contains(&format!("<template pp-owner=\"{expected}\">")),
+        "{out}"
+    );
+}
+
 /// Children with their own `<script>` are self-contained blocks — their
 /// bindings read state they declare themselves, so they keep their own
 /// stamp and take no owner wrap.
