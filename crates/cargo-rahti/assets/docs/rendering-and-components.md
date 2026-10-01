@@ -220,6 +220,9 @@ Rules:
 - take props as normal typed Rust arguments;
 - keep one root — a literal element, or a single component tag (see
   Composition below);
+- write client `{…}` bindings inside the root, not on it: root attributes
+  are evaluated in the caller's scope, so `html!` refuses a component's own
+  `{…}` on its root (handlers excepted — see "Events" in `pulsepoint.md`);
 - do not manually stamp `pp-component` unless implementing a deliberate
   framework boundary.
 
@@ -350,7 +353,31 @@ let rows = Html::concat(items.iter().map(|item| html! {
 ```
 
 A component that takes `children` and passes it on interpolates it between
-the next component's tags instead of writing `<slot />`.
+the next component's tags instead of writing `<slot />`, alone or beside
+markup of its own:
+
+```rust
+#[component]
+pub fn Section(title: &str, children: Html) -> Html {
+    html! {
+        <section>
+            <Panel title=@{title}>
+                <h3>{heading}</h3>
+                @{children}
+            </Panel>
+            <script>const heading = "Totals";</script>
+        </section>
+    }
+}
+```
+
+The children keep the block that wrote them as their owner at every level:
+`{heading}` reads `Section`'s scope, and a page's
+`<Section title="…"><b>{count}</b></Section>` keeps `{count}` the page's,
+updated when the page's state changes. That holds when the receiving
+component renders `<slot />` inside its own `pp-for` (the children render
+once per row) and when the passing component sits in a page's `pp-for`, with
+the children reading the loop variable.
 
 ## Reactive Boundary Rule
 
@@ -372,11 +399,13 @@ serialization the children take is decided per child block:
 - **Static children** are served inline, visible without JavaScript, with a
   single root stamped as before.
 
-Two shapes still do not cross the boundary: children rooted in `<>…</>`
+Two shapes stay in the component's scope: children rooted in `<>…</>`
 keep the fragment's own-block stamping even when they carry bindings, and
-children built in Rust and handed over as `@{expr}` are opaque `Html` — the
-macro cannot see their bindings, so they render inside the component's
-boundary and read its scope, not the caller's. A `{…}` prop on a nested
+`Html` built in Rust and handed over as `@{expr}` is opaque — the macro cannot
+see its bindings, so it renders inside the component's boundary and reads its
+scope, not the caller's. Children a component received between its own tags
+and hands on with `@{children}` are the exception: they are already wrapped
+for their owner, and keep it. A `{…}` prop on a nested
 component tag written inside children (`<Card><Badge class={x} /></Card>`)
 does not by itself make the children owned either; event-handler props still
 fire correctly, but a non-event prop binding there re-renders only with the

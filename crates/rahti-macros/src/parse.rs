@@ -77,6 +77,18 @@ pub fn is_native_event_name(name: &str) -> bool {
     lower.len() > 2 && lower.starts_with("on") && lower[2..].bytes().all(|b| b.is_ascii_lowercase())
 }
 
+/// A root attribute the client runtime would evaluate in some scope: a `{…}`
+/// that is not an event handler (owned separately), not a runtime-managed
+/// `pp-*` attribute, and not JSON data (`data-config="{\"a\":1}"`).
+fn is_scope_binding(name: &str, value: &str) -> bool {
+    if !value.contains('{') || is_native_event_name(name) || name.starts_with("pp-") {
+        return false;
+    }
+    let trimmed = value.trim_start();
+    let after_brace = trimmed.strip_prefix('{').map(str::trim_start);
+    !matches!(after_brace, Some(rest) if rest.starts_with('"') || rest.starts_with('}'))
+}
+
 /// The markers a `<>…</>` fragment ships between.
 ///
 /// A fragment is a run of siblings framed by a comment pair — the open
@@ -401,6 +413,10 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         slot_at: None,
         client_bindings: 0,
         scripts: 0,
+        root_attr_bindings: 0,
+        root_binding: None,
+        root_close_at: None,
+        inner_spread: false,
     };
     let forced_component = parser.component_directive();
     let mut ops = Vec::new();
@@ -414,6 +430,10 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
     }
 
     check_single_root(&parser.roots, call_site)?;
+    if forced_component.is_some() && !parser.declares_component {
+        parser.reject_root_binding()?;
+        parser.claim_scriptless_markup(&mut ops);
+    }
     let renders_document = parser.roots.iter().any(
         |root| matches!(root, Root::Element(name, _) if name.eq_ignore_ascii_case(DOCUMENT_ROOT)),
     );
@@ -537,6 +557,19 @@ struct Parser {
     /// `<script>` elements seen in the block being parsed. Same save/reset
     /// discipline as `client_bindings`.
     scripts: usize,
+    /// The part of `client_bindings` written on the root's own attributes.
+    /// Those are the caller's to evaluate, so they are not the block's own
+    /// markup; see [`Parser::claim_scriptless_markup`].
+    root_attr_bindings: usize,
+    /// A non-event attribute of the root element whose value is a client
+    /// `{…}` binding, with the root's span: the first one written.
+    root_binding: Option<(String, String, Span)>,
+    /// Index of the op closing the block's root — `</tag>` or a fragment's
+    /// close marker — where a claimed script goes.
+    root_close_at: Option<usize>,
+    /// A spread sits on an element below the root. What it brings is only
+    /// known at render, and may be the caller's `bindings`.
+    inner_spread: bool,
 }
 
 impl Parser {
@@ -782,9 +815,22 @@ impl Parser {
         }
 
         let mut markup = format!("<{name}");
+        let bindings_before = self.client_bindings;
         let mut attrs = self.tag_attributes()?;
         if is_root {
+            self.root_attr_bindings = self.client_bindings - bindings_before;
+            self.root_binding = attrs.iter().find_map(|attr| match attr {
+                TagAttr::Literal {
+                    name: attr_name,
+                    value: Some(value),
+                } if is_scope_binding(attr_name, value) => {
+                    Some((attr_name.clone(), value.clone(), open))
+                }
+                _ => None,
+            });
             self.claim_root_events(&mut attrs, &name, open)?;
+        } else if attrs.iter().any(|attr| matches!(attr, TagAttr::Spread(_))) {
+            self.inner_spread = true;
         }
         emit_attributes(attrs, &mut markup, ops);
 
@@ -847,6 +893,9 @@ impl Parser {
         }
         self.next();
         ops.push(Op::Static(format!("</{name}>")));
+        if is_root && !RAW_TEXT.contains(&name.as_str()) {
+            self.root_close_at = Some(ops.len() - 1);
+        }
         Ok(())
     }
 
@@ -990,7 +1039,8 @@ impl Parser {
         self.next(); // '>'
         self.mark_root(Root::Fragment(open));
 
-        if self.component_slot.is_none() {
+        let is_root = self.component_slot.is_none();
+        if is_root {
             self.component_slot = Some((ops.len(), FRAGMENT_NAME_AT, SlotKind::Fragment));
         }
         ops.push(Op::Static(FRAGMENT_OPEN.to_string()));
@@ -1010,6 +1060,9 @@ impl Parser {
         self.next();
         self.next();
         ops.push(Op::Static(FRAGMENT_CLOSE.to_string()));
+        if is_root {
+            self.root_close_at = Some(ops.len() - 1);
+        }
         Ok(())
     }
 
@@ -1068,6 +1121,10 @@ impl Parser {
         let outer_depth = std::mem::replace(&mut self.depth, 0);
         let outer_bindings = std::mem::replace(&mut self.client_bindings, 0);
         let outer_scripts = std::mem::replace(&mut self.scripts, 0);
+        let outer_root_attr_bindings = std::mem::replace(&mut self.root_attr_bindings, 0);
+        let outer_root_binding = self.root_binding.take();
+        let outer_root_close_at = self.root_close_at.take();
+        let outer_inner_spread = std::mem::replace(&mut self.inner_spread, false);
 
         let mut child_ops = Vec::new();
         let children = self.nodes(&mut child_ops);
@@ -1093,6 +1150,10 @@ impl Parser {
         self.depth = outer_depth;
         self.client_bindings = outer_bindings;
         self.scripts = outer_scripts;
+        self.root_attr_bindings = outer_root_attr_bindings;
+        self.root_binding = outer_root_binding;
+        self.root_close_at = outer_root_close_at;
+        self.inner_spread = outer_inner_spread;
         children?;
 
         if !(self.is_punct(0, '<') && self.is_punct(1, '/')) {
@@ -1294,6 +1355,58 @@ impl Parser {
             attrs.insert(0, TagAttr::OwnsEvents);
         }
         Ok(())
+    }
+
+    /// Refuse a client binding a component wrote on its own root element.
+    ///
+    /// The client runtime evaluates a component root's attributes in the
+    /// CALLER's scope — that is where the caller's forwarded `bindings`
+    /// belong — so `<section hidden={!open}>` in a component reads the
+    /// caller's `open`, never the component's own state or `pp.props`, and
+    /// renders a wrong value with no error. Handlers are the exception, owned
+    /// through `pp-event-owner` (see [`Parser::claim_root_events`]).
+    fn reject_root_binding(&self) -> Result<(), Error> {
+        let Some((name, value, span)) = &self.root_binding else {
+            return Ok(());
+        };
+        Err(Error {
+            span: *span,
+            msg: format!(
+                "rahti: this component binds `{name}={value}` on its own root element.\n  \
+                 The client runtime evaluates a component root's attributes in the \
+                 caller's scope, so this cannot read the component's own state or \
+                 `pp.props`. Bind an element inside the root, or let the caller pass \
+                 it: `<Component {name}={{…}}>` arrives in `bindings` for the root."
+            ),
+        })
+    }
+
+    /// Give a script-less component that has bindings of its own a
+    /// `<script>`.
+    ///
+    /// The client runtime compiles a boundary without a script in its
+    /// PARENT's scope: that is what lets a hand-written as-child boundary in
+    /// a parent's `pp-for` bake the loop variable in. A component's own
+    /// markup is its own, though — `<p>{pp.props.label}</p>` must read this
+    /// component's props — so an empty script is written before the root's
+    /// closing tag, and the runtime compiles the block in its own scope.
+    ///
+    /// Counted: client bindings in the block's markup below the root. Not
+    /// counted: the root's attributes (the caller's, see
+    /// [`Parser::reject_root_binding`]), children between component tags (a
+    /// block of their own), and anything a spread below the root brings at
+    /// render — which may be the caller's `bindings`, so a block with such a
+    /// spread keeps the runtime's rule.
+    fn claim_scriptless_markup(&self, ops: &mut Vec<Op>) {
+        if self.scripts > 0 || self.inner_spread {
+            return;
+        }
+        if self.client_bindings <= self.root_attr_bindings {
+            return;
+        }
+        if let Some(at) = self.root_close_at {
+            ops.insert(at, Op::Static("<script></script>".into()));
+        }
     }
 
     /// Everything between the tag name and the `>`, in written order.

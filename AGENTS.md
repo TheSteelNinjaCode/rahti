@@ -35,7 +35,7 @@ application, which is the perspective every rule below serves.
 | Cache stores, page caching, expiration, invalidation | `docs/conventions/caching.md` |
 | Locales, Fluent catalogs, fallback, localized routes, language direction | `docs/conventions/localization.md` |
 | Typed input rules, field errors, HTTP 422 validation failures | `docs/conventions/validation.md` |
-| Browser state, hooks, bindings, events, lists, refs, SPA navigation | `docs/conventions/pulsepoint.md` |
+| Browser state, hooks, bindings, events, lists, refs, SPA navigation, native web APIs (WebGPU, Workers, WebAssembly) | `docs/conventions/pulsepoint.md` |
 | Browser/backend development diagnostics and `.rahti/dev.log` | `docs/conventions/diagnostics.md` |
 | `#[rpc]`, errors, component RPCs, streams, files | `docs/conventions/rpc-and-uploads.md` |
 | WebSockets: `#[socket]`, `pp.socket`, the optional `ws` feature | `docs/conventions/websockets.md` |
@@ -105,9 +105,15 @@ preserve them, and documentation or scaffold changes must teach them.
 10. A reactive block and its `<script>` must be self-contained. Children
     written between component tags are the exception: a `{…}` binding there
     reads the writing block's state — `html!` ships such children as an
-    owner-scoped `<template pp-owner="…">`, the React children semantics.
-    Fragment-rooted (`<>…</>`) and `@{expr}`-built children still do not
-    cross the boundary.
+    owner-scoped `<template pp-owner="…">`, the React children semantics —
+    and keeps that owner when a component hands them on with `@{children}`.
+    Fragment-rooted (`<>…</>`) children and `Html` built in Rust read the
+    component's scope instead. `pp.props` works in a component's script,
+    markup, and inline handlers alike. A client `{…}` a component writes on
+    its own root is a compile error (root attributes are evaluated in the
+    caller's scope; handlers excepted). A script-less component whose own
+    markup binds a client value gets an empty `<script></script>` from
+    `html!`, so that markup reads its own scope.
 11. A page-owned `#[rpc]` sits beside its caller in that `page.rs`; a
     component-owned `#[rpc]` sits in the component file. Component RPC names
     are application-wide; the same page RPC name may exist on different page
@@ -251,6 +257,14 @@ preserve them, and documentation or scaffold changes must teach them.
     and rejects unsupported values. Translation results are escaped text, not
     trusted markup; keep explicit locale prefixes in localized links and never
     replace a URL locale from `Accept-Language`.
+41. A component script is plain browser JavaScript, so every web API is
+    available to it directly: WebGPU (`navigator.gpu`), Canvas/WebGL, Web
+    Workers, WebAssembly, Web Audio, WebRTC, IndexedDB, and the device APIs.
+    PulsePoint wraps none of them; do not invent `pp.gpu` or similar. Server
+    data arrives through `#[rpc]`/`pp.rpc`, displayed values go in
+    `pp.state`, the device or worker handle goes in `pp.ref`, and a
+    `pp.effect` acquires it, feeds it, and releases it in its cleanup. See
+    "Native Web APIs" in `docs/conventions/pulsepoint.md`.
 
 ## Repository Map
 

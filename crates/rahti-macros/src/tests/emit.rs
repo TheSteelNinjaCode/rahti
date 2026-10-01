@@ -592,3 +592,107 @@ fn a_spread_beside_an_owned_handler_is_marked() {
     assert!(!plain.contains("@owns-events"), "{plain}");
     assert!(!plain.contains("pp-event-owner"), "{plain}");
 }
+
+/// A script-less component whose own markup binds a client value gets an
+/// empty `<script>` before its root closes: the runtime compiles a boundary
+/// without one in the caller's scope, and `{pp.props.label}` must read this
+/// component's props.
+#[test]
+fn a_scriptless_component_with_its_own_bindings_claims_its_markup() {
+    let out = markup(
+        "@component \"label_12345678\" <p class=\"label\"><b>{pp.props.label}</b></p>",
+        "src/components/label.rs",
+    );
+    assert!(
+        out.ends_with("<b>{pp.props.label}</b><script></script></p>"),
+        "{out}"
+    );
+
+    let fragment = markup(
+        "@component \"pair_12345678\" <><dt>{pp.props.term}</dt><dd>\"x\"</dd></>",
+        "src/components/pair.rs",
+    );
+    assert!(
+        fragment.contains("<dd>x</dd><script></script><!--/pp-->"),
+        "{fragment}"
+    );
+}
+
+/// Markup that is not the component's own keeps the runtime's rule.
+#[test]
+fn a_component_without_bindings_of_its_own_is_left_alone() {
+    let cases = [
+        // No client binding at all.
+        "@component \"a_12345678\" <p>\"static\"</p>",
+        // A script of its own already.
+        "@component \"b_12345678\" <p>{n}<script>const n = 1;</script></p>",
+        // Children between a component tag are a block of their own.
+        "@component \"c_12345678\" <div><Card><b>{count}</b></Card></div>",
+        // A spread below the root may carry the caller's `bindings`.
+        "@component \"d_12345678\" <label><input @{..bindings} /><span>{pp.props.hint}</span></label>",
+        // Only the root's own attributes, which are the caller's.
+        "@component \"e_12345678\" <button onclick={pp.props.onPick()}>\"go\"</button>",
+    ];
+    for src in cases {
+        let out = markup(src, "src/components/x.rs");
+        assert!(!out.contains("<script></script>"), "{src} -> {out}");
+    }
+}
+
+/// A page is not a component and is not claimed.
+#[test]
+fn a_page_is_not_claimed() {
+    let out = markup("<main><p>{count}</p></main>", "src/app/page.rs");
+    assert!(!out.contains("<script></script>"), "{out}");
+}
+
+/// A client binding a component writes on its own root is evaluated in the
+/// caller's scope, so it can never read the component's own state: refused.
+#[test]
+fn a_component_binding_on_its_own_root_is_refused() {
+    let stream = TokenStream::from_str(
+        "@component \"dialog_12345678\" <section hidden={!open}><script>const { open } = pp.props;</script></section>",
+    )
+    .expect("tokenizes");
+    let Err(err) = parse::parse(stream) else {
+        panic!("a root binding in a component must not compile");
+    };
+    assert!(err.msg.contains("`hidden={!open}`"), "{}", err.msg);
+    assert!(err.msg.contains("caller's scope"), "{}", err.msg);
+}
+
+/// What is allowed on a component root: handlers, JSON data, runtime-managed
+/// attributes, server values — and any binding on an inner element.
+#[test]
+fn allowed_root_attributes_still_compile() {
+    let cases = [
+        "@component \"a_12345678\" <form onsubmit={save(event)}>\"x\"</form>",
+        "@component \"b_12345678\" <div data-config=\"{\\\"a\\\": 1}\">\"x\"</div>",
+        "@component \"c_12345678\" <div pp-ref={root}>\"x\"</div>",
+        "@component \"d_12345678\" <div class=@{cls}>\"x\"</div>",
+        "@component \"e_12345678\" <section><div hidden={!open}>\"x\"</div><script>const { open } = pp.props;</script></section>",
+    ];
+    for src in cases {
+        let stream = TokenStream::from_str(src).expect("tokenizes");
+        assert!(parse::parse(stream).is_ok(), "{src}");
+    }
+}
+
+/// A page's root is not a component's and is not checked.
+#[test]
+fn a_page_root_binding_compiles() {
+    let stream = TokenStream::from_str("<main class={theme}>\"x\"</main>").expect("tokenizes");
+    assert!(parse::parse(stream).is_ok());
+}
+
+/// Children handed on (`<Panel>@{children}</Panel>`) are opaque `Html`
+/// already wrapped for their owner at the caller: the passing block adds no
+/// owner wrap of its own.
+#[test]
+fn children_handed_on_are_not_wrapped_again() {
+    let out = markup(
+        "@component \"framed_12345678\" <div><Panel title=\"t\">@{children}</Panel></div>",
+        "src/components/panel.rs",
+    );
+    assert!(!out.contains("pp-owner"), "{out}");
+}

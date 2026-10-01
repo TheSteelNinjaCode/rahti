@@ -61,6 +61,15 @@ and never by hand:
   as served and no boundary is created — the fragment is grouping only
   there, and its contents belong to the enclosing scope.
 
+The runtime compiles a boundary that has no `<script>` in its parent's
+scope. That is what lets a script-less component take expressions from the
+page that renders it, the way rahti-ui's parts do. A `#[component]` whose own
+markup below the root writes a client `{…}` binding and has no script is
+compiled in its own scope instead: `html!` adds an empty `<script></script>`
+before the root closes, so `<p>{pp.props.label}</p>` reads that component's
+props. A block with a spread below its root keeps the parent's scope, because
+the spread may carry the caller's `bindings`.
+
 Two things are deliberately *not* boundaries. A block whose root is a
 component tag (composition) contributes no markup of its own, so it adds no
 scope — the inner component's boundary is what mounts. And several instances
@@ -227,6 +236,21 @@ error, and a spread that brings an event handler onto such a root is refused
 at render (a debug assertion; dropped in release). Put the caller's handler on
 an inner element, or call it from the block's own handler.
 
+Handlers are the only client expressions a component writes on its own root.
+Every other root attribute is evaluated in the caller's scope, so a `{…}` the
+component writes there can never read the component's own state or
+`pp.props`. `html!` refuses it at compile time in a `#[component]`:
+
+```rust
+<section hidden={!open}>              // compile error in a component
+<section><div hidden={!open}>…</div>  // bind an element inside the root
+```
+
+A value the caller passes as a `{…}` prop and the component writes on its
+root through `bindings` is the caller's expression, evaluated where it was
+written. Server `@{…}` values, `pp-*` attributes, and JSON data on the root
+compile as usual. Page and layout roots are not checked.
+
 ### Forms
 
 `value={state}` and `checked={state}` are controlled bindings. Default values
@@ -346,10 +370,39 @@ over the confirmed value and reset when the passthrough value changes.
 
 ### `pp.props`
 
-Contains component-boundary props resolved from root attributes. Rahti Rust
-components normally pass server props through rendered markup or seed them in
-the script. Do not assume a Rust function argument automatically appears in
-`pp.props`.
+`pp.props` holds the props of the block that wrote the expression, read from
+that block's root attributes, with kebab-case names in camelCase:
+
+- a server value the component writes on its root —
+  `<form user-name=@{user_name}>` gives `pp.props.userName`, as a string;
+- a client expression the caller passed as a `{…}` prop, which the component
+  writes on its root through `bindings` — evaluated in the caller's scope,
+  with its real type.
+
+A Rust argument is in `pp.props` only when the component writes it on its
+root.
+
+`pp.props` reads the same in the script, in markup, and in inline handlers,
+like `props.x` in JSX:
+
+```rust
+#[component]
+pub fn Greeting(user_name: &str) -> Html {
+    html! {
+        <div user-name=@{user_name}>
+            <b>{pp.props.userName}</b>
+            <p>{name}</p>
+            <button type="button" onclick={setName(pp.props.userName)}>"Reset"</button>
+            <script>const [name, setName] = pp.state(pp.props.userName ?? "");</script>
+        </div>
+    }
+}
+```
+
+Handlers read the props current when the event fires. Children written
+between component tags read the props of the block that wrote them. Derive
+values from `pp.props` on every render; `pp.state(pp.props.x)` seeds
+independent state, as `useState(props.x)` does.
 
 ## Runtime Utilities
 
@@ -365,6 +418,185 @@ the script. Do not assume a Rust function argument automatically appears in
 - `pp.enablePerf()` / `pp.disablePerf()` toggle runtime performance sampling.
 - `pp.getPerfStats()` returns per-component render-phase aggregates.
 - `pp.resetPerfStats()` clears the aggregates.
+
+## Native Web APIs
+
+A component's `<script>` is plain browser JavaScript, evaluated as a function
+body in the page's own global scope. It is not a sandbox and no build step
+rewrites it: `window`, `document`, and `navigator` are the objects every other
+script on the page sees, and DevTools debug the script as written. Every web
+API the browser ships is therefore available to a component directly:
+
+- **WebGPU** (`navigator.gpu`) — GPU rendering and compute: large charts,
+  simulations, image and video processing, in-browser ML inference;
+- **Canvas 2D / WebGL** — drawing, charts, image processing;
+- **Web Workers / OffscreenCanvas** — parsing, number crunching, or rendering
+  off the main thread;
+- **WebAssembly** — native-speed modules compiled from Rust, C, or Go;
+- **Web Audio**, **media capture**, and **WebRTC** — synthesis, camera,
+  microphone, screen share, calls;
+- **IndexedDB / Cache Storage** and the **Intersection / Resize / Mutation
+  observers**;
+- **Web Serial / WebUSB / WebHID / Web Bluetooth**, plus Clipboard,
+  Notifications, File System Access, and Geolocation.
+
+PulsePoint wraps none of them, and none needs a wrapper: do not invent
+`pp.gpu`, `pp.worker`, or similar. When a task needs heavy or hardware-backed
+work, write the browser API inside the component that owns it. Do not declare
+the task out of reach, add a second frontend framework, or push per-frame work
+through `pp.state`.
+
+The parts divide the work:
+
+| Job | Use |
+| --- | --- |
+| Data from the server | `#[rpc]` + `pp.rpc`, `RpcStream`, `#[socket]` + `pp.socket`, or `@{Json(&value)}` for the first render |
+| Values the markup shows | `pp.state` — a change re-renders only the nodes that differ |
+| Handles to browser objects | `pp.ref` — devices, buffers, contexts, workers, audio graphs, streams; a ref change never re-renders |
+| Acquire, feed, release | `pp.effect` — create on mount, push new state in when it changes, dispose in the cleanup |
+| The heavy work | the browser API itself — shaders, threads, codecs, and hardware run at native speed, outside PulsePoint |
+
+A WebGPU chart fed by an rpc. The server renders the first series into the
+page, and each click asks for a new one:
+
+```rust
+use crate::rahti::{Html, Json, html, rpc};
+
+fn series(points: u32, phase: f32) -> Vec<f32> {
+    (0..points.clamp(8, 512))
+        .map(|i| 0.5 + 0.4 * (phase + i as f32 / 6.0).sin())
+        .collect()
+}
+
+#[rpc]
+pub async fn gpu_series(points: u32, phase: f32) -> Vec<f32> {
+    series(points, phase)
+}
+
+pub async fn page() -> Html {
+    let initial = series(48, 0.0);
+    html! {
+        <section>
+            <canvas pp-ref={canvas} width="640" height="240"></canvas>
+            <button onclick={load()}>"Refresh"</button>
+            <p hidden={gpuSupported}>"WebGPU is unavailable; drawing with Canvas 2D."</p>
+            <script>
+                const canvas = pp.ref(null);
+                const gpu = pp.ref(null);                // device, pipeline, buffers: never state
+                const [series, setSeries] = pp.state(@{Json(&initial)});
+                const [ready, setReady] = pp.state(false);
+                const gpuSupported = !!navigator.gpu;
+
+                // Acquire the GPU once; release it on unmount.
+                pp.effect(() => {
+                    if (!navigator.gpu) { setReady(true); return; }
+                    let cancelled = false;
+                    initGpu(canvas.current).then((g) => {
+                        if (cancelled) return g?.device.destroy();
+                        gpu.current = g;
+                        setReady(true);
+                    });
+                    return () => {
+                        cancelled = true;
+                        gpu.current?.device.destroy();
+                        gpu.current = null;
+                    };
+                }, []);
+
+                // Every new series: write it to a GPU buffer and draw.
+                pp.effect(() => {
+                    if (!ready) return;
+                    gpu.current ? drawGpu(gpu.current, series) : draw2d(canvas.current, series);
+                }, [series, ready]);
+
+                async function load() {
+                    const values = await pp.rpc("gpu_series", { points: 64, phase: Math.random() * 6.28 });
+                    setSeries(values);
+                }
+
+                // initGpu, drawGpu, and draw2d are plain WebGPU and Canvas code:
+                // navigator.gpu.requestAdapter(), adapter.requestDevice(),
+                // canvas.getContext("webgpu"), a render pipeline,
+                // device.queue.writeBuffer(...), a render pass.
+            </script>
+        </section>
+    }
+}
+```
+
+A continuous animation belongs to the browser's frame loop, not to the render
+cycle; state only starts and stops it:
+
+```javascript
+const frame = pp.ref(0);
+const [running, setRunning] = pp.state(true);
+
+pp.effect(() => {
+    if (!running) return;
+    let id = requestAnimationFrame(function tick(t) {
+        frame.current += 1;             // a ref: no render per frame
+        renderFrame(gpu.current, t);    // the GPU does the per-frame work
+        id = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(id);
+}, [running]);
+```
+
+A worker takes data from the server and hands its answer back to state:
+
+```javascript
+const worker = pp.ref(null);
+const [result, setResult] = pp.state(null);
+
+pp.effect(() => {
+    const w = new Worker("/js/parse-worker.js", { type: "module" });
+    w.onmessage = (event) => setResult(event.data);
+    worker.current = w;
+    return () => w.terminate();
+}, []);
+
+async function analyze() {
+    worker.current.postMessage(await pp.rpc("export_rows"));
+}
+```
+
+Rules:
+
+- Browser objects — GPU devices and buffers, contexts, workers, audio
+  contexts, media streams, peer connections, observers, database handles —
+  live in `pp.ref`, never in `pp.state`.
+- Acquire in an effect with `[]` dependencies and release in its cleanup:
+  `device.destroy()`, `worker.terminate()`, `audioContext.close()`,
+  `track.stop()`, `peerConnection.close()`, `observer.disconnect()`,
+  `db.close()`. SPA navigation unmounts the component, so a missing cleanup
+  leaks a GPU device or a running worker into the next page.
+- Cleanups are synchronous. Start async setup (`requestAdapter()`,
+  `getUserMedia()`, `WebAssembly.instantiateStreaming()`) inside the effect
+  and guard it with a `cancelled` flag, as above.
+- Feed the API from a second effect whose dependencies are the state it reads.
+  That effect is the bridge from server data to the GPU, worker, or audio
+  graph.
+- Per-frame values live in refs and per-frame work runs on
+  `requestAnimationFrame`. Never call a state setter every frame; set state
+  only when something on screen changes.
+- Feature-detect (`if (!navigator.gpu)`) and keep a fallback. WebGPU and most
+  device APIs need a secure context: HTTPS, or `localhost` in development.
+- APIs that need a user gesture — the hardware `request*()` pickers,
+  clipboard writes, fullscreen, the first `AudioContext.resume()` — run inside
+  the `on…` handler that received it, not in an effect.
+- A component script has no static `import`/`export` and no top-level
+  `await`. Load a library with `import()` inside an effect, or with its own
+  `<script type="module">` in a root layout.
+- Worker scripts, `.wasm` modules, shaders, and model files go in `public/`,
+  which serves them at the URL root.
+- Rahti's default CSP admits this: `worker-src 'self' blob:`, `script-src`
+  with `'unsafe-eval'` (which WebAssembly compilation needs) and `https:`, and
+  `connect-src` with `https:` and `blob:`. A worker script must be same-origin
+  or a `blob:` URL. An application that narrows its policy must keep these
+  sources for the APIs it uses; see `security-middleware.md`.
+- Results that must stay authoritative or secret — prices, permissions,
+  anything persisted — are computed in Rust behind `#[rpc]`. The browser API
+  is for rendering, interaction, and client-side acceleration.
 
 ## SPA Navigation
 
@@ -432,3 +664,7 @@ Do not invent React compatibility. PulsePoint v2 has no direct equivalent for
 `forwardRef`, component-wrapper `memo`, `lazy`, `Suspense`,
 `useInsertionEffect`, `useActionState`, `useFormStatus`, or a free-standing
 `startTransition`.
+
+Nor does it wrap browser APIs. There is no `pp.gpu`, `pp.worker`, `pp.audio`,
+or `pp.storage`; call `navigator.gpu`, `new Worker(...)`, and the rest directly,
+as "Native Web APIs" describes.

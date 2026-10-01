@@ -1670,7 +1670,8 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/validation.md` |\n",
     );
     out.push_str(
-        "| Browser state, hooks, bindings, events, lists, refs, SPA navigation | \
+        "| Browser state, hooks, bindings, events, lists, refs, SPA navigation, \
+         native web APIs (WebGPU, Workers, WebAssembly) | \
          `docs/conventions/pulsepoint.md` |\n",
     );
     out.push_str(
@@ -1950,6 +1951,16 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
     rules.push(
         "`public/js/pp-reactive-v2.min.js` is a shipped framework asset.\n\
          Never hand-edit it; `cargo rahti upgrade` replaces it."
+            .to_string(),
+    );
+    rules.push(
+        "A component script is plain browser JavaScript, so every web API is\n\
+         available to it directly: WebGPU (`navigator.gpu`), Canvas/WebGL, Web\n\
+         Workers, WebAssembly, Web Audio, WebRTC, IndexedDB, and the device APIs.\n\
+         PulsePoint wraps none of them; do not invent `pp.gpu` or similar. The\n\
+         handle goes in `pp.ref`, a `pp.effect` acquires, feeds, and releases\n\
+         it, and data arrives through `#[rpc]`/`pp.rpc`. See \"Native Web APIs\"\n\
+         in `docs/conventions/pulsepoint.md`."
             .to_string(),
     );
     if ws {
