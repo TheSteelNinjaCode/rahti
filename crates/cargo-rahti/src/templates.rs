@@ -11,6 +11,35 @@ use rahti_build::Backend;
 /// The client runtime, embedded so `new` never needs the network.
 pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js");
 
+/// The runtime's type declarations for the application's own modules in
+/// `public/js/`, generated from the same build as [`PP_RUNTIME`]: a module
+/// that starts with `// @ts-check` is checked against the `pp` it calls.
+pub const PP_TYPES: &str = include_str!("../assets/js/pp.d.ts");
+
+/// Makes `public/js/` a checkable JavaScript project: `/js/…` imports resolve
+/// to the files the server serves, `pp.d.ts` is in scope, and a module opts
+/// in with `// @ts-check` (editors do it live; `npx tsc -p jsconfig.json`
+/// checks from a terminal). Nothing is compiled or emitted — there is no
+/// JavaScript build step.
+pub const JSCONFIG: &str = r#"{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "strictNullChecks": true,
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": [],
+    "paths": { "/js/*": ["./public/js/*"] }
+  },
+  "include": ["public/js/**/*.js", "public/js/**/*.mjs", "public/js/pp.d.ts"],
+  "exclude": ["public/js/pp-reactive-v2.min.js", "public/js/tailwind-merge.mjs"]
+}
+"#;
+
 /// The convention documents every new project carries in `docs/conventions/`.
 ///
 /// Rahti is not in anyone's training data, so a project that leaves the
@@ -2020,7 +2049,11 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `#[rpc]` answers and refuses a malformed payload, a private route\n\
          redirects without a session. Before testing private routes, install\n\
          the auth policy in `setup()` exactly as `initialize_application`\n\
-         does. See `docs/conventions/testing.md`."
+         does. What only a browser shows — a binding updating, a window\n\
+         opening, a library's DOM surviving a re-render — gets a browser\n\
+         test with `rahti::browser` (the `browser-test` feature, in\n\
+         `[dev-dependencies]`), ending with `browser.errors()` empty. See\n\
+         `docs/conventions/testing.md`."
             .to_string(),
     );
     if db {

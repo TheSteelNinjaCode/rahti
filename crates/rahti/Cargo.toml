@@ -39,6 +39,13 @@ mcp = ["dep:rahti-mcp"]
 # still works.
 dev-watch = ["dep:notify"]
 
+# Browser tests: `rahti::browser`, which launches the installed Chrome or Edge
+# headless and drives a page through the DevTools protocol — trusted clicks
+# and key presses, JavaScript evaluation, console capture. Off by default and
+# meant for an application's `[dev-dependencies]`: it is test tooling, and it
+# brings a WebSocket client and process spawning with it.
+browser-test = ["dep:tokio-tungstenite", "tokio/process", "tokio/net", "tokio/macros"]
+
 [dependencies]
 # `multipart` is the upload half of the rpc wire — see src/rpc.rs.
 axum = { version = "0.8.9", features = ["multipart"] }
@@ -89,6 +96,8 @@ tokio-util = { version = "0.7", features = ["io"] }
 # Static export drives the generated Axum router in-process with `oneshot`.
 tower = { version = "0.5", features = ["util"] }
 inventory = "0.3.24"
+# The DevTools-protocol connection behind the `browser-test` feature.
+tokio-tungstenite = { version = "0.28", optional = true }
 
 [dev-dependencies]
 # Driving a finished `Router` the way the generated one is built: a request

@@ -83,13 +83,13 @@ the package boundary, so the automatic loop takes as long as an incremental
 Android build and deployment.
 
 The application is outside `native/`'s deliberately separate Cargo workspace.
-Tauri CLI 2.8 introduced the additional watch folders needed to observe it;
-`doctor` refuses an older CLI and prints the upgrade command.
+Observing it needs the additional watch folders of Tauri CLI 2.8 or later;
+`doctor` checks the CLI version and prints the upgrade command when it is
+lower.
 
-An existing project gets this behavior after updating `cargo-rahti-native` and
-running `cargo rahti native init` again. Untouched generated shell files are
-updated; an application-owned file you edited remains yours and is reported,
-as usual.
+`cargo rahti native init` writes the shell and refreshes it when run again:
+untouched generated shell files are updated, and an application-owned file
+you edited remains yours and is reported.
 
 ## Your application has to expose its startup
 

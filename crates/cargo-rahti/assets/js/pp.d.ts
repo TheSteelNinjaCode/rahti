@@ -1,0 +1,151 @@
+// PulsePoint v2 — type declarations for an application's own JavaScript.
+// Generated from the runtime's declarations; do not edit.
+//
+// In a module under public/js/, start the file with `// @ts-check` and the
+// global `pp` and the `PulsePoint` types are checked against the runtime:
+//
+//   /** @param {PulsePoint.RuntimeSocketHandle} socket */
+//   function listen(socket) { socket.send({ type: "hello" }); }
+
+declare namespace PulsePoint {
+  export interface RefObject<T = any> {
+      current: T | null;
+  }
+  export interface PortalInfo {
+      sourceParent: Element | null;
+  }
+  export const PP_CONTEXT_TYPE: unique symbol;
+  export type ContextProviderProps<T = any> = {
+      value: T;
+      children?: unknown;
+  };
+  export type ContextProvider<T = any> = (props: ContextProviderProps<T>) => unknown;
+  export interface PPContext<T = any> {
+      readonly $$typeof: symbol;
+      readonly defaultValue: T;
+      displayName?: string;
+      Provider: ContextProvider<T>;
+  }
+  export type ContextToken<T = any> = PPContext<T>;
+  type ContextProvisionDispatcher = <T>(context: ContextToken<T>, value: T) => void;
+  /**
+   * Install a context-provision dispatcher for the duration of a component's
+   * script evaluation and return the previous one, which the caller MUST
+   * restore in a `finally`. The swap pair brackets the script call exactly as a
+   * closure-wrapping form would, including nested renders, without allocating
+   * per render.
+   */
+  export function swapContextProvisionDispatcher(dispatcher: ContextProvisionDispatcher | null): ContextProvisionDispatcher | null;
+  export function createContext<T>(defaultValue: T): PPContext<T>;
+  type StateSetter<T> = (updater: T | ((prev: T) => T)) => void;
+  export type StateHook = {
+      (): [undefined, StateSetter<undefined>];
+      <T>(initial: () => T): [T, StateSetter<T>];
+      <T>(initial: T): [T, StateSetter<T>];
+  };
+  export type ReducerHook = {
+      <S, A>(reducer: (state: S, action: A) => S, initial: S): [S, (action: A) => void];
+      <S, A, I>(reducer: (state: S, action: A) => S, initialArg: I, init: (arg: I) => S): [S, (action: A) => void];
+  };
+  export type OptimisticHook = {
+      <S>(passthrough: S): [S, (action: S) => void];
+      <S, A>(passthrough: S, reducer: (state: S, action: A) => S): [S, (action: A) => void];
+  };
+  export type ComponentHooksAPI<Props extends Record<string, any> = Record<string, any>> = {
+      state: StateHook;
+      effect(cb: () => void | (() => void), deps?: any[]): void;
+      layoutEffect(cb: () => void | (() => void), deps?: any[]): void;
+      ref<T>(initialValue?: T | null): RefObject<T>;
+      memo<T>(factory: () => T, deps?: any[]): T;
+      callback<T extends (...args: any[]) => any>(cb: T, deps?: any[]): T;
+      /** A stable function that always runs the latest render's version. */
+      event<T extends (...args: any[]) => any>(cb: T): T;
+      reducer: ReducerHook;
+      context<T>(context: PPContext<T>): T;
+      portal<T extends HTMLElement>(ref: RefObject<T>, target?: Element | null): PortalInfo;
+      id(): string;
+      errorBoundary(): [unknown, () => void];
+      syncExternalStore<T>(subscribe: (onStoreChange: () => void) => (() => void) | void, getSnapshot: () => T): T;
+      imperativeHandle<T>(ref: RefObject<T> | ((instance: T | null) => void) | null | undefined, createHandle: () => T, deps?: any[]): void;
+      transition(): [boolean, (scope: () => void | Promise<unknown>) => void];
+      deferredValue<T>(value: T, initialValue?: T): T;
+      optimistic: OptimisticHook;
+      props: Props;
+  };
+  export type RuntimeRpcOptions = {
+      abortPrevious?: boolean;
+      url?: string;
+      csrfUrl?: string;
+      credentials?: RequestCredentials;
+      onStream?: (chunk: any) => void;
+      onStreamError?: (error: any) => void;
+      onStreamComplete?: () => void;
+      onUploadProgress?: (info: {
+          loaded: number;
+          total: number | null;
+          percent: number | null;
+      }) => void;
+      onUploadComplete?: () => void;
+  };
+  export type RuntimeSocketOptions = {
+      url?: string;
+      onOpen?: (info: {
+          reconnected: boolean;
+      }) => void;
+      onMessage?: (message: any) => void;
+      onError?: (error: Error) => void;
+      onClose?: (info: {
+          code: number;
+          reason: string;
+          wasClean: boolean;
+          willReconnect: boolean;
+      }) => void;
+      onReconnecting?: (info: {
+          attempt: number;
+          delay: number;
+      }) => void;
+      reconnect?: boolean;
+      reconnectDelay?: number;
+      reconnectDelayMax?: number;
+      maxReconnectAttempts?: number;
+      heartbeatInterval?: number;
+      heartbeatTimeout?: number;
+  };
+  export type RuntimeSocketHandle = {
+      send: (value: any) => boolean;
+      close: (code?: number, reason?: string) => void;
+      readonly readyState: number;
+  };
+  export type RuntimePerfPhaseSample = {
+      count: number;
+      totalMs: number;
+      maxMs: number;
+  };
+  export type RuntimePerfEntry = {
+      renderCount: number;
+      phases: Record<string, RuntimePerfPhaseSample>;
+  };
+  export type RuntimeUtilityAPI = {
+      createContext<T>(defaultValue: T): PPContext<T>;
+      mount(): void;
+      redirect(url: string): Promise<void>;
+      rpc<T = any>(functionName: string, data?: Record<string, any>, optionsOrAbort?: boolean | RuntimeRpcOptions): Promise<T | void>;
+      socket(functionName: string, args?: Record<string, any>, options?: RuntimeSocketOptions): RuntimeSocketHandle;
+      enablePerf(): void;
+      disablePerf(): void;
+      getPerfStats(): Record<string, RuntimePerfEntry>;
+      resetPerfStats(): void;
+  };
+  export type ComponentRuntime<Props extends Record<string, any> = Record<string, any>> = ComponentHooksAPI<Props> & RuntimeUtilityAPI & Record<string, any>;
+
+}
+
+/**
+ * The page-level runtime: rpc, sockets, navigation. Hooks such as
+ * `pp.state` belong to a component's own `<script>`, not to a module.
+ */
+declare var pp: PulsePoint.RuntimeUtilityAPI;
+
+interface Window {
+  pp: PulsePoint.RuntimeUtilityAPI;
+}

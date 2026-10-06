@@ -53,7 +53,7 @@ application, which is the perspective every rule below serves.
 | Escaping, CSRF, redirects, upload trust, development exposure | `docs/conventions/security.md` |
 | `rahti.config.json`, CSS, static files, CLI, environment variables | `docs/conventions/configuration-and-tooling.md` |
 | Workspace test placement and verification | `docs/conventions/workspace-testing.md` |
-| Application test suites (shipped to new projects) | `docs/conventions/testing.md` |
+| Application test suites (the application guide) | `docs/conventions/testing.md` |
 | Optional Windows/Android packaging, packaged paths, the loopback server | `docs/conventions/native-packaging.md` |
 
 When documentation and code disagree, verify the behavior in source and tests,
@@ -341,9 +341,12 @@ into new applications through `cargo rahti new`, embedded from copies in
 byte-identical to its canonical file here, so after editing a shipped
 document, copy it over its `assets/docs/` twin in the same change.
 
-Document what Rahti implements today. Do not describe a planned feature, a
-migration path, or compatibility with something Rahti never shipped; a reader
-cannot tell an aspiration from a rule.
+Document what Rahti implements today: each feature as it works now and how to
+use it. Rahti is in development and keeps no legacy, so never write about
+older behavior, what "new" versus "existing" projects get, a migration path,
+backward compatibility, or a planned feature. A coding agent reading such a
+sentence goes looking for the legacy path it implies, or builds one; it
+cannot tell a history note or an aspiration from a rule.
 
 When adding a feature:
 

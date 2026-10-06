@@ -92,7 +92,7 @@ robots, Open Graph, and Twitter tags supported by `metadata-and-seo.md`.
 
 ## Output Ownership and Safety
 
-`dist/` is gitignored in a new project. The exporter places
+The scaffold's `.gitignore` ignores `dist/`. The exporter places
 `.rahti-static-output` inside its output directory. On a later build it clears
 only a non-empty directory carrying that marker; it refuses to erase an
 existing directory it does not own. It also refuses the project root, a

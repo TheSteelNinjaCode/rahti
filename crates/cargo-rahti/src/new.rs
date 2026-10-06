@@ -164,6 +164,8 @@ pub fn project_files(
             "public/js/pp-reactive-v2.min.js".into(),
             t::PP_RUNTIME.into(),
         ),
+        ("public/js/pp.d.ts".into(), t::PP_TYPES.into()),
+        ("jsconfig.json".into(), t::JSCONFIG.into()),
         ("public/favicon.ico".into(), t::FAVICON.into()),
         // The framework's own account of itself. Rahti is not in anyone's
         // training data, so a project without these files gives a coding

@@ -673,6 +673,73 @@ Rules:
   anything persisted — are computed in Rust behind `#[rpc]`. The browser API
   is for rendering, interaction, and client-side acceleration.
 
+## Splitting a Large Page
+
+A state change re-renders the component that owns the state. A page that
+keeps everything in one script — a game HUD, a dashboard — re-renders all of
+its markup whenever any of it changes. Split it the way the state splits:
+
+- **Presentational pieces** that show the page's state go between component
+  tags; a `{…}` binding there reads the page's scope (see "Children and
+  Slots" in `rendering-and-components.md`).
+- **State several components share** lives in a small store module, loaded
+  before the runtime mounts, and each component reads the slice it shows
+  with `pp.syncExternalStore`. A change re-renders the components whose slice
+  changed, and no others:
+
+```javascript
+// public/js/office/store.js — loaded by the root layout before /js/main.js:
+// <script type="module" src="/js/office/store.js"></script>
+let state = { workers: [], hint: "" };
+const listeners = new Set();
+globalThis.officeStore = {
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    get: () => state,
+    set(patch) { state = { ...state, ...patch }; listeners.forEach((l) => l()); },
+};
+```
+
+```javascript
+// In the roster component's script:
+const store = globalThis.officeStore;
+const workers = pp.syncExternalStore(store.subscribe, () => store.get().workers);
+```
+
+  The snapshot function must return the same value for the same state —
+  select a slice the store keeps, never build a new array or object in it,
+  or every store change re-renders the component.
+- **A value a whole subtree reads** (a theme, the signed-in member) goes in a
+  context: `pp.createContext` and `pp.context`.
+
+Keep server data flowing in through rpcs and sockets as before; the store is
+the page's working state, not a cache of authority.
+
+## Typed Modules
+
+`public/js/pp.d.ts` declares the runtime for the application's own modules,
+and `jsconfig.json` at the project root makes `public/js/` a checkable
+JavaScript project: `/js/…` imports resolve to the served files and
+`pp.d.ts` is in scope. Nothing is compiled. A module opts in with
+`// @ts-check` on its first line; editors check it as you type, and
+`npx tsc -p jsconfig.json` checks it from a terminal. `pp.d.ts` is generated
+from the same build as the runtime bundle and is replaced with it by
+`cargo rahti upgrade`; never hand-edit it.
+
+```javascript
+// @ts-check
+/** @param {PulsePoint.RuntimeSocketHandle} socket */
+export function hello(socket) {
+    socket.send({ type: "hello" });
+}
+```
+
+In a module the global `pp` is the page-level runtime — `pp.rpc`,
+`pp.socket`, `pp.redirect` — and the `PulsePoint` namespace names its types
+for JSDoc. Hooks (`pp.state`, `pp.effect`, …) belong to a component's own
+`<script>`, so the declarations do not offer them to a module. A module that
+imports a library without type information (a vendored three.js build) needs
+that library's own declarations before it can be checked.
+
 ## SPA Navigation
 
 PulsePoint intercepts eligible same-origin links after mount, fetches the next

@@ -119,7 +119,7 @@ rather than falling back. None of the three belongs in `rahti.config.json` —
 the auth policy is code, in `src/auth.rs`, and the secret is a credential.
 
 `APP_TIMEZONE` is read from the same environment source, defaults to `UTC`,
-and is written explicitly in a new project's ignored `.env`. It must be an
+and `cargo rahti new` writes it explicitly in the ignored `.env`. It must be an
 IANA name such as `America/Santo_Domingo`; an invalid name stops startup.
 It controls application calendar interpretation and local daily schedules,
 not absolute expiry or storage. See `application-timezone.md`.

@@ -221,6 +221,53 @@ Because the migrations run in `setup()`, any test that touches an entity
 also proves the migration creates what the entity expects — a disagreement
 between the two fails on the first query.
 
+## Browser Tests
+
+The router tests prove what the server sends. What PulsePoint then does with
+it — state, bindings, effects, the DOM a library builds, what a click or a key
+press changes — happens in a browser. `rahti::browser`, behind the
+`browser-test` feature, drives one: it launches the installed Chrome,
+Chromium or Edge headless, speaks the DevTools protocol to it, and needs no
+WebDriver, Node, or browser download. Turn it on for tests only:
+
+```toml
+[dev-dependencies]
+rahti = { version = "…", features = ["browser-test"] }
+```
+
+```rust
+use rahti::browser::{Browser, serve};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_counter_counts() {
+    setup().await;
+    let addr = serve(crate::routes::router()).await;
+    let Some(mut browser) = Browser::launch().await.unwrap() else {
+        return; // no browser installed: skipped, with a note on stderr
+    };
+    browser.goto(&format!("http://{addr}/")).await.unwrap();
+    browser.click("button").await.unwrap();
+    browser.wait_for("document.querySelector('p').textContent === '1'").await.unwrap();
+    assert!(browser.errors().is_empty(), "{:?}", browser.errors());
+}
+```
+
+- `goto`, `click`, `double_click`, `click_at`, `move_mouse`, `press`,
+  `key_down`/`key_up` (hold a key), and `type_text` produce trusted input,
+  the same kind a person does.
+- `eval::<T>(js)` reads a value back; `wait_for(js)` polls a condition for up
+  to 30 seconds and, when it gives up, names the condition and any page
+  errors.
+- `errors()` is every console error and uncaught exception so far. End a
+  journey by asserting it is empty.
+- `RAHTI_BROWSER` names a browser executable when the search does not find
+  one. Without a browser, `launch` answers `None` and the test returns early,
+  so the suite still passes on a machine that has none.
+
+Test a journey — sign in, act, check what the page shows — and use the
+browser for what only a browser can show; keep rules and data in the router
+tests, which are faster and exact.
+
 ## What a Feature's Tests Cover
 
 Adding a feature means adding its tests in the same change:
@@ -231,9 +278,10 @@ Adding a feature means adding its tests in the same change:
   `#[rpc(auth)]` refuses without one;
 - a new table: an insert and a query through the entity, which exercises
   the migration for free;
-- a bug fix: a test that fails on the old behavior.
+- a bug fix: a test that fails on the old behavior;
+- browser behavior a person would notice — a binding that must update, a
+  window that must open and close, a library's DOM surviving a re-render:
+  a browser test (see "Browser Tests" above).
 
-What the suite cannot reach is browser behavior — PulsePoint state,
-bindings, and events run in the page, not in `cargo test`. Verify those in
-a browser, and read `.rahti/dev.log` when something misbehaves; see
+Read `.rahti/dev.log` when something misbehaves in the browser; see
 `diagnostics.md`.

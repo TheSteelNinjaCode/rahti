@@ -41,6 +41,8 @@ mod upload;
 pub mod validation;
 #[cfg(feature = "ws")]
 pub mod ws;
+#[cfg(feature = "browser-test")]
+pub mod browser;
 #[cfg(feature = "mcp")]
 pub use rahti_mcp as mcp;
 

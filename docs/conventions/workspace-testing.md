@@ -13,7 +13,11 @@ counterpart is `testing.md`, which teaches a scaffolded application's suite.
   API.
 
 The workspace has no JavaScript test suite; the browser runtime is a prebuilt
-asset and is exercised through the browser, not through `cargo test`.
+asset, tested in its own repository. Rahti's browser-test driver,
+`rahti::browser`, is tested against a real headless browser in
+`crates/rahti/src/tests/browser.rs` with
+`cargo test -p rahti --features browser-test browser::`; those tests skip,
+passing, on a machine with no Chrome, Chromium or Edge.
 
 Follow the existing placement instead of creating ad hoc test binaries.
 

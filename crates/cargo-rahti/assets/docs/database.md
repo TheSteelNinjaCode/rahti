@@ -25,7 +25,7 @@ interactive run asks — defaulting to no, so pressing enter agrees with
 omitting the flag — and a run with nowhere to ask takes the command line at
 its word.
 
-For an existing project, one command:
+`cargo rahti upgrade --db` adds a database to a project that has none:
 
 ```text
 cargo rahti upgrade --db sqlite
