@@ -408,11 +408,7 @@ keep the fragment's own-block stamping even when they carry bindings, and
 see its bindings, so it renders inside the component's boundary and reads its
 scope, not the caller's. Children a component received between its own tags
 and hands on with `@{children}` are the exception: they are already wrapped
-for their owner, and keep it. A `{…}` prop on a nested
-component tag written inside children (`<Card><Badge class={x} /></Card>`)
-does not by itself make the children owned either; event-handler props still
-fire correctly, but a non-event prop binding there re-renders only with the
-component that carries it.
+for their owner, and keep it.
 
 State, functions, and the script that declares them still belong together: a
 reusable interactive child should be its own `#[component]` or carry its own

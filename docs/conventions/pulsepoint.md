@@ -258,6 +258,16 @@ are uncontrolled. Do not switch a control between controlled and uncontrolled
 after mount. PulsePoint preserves selection/focus and handles input, textarea,
 select, checkbox/radio, and form-reset behavior.
 
+On a large page PulsePoint may defer the render an `input` event causes to the
+next frame. A discrete event — `submit`, `click`, `keydown`, and so on — commits
+any such pending render before its handler runs, so a handler always reads the
+state every earlier edit produced, as in React: typing then pressing Enter, or
+an autofill followed by a submit in the same frame, never submits stale state.
+Events that carry their control's own new value (`input`, `change`, `blur`,
+`focusout`, and a checkbox or radio `click`) are not preceded by that commit,
+because re-rendering first would write the old controlled value back before
+the handler reads it.
+
 Use `pp.ref` plus `pp-ref` for file inputs and imperative DOM access:
 
 ```rust
@@ -282,6 +292,33 @@ For browser-owned reactive collections, use a template:
 The collection must be iterable. Stable keys preserve row identity and local
 state. For server-owned lists rendered once in Rust, use `Html::concat`
 instead.
+
+A component rendered inside a `pp-for` keeps its own loops. When a row
+component with a `<script>` writes its own `<template pp-for>`, that loop is
+compiled in the component's scope, not the surrounding row's, at any depth of
+nesting:
+
+```rust
+#[component]
+pub fn Code() -> Html {
+    html! {
+        <p>
+            <template pp-for="(letter, index) in letters">
+                <span key="{index}">{letter}</span>
+            </template>
+            <script>const letters = ["K", "7", "Q"];</script>
+        </p>
+    }
+}
+
+// In a page:
+<template pp-for="row in rows">
+    <article key="{row.id}"><Code /></article>
+</template>
+```
+
+`letters` resolves in `Code` for every row the page's loop renders, even
+though the page never defines it.
 
 ## Hooks
 
