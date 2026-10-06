@@ -335,10 +335,16 @@ pub async fn refuse(socket: Socket, message: String) {
 
 /// A handler that returned `Err`: the same error frame, sent on the sender
 /// the shim kept, because the handler consumed the socket itself.
+///
+/// Logged the way an rpc failure is: an expected 4xx refusal ("that worker is
+/// not running") as a warning, a 5xx as an error. The frame carries the
+/// client-safe message, so an unexpected production failure is redacted here
+/// exactly as it is in an rpc response.
 pub async fn failed(sender: &SocketSender, error: Error) {
-    let message = format!("rahti: socket {} — {}", error.status(), error.message());
-    super::dev::record_server("error", "socket", &message);
-    sender.error(error.message()).await;
+    error.record("socket");
+    sender
+        .error(error.client_message(super::dev::enabled()))
+        .await;
 }
 
 /// `{"error": "…"}` — the frame shape the client runtime hands to `onError`.

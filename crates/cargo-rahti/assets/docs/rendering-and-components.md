@@ -140,6 +140,39 @@ attribute nobody meant to write.
 remain literal. `@{...}` is supported inside `<script>` and renders through
 `RenderJs`; it is not lifted inside `<style>`.
 
+### Scripts as Raw Strings
+
+A `<script>` body written as tokens still has to survive the **Rust** lexer
+before `html!` sees it. That rules out JavaScript the Rust lexer rejects or
+drops: single-quoted strings (`'hi'`), template literals (`` `${x}` ``), and
+comments, which vanish. When a script needs any of them, write its body as
+one raw string literal:
+
+```rust
+html! {
+    <section>
+        <p>{greeting}</p>
+        <script>r#"
+            // Comments stay.
+            const name = @{Json(&user.name)};
+            const [greeting, setGreeting] = pp.state(`Hello, ${name}!`);
+            const quote = 'single quotes work';
+        "#</script>
+    </section>
+}
+```
+
+The contents reach the browser exactly as written. `@{expr}` is still lifted
+from them as a Rust expression, rendered through `RenderJs`; write `@@{` for a
+literal `@{`. A body containing `"#` needs more hashes: `r##"…"##`. Only a raw
+string switches to this form — `r"…"` is not JavaScript, so it cannot be a
+script that meant something else — and a plain `"use strict";` body stays an
+ordinary token body.
+
+Prefer the raw-string form for any script longer than a few lines: it is the
+form where what you write is what runs. Keep large modules in `public/js/` and
+load them with `import()`.
+
 ## Escaping and Trusted Markup
 
 Rust strings and values are escaped in text and attribute position. Attributes

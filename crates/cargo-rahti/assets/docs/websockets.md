@@ -53,7 +53,11 @@ Rules:
   argument.
 - Return nothing, or `rahti::Result<()>`. A socket answers through its
   frames, so a returned value would have nowhere to go — the macro refuses
-  one. An `Err` reaches the browser as an error frame, then the close.
+  one. An `Err` reaches the browser as an error frame, then the close. It is
+  handled the way an rpc failure is: a 4xx ("this worker is not running") is
+  an expected refusal, logged as a warning, and its message is public; a 5xx
+  is logged as an error, and outside development the browser receives the
+  generic message, never the diagnostic.
 - The original function remains callable from Rust, but only the wire builds
   a `Socket` — there is no way to construct one by hand.
 

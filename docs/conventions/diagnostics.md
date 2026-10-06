@@ -60,6 +60,9 @@ Fields:
 - `url`: document URL;
 - `source`, `line`, `column`: browser-reported source location when available;
 - `component`: best-effort active `pp-component` boundary;
+- `file`: the application file that boundary comes from (`src/app/page.rs`),
+  when the build manifest knows it — resolved from `component`, or from a
+  `pp://component/<id>.js` frame in the stack;
 - `timestamp`: browser capture time.
 
 Console APIs do not expose their call-site filename separately. Their captured
@@ -67,6 +70,11 @@ stack is therefore the source-location evidence. The PulsePoint bundle ships
 minified and without a source map, so a stack that lands inside it gives a
 bundle line/column and nothing more readable. Identify such a record by its
 message text and by the `component` boundary it came from.
+
+Code that runs in a component's own `<script>` is different: PulsePoint
+compiles each one under the name `pp://component/<id>.js`, so its frames read
+`at walkIn (pp://component/page_33bf1147.js:12:7)` — the function, the
+component, and the line within that script.
 
 ## Server Record
 
@@ -77,8 +85,9 @@ Example:
 ```
 
 `target` identifies the framework subsystem, such as `page`, `page-panic`,
-`rpc`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `upload-config`, `csrf`, or
-`jobs`, or `schedule`.
+`rpc`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `socket`, `upload-config`,
+`csrf`, `jobs`, or `schedule`. An expected refusal — any 4xx an rpc or socket
+returns on purpose — is `warn`; `error` is reserved for failures.
 
 ## Limits and Failure Behavior
 
@@ -100,7 +109,10 @@ network failure can lose its final batch.
 2. Reproduce the frontend behavior in a browser.
 3. Read `.rahti/dev.log` from the beginning of the current session.
 4. Group records by `boot`, URL, component, and message.
-5. Use `source`/line/column when present; otherwise inspect `stack`.
+5. Open the record's `file` when present — it is the page, layout, error
+   boundary or loading region the failure came from. Use `source`/line/column
+   when present; otherwise inspect `stack`, where a `pp://component/` frame
+   names the component script and the line inside it.
 6. A message from the runtime itself names the condition it detected — read
    it against the markup and script of the reported `component`.
 7. Fix the smallest owning block and rerun the reproduction.

@@ -263,3 +263,59 @@ async fn missing_argument_gets_the_error_shape() {
         .expect("the error frame");
     assert!(message.contains("`label`"), "{message}");
 }
+
+inventory::submit! {
+    SocketEntry {
+        name: "test_ws_refuses",
+        source: "src/tests/ws.rs",
+        auth: false,
+        handler: |_, socket| Box::pin(async move {
+            let sender = socket.sender();
+            failed(
+                &sender,
+                crate::Error::new(axum::http::StatusCode::NOT_FOUND, "This worker is not running."),
+            )
+            .await;
+        }),
+    }
+}
+
+inventory::submit! {
+    SocketEntry {
+        name: "test_ws_breaks",
+        source: "src/tests/ws.rs",
+        auth: false,
+        handler: |_, socket| Box::pin(async move {
+            let sender = socket.sender();
+            failed(&sender, crate::Error::internal("database password rejected")).await;
+        }),
+    }
+}
+
+async fn first_error_frame(name: &str) -> String {
+    let addr = serve().await;
+    let (mut ws, _) = connect_async(format!("ws://{addr}{WS_PATH}?name={name}"))
+        .await
+        .expect("handshake");
+    ws.send(Frame::text("{}")).await.unwrap();
+    let frame = ws.next().await.unwrap().unwrap();
+    let value: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+    value["error"].as_str().expect("the error frame").to_string()
+}
+
+/// An expected refusal reaches the browser with its public message.
+#[tokio::test]
+async fn a_handler_refusal_sends_its_public_message() {
+    assert_eq!(first_error_frame("test_ws_refuses").await, "This worker is not running.");
+}
+
+/// An unexpected failure is redacted outside development, as an rpc's is.
+#[tokio::test]
+async fn an_unexpected_handler_failure_is_redacted_outside_development() {
+    let message = first_error_frame("test_ws_breaks").await;
+    if crate::dev::enabled() {
+        assert!(message.contains("database password rejected"), "{message}");
+    } else {
+        assert!(!message.contains("database password"), "{message}");
+    }
+}

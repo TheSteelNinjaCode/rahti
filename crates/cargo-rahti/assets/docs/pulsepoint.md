@@ -352,6 +352,34 @@ Memoizes a computed value.
 
 Memoizes a function identity. Use for stable subscriptions and callbacks.
 
+### `pp.event(function)`
+
+Returns a function whose identity never changes and which always runs the
+version the latest render passed in — React's `useEffectEvent`, callable
+anywhere. It is the answer to stale closures: a plain function captures the
+state of the render that created it, so a handler handed once to something
+outside the render cycle — a library callback, a socket's `onMessage`, a
+listener added in a `[]` effect — keeps reading old state forever.
+
+```javascript
+const [workers, setWorkers] = pp.state([]);
+
+// Reads the current `workers` every time the 3D world calls it.
+const useDesk = pp.event((deskId) => {
+    const sitting = workers.find((w) => w.desk === deskId);
+    sitting ? openTerminal(sitting.id) : openHireWindow(deskId);
+});
+
+pp.effect(() => {
+    world.current = createWorld(canvas.current, { onUse: useDesk });
+    return () => world.current.dispose();
+}, []);
+```
+
+Use `pp.event` for a function given away once; use `pp.callback` when a
+dependency list is genuinely what decides the identity. Do not keep a
+hand-written "latest values" ref for this.
+
 ### `pp.reducer(reducer, initial, init?)`
 
 Returns `[state, dispatch]`; supports an optional initializer.
@@ -602,6 +630,16 @@ Rules:
 - Browser objects — GPU devices and buffers, contexts, workers, audio
   contexts, media streams, peer connections, observers, database handles —
   live in `pp.ref`, never in `pp.state`.
+- What a library writes into the DOM is the library's. A re-render removes
+  only the attributes the template itself rendered, so a WebGL canvas keeps
+  the `width` and `height` its renderer set. An element bound with `pp-ref`
+  that the template renders **empty** is a host: a terminal, a map, an editor
+  or a chart mounts its children into it, and a re-render leaves them alone.
+  Give such a library an empty `<div pp-ref={host}></div>` of its own — put
+  no bindings or text inside it, or the template owns its children again.
+- A function handed to a library once (`onUse`, `onMessage`, `onTick`) is
+  wrapped in `pp.event(…)`, so it reads current state when the library calls
+  it later.
 - Acquire in an effect with `[]` dependencies and release in its cleanup:
   `device.destroy()`, `worker.terminate()`, `audioContext.close()`,
   `track.stop()`, `peerConnection.close()`, `observer.disconnect()`,
@@ -694,6 +732,13 @@ deferred module scripts execute. That ordering lets it wrap `console.warn` and
 Captured events are mirrored to the server terminal and written as JSON Lines
 to `.rahti/dev.log`. See `diagnostics.md` for the schema, limits, privacy
 boundary, and AI debugging workflow.
+
+A component's script is compiled with a name, so an error thrown inside it
+has a stack frame of the form `pp://component/<boundary-id>.js:<line>:<col>`
+rather than an anonymous eval. The boundary id is the component's
+`pp-component` name, which `.rahti/manifest.json` maps back to its source
+file; the line counts from the first line of the script body (engines add a
+constant two-line header above it).
 
 ## APIs Not Present
 

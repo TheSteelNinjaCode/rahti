@@ -61,6 +61,23 @@ rate_limit::configure(RateLimit {
 });
 ```
 
+To exempt one more path, add it with `exempt`, which keeps the defaults:
+
+```rust
+rate_limit::configure(RateLimit::default().exempt("/api/hooks"));
+```
+
+Assigning `exempt_paths` *replaces* the list, so `/health`, `/ready`, and the
+development tooling start spending the budget; use `exempt` unless replacing
+the list is the point.
+
+The default budget is 200 requests per minute in production and 2,000 in
+development mode (`RAHTI_DEV`, or a debug build when it is unset). Everything
+on a developer's machine — the browser, an editor's preview pane polling the
+server, scripts, coding agents — is one client, `127.0.0.1`, and spends the
+production budget on its own. The constants are
+`rate_limit::PRODUCTION_REQUESTS` and `rate_limit::DEVELOPMENT_REQUESTS`.
+
 `RateLimit::per_second`, `per_minute`, and `per_hour` provide concise starting
 policies. `RateLimit::disabled()` disables the middleware without removing the
 generated layer. A positive policy requires a nonzero window and

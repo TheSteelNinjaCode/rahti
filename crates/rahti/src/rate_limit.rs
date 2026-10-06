@@ -27,6 +27,15 @@ const REMAINING_HEADER: &str = "ratelimit-remaining";
 const RESET_HEADER: &str = "ratelimit-reset";
 const RPC_HEADER: &str = "x-pp-function";
 
+/// The default budget per client and minute in production.
+pub const PRODUCTION_REQUESTS: u32 = 200;
+
+/// The default budget per client and minute in development mode. Everything
+/// on a developer's machine — the browser, an editor's preview pane polling
+/// the server, test scripts, coding agents — is one client, `127.0.0.1`, and
+/// the production budget is spent by the tooling alone.
+pub const DEVELOPMENT_REQUESTS: u32 = 2_000;
+
 /// The application-wide request budget.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RateLimit {
@@ -67,6 +76,24 @@ impl RateLimit {
         }
     }
 
+    /// Exempt one more route subtree, keeping the exemptions already there.
+    ///
+    /// Prefer this to assigning `exempt_paths`: assigning replaces the
+    /// defaults, and `/health`, `/ready` and the development tooling start
+    /// spending the budget.
+    ///
+    /// ```
+    /// let policy = rahti::rate_limit::RateLimit::default().exempt("/api/hooks");
+    /// assert!(policy.exempt_paths.iter().any(|p| p == "/health"));
+    /// ```
+    pub fn exempt(mut self, path: impl Into<String>) -> Self {
+        let path = path.into();
+        if !self.exempt_paths.contains(&path) {
+            self.exempt_paths.push(path);
+        }
+        self
+    }
+
     /// No request limiting. Public-file detection and bucket allocation are
     /// skipped too.
     pub fn disabled() -> Self {
@@ -78,9 +105,15 @@ impl RateLimit {
 }
 
 impl Default for RateLimit {
+    /// [`PRODUCTION_REQUESTS`] per minute, or [`DEVELOPMENT_REQUESTS`] in
+    /// development mode.
     fn default() -> Self {
         Self {
-            requests: 200,
+            requests: if crate::dev::enabled() {
+                DEVELOPMENT_REQUESTS
+            } else {
+                PRODUCTION_REQUESTS
+            },
             window: Duration::from_secs(60),
             max_clients: 10_000,
             trust_forwarded_headers: false,

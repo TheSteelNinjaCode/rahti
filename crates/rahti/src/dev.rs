@@ -254,8 +254,14 @@ async fn browser_log(body: Bytes) -> Response {
             format!(" — {url}")
         };
 
+        let file = entry
+            .get("file")
+            .and_then(Value::as_str)
+            .map(|file| format!(" ({file})"))
+            .unwrap_or_default();
+
         eprintln!(
-            "rahti browser {level}: {}{component}{url}{source}",
+            "rahti browser {level}: {}{component}{file}{url}{source}",
             limit(message, 1000)
         );
         append_diagnostic(entry);
@@ -301,6 +307,10 @@ fn browser_entries(body: &[u8]) -> Result<Vec<Value>, &'static str> {
             }
         }
 
+        if let Some(file) = source_file(&entry, component_files()) {
+            entry.insert("file".into(), Value::String(file));
+        }
+
         entry
             .entry("level")
             .or_insert_with(|| Value::String("error".into()));
@@ -310,6 +320,68 @@ fn browser_entries(body: &[u8]) -> Result<Vec<Value>, &'static str> {
         entries.push(Value::Object(entry));
     }
     Ok(entries)
+}
+
+/// The application file a browser diagnostic came from, when it names a
+/// component the build manifest knows — so whoever reads `.rahti/dev.log`
+/// (very often a coding agent) opens the right file without decoding hashed
+/// boundary names.
+///
+/// A component is named by the runtime's `component` field (`page_33bf1147
+/// (main)`) or by a `pp://component/<id>.js` frame, which is how PulsePoint
+/// names a component script in a stack trace.
+fn source_file(
+    entry: &Map<String, Value>,
+    files: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    if files.is_empty() {
+        return None;
+    }
+    let named = entry
+        .get("component")
+        .and_then(Value::as_str)
+        .and_then(|component| component.split_whitespace().next())
+        .and_then(|id| files.get(id));
+    if let Some(file) = named {
+        return Some(file.clone());
+    }
+    ["stack", "message", "source"]
+        .iter()
+        .filter_map(|field| entry.get(*field).and_then(Value::as_str))
+        .flat_map(|text| text.split("pp://component/").skip(1))
+        .filter_map(|rest| rest.split(".js").next())
+        .find_map(|id| files.get(id).cloned())
+}
+
+/// Boundary id → source file, from `.rahti/manifest.json`, read once. Empty
+/// when there is no manifest (a test, a binary run outside its project).
+fn component_files() -> &'static std::collections::HashMap<String, String> {
+    static FILES: OnceLock<std::collections::HashMap<String, String>> = OnceLock::new();
+    FILES.get_or_init(|| {
+        std::fs::read_to_string(Path::new(".rahti").join("manifest.json"))
+            .map(|json| files_from_manifest(&json))
+            .unwrap_or_default()
+    })
+}
+
+/// The `component` → `file` pairs of every route, layout, error boundary and
+/// loading region in a build manifest.
+fn files_from_manifest(json: &str) -> std::collections::HashMap<String, String> {
+    let mut files = std::collections::HashMap::new();
+    let Ok(manifest) = serde_json::from_str::<Value>(json) else {
+        return files;
+    };
+    for section in ["routes", "layouts", "errors", "loading"] {
+        for item in manifest.get(section).and_then(Value::as_array).into_iter().flatten() {
+            if let (Some(component), Some(file)) = (
+                item.get("component").and_then(Value::as_str),
+                item.get("file").and_then(Value::as_str),
+            ) {
+                files.insert(component.to_string(), file.to_string());
+            }
+        }
+    }
+    files
 }
 
 fn source_of(entry: &Value) -> String {

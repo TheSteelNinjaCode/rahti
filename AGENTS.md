@@ -265,6 +265,15 @@ preserve them, and documentation or scaffold changes must teach them.
     `pp.state`, the device or worker handle goes in `pp.ref`, and a
     `pp.effect` acquires it, feeds it, and releases it in its cleanup. See
     "Native Web APIs" in `docs/conventions/pulsepoint.md`.
+42. Write a `<script>` longer than a few lines as one raw string,
+    `<script>r#"…"#</script>`: it reaches the browser exactly as written —
+    single quotes, template literals and comments included — and `@{expr}`
+    is still interpolated. A token-written script must survive the Rust
+    lexer, which rejects `'text'` and backticks and drops comments. A
+    function handed to a library or a long-lived listener is wrapped in
+    `pp.event(…)` so it reads current state. A library mounts into an empty
+    element of its own, `<div pp-ref={host}></div>`; re-renders leave its
+    children and the attributes it sets alone.
 
 ## Repository Map
 

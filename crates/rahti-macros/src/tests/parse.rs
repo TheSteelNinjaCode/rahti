@@ -677,6 +677,78 @@ fn style_keeps_at_braces_raw() {
     );
 }
 
+// ------------------------------------------------------- raw-string scripts
+
+/// A script body written as one raw string is JavaScript verbatim: single
+/// quotes, template literals and comments, none of which survive the Rust
+/// lexer in a token-written body.
+#[test]
+fn a_raw_string_script_is_javascript_verbatim() {
+    let out = render(r###"<script>r##"
+        // a comment that stays
+        const greeting = 'hi';
+        const line = `${greeting}, it's ${new Date().getFullYear()}`;
+    "##</script>"###);
+    assert!(out.contains("// a comment that stays"), "{out}");
+    assert!(out.contains("const greeting = 'hi';"), "{out}");
+    assert!(out.contains("`${greeting}, it's ${new Date().getFullYear()}`"), "{out}");
+    assert!(!out.contains("r##"), "{out}");
+}
+
+/// `@{expr}` is lifted out of a raw-string body the same way as from tokens.
+#[test]
+fn a_raw_string_script_lifts_at_braces() {
+    let parsed = parse_ok(r##"<script>r#"const [n, setN] = pp.state(@{initial}); const s = 'ok';"#</script>"##);
+    let lifted = parsed
+        .ops
+        .iter()
+        .filter(|op| matches!(op, Op::ScriptText(_)))
+        .count();
+    assert_eq!(lifted, 1, "got ops: {:?}", parsed.ops);
+    assert_eq!(
+        show(&parsed.ops),
+        "<script>const [n, setN] = pp.state(@{initial}); const s = 'ok';</script>",
+    );
+}
+
+/// The end of an `@{…}` is found by counting braces, past Rust strings.
+#[test]
+fn a_raw_string_script_finds_the_end_of_a_nested_expression() {
+    let parsed = parse_ok(r##"<script>r#"const a = @{format!("{}}", Json(&x))}; const b = 1;"#</script>"##);
+    assert_eq!(
+        parsed.ops.iter().filter(|op| matches!(op, Op::ScriptText(_))).count(),
+        1,
+        "got ops: {:?}",
+        parsed.ops
+    );
+    assert!(show(&parsed.ops).ends_with("; const b = 1;</script>"), "{}", show(&parsed.ops));
+}
+
+/// `@@{` is a literal `@{`, for the rare script that needs one.
+#[test]
+fn a_raw_string_script_escapes_a_literal_at_brace() {
+    let out = render(r##"<script>r#"const css = '@@{ not rust }';"#</script>"##);
+    assert!(out.contains("const css = '@{ not rust }';"), "{out}");
+}
+
+#[test]
+fn an_unclosed_at_brace_in_a_raw_string_script_is_an_error() {
+    let stream = TokenStream::from_str(r##"<script>r#"const a = @{x;"#</script>"##).unwrap();
+    let err = match parse(stream) {
+        Ok(_) => panic!("expected an error"),
+        Err(err) => err,
+    };
+    assert!(err.msg.contains("never closed"), "{}", err.msg);
+}
+
+/// A plain string body is ordinary JavaScript (an expression statement), so
+/// only raw strings switch to the verbatim form.
+#[test]
+fn a_plain_string_script_body_stays_a_token_body() {
+    let out = render(r#"<script>"use strict";</script>"#);
+    assert_eq!(out, r#"<script>"use strict";</script>"#);
+}
+
 #[test]
 fn empty_script_body() {
     assert_eq!(

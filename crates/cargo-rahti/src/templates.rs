@@ -1963,6 +1963,19 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          in `docs/conventions/pulsepoint.md`."
             .to_string(),
     );
+    rules.push(
+        "Write a `<script>` longer than a few lines as one raw string,\n\
+         `<script>r#\"…\"#</script>`: it reaches the browser exactly as written —\n\
+         single quotes, template literals and comments included — and\n\
+         `@{expr}` is still interpolated. A token-written script must survive\n\
+         the Rust lexer, which rejects `'text'` and backticks and drops\n\
+         comments. A function handed to a library or a long-lived listener is\n\
+         wrapped in `pp.event(…)` so it reads current state, never a\n\
+         hand-kept \"latest\" ref. A library mounts into an empty element of its\n\
+         own, `<div pp-ref={host}></div>`; re-renders leave its children and the\n\
+         attributes it sets alone."
+            .to_string(),
+    );
     if ws {
         rules.push(
             "A `#[socket]` function lives beside the page or component whose\n\

@@ -45,6 +45,7 @@
 //! (see [`Gap::Unknown`]).
 
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
+use std::str::FromStr;
 
 #[cfg(test)]
 #[path = "tests/parse.rs"]
@@ -927,6 +928,14 @@ impl Parser {
     /// would need a `RenderCss` trait and a different escape rule, and is
     /// held back until there is a reason to add it.
     ///
+    /// A body written as one raw string literal — `<script>r#"…"#</script>` —
+    /// is JavaScript exactly as written, because the Rust lexer never looks
+    /// inside it: single-quoted strings, template literals and comments all
+    /// survive, where a token-written body would fail to compile or lose its
+    /// comments. `@{expr}` is still lifted from it (and `@@{` is a literal
+    /// `@{`). A raw string is not valid JavaScript, so this form can never be
+    /// mistaken for a script that meant something else. See [`raw_script`].
+    ///
     /// Inside `<script>`, the `@{…}` lift has to descend into Groups: `pp.
     /// state(@{x})` — the shape most pages actually write — arrives as one
     /// `Group{ Parenthesis }` token wrapping the `@` and the brace, so the
@@ -946,6 +955,11 @@ impl Parser {
         }
         let body = &self.toks[first..self.pos];
         if name == "script" {
+            if let [TokenTree::Literal(lit)] = body
+                && let Some(js) = raw_string_contents(&lit.to_string())
+            {
+                return raw_script(&js, lit.span(), ops);
+            }
             scan_script_tokens(body, ops);
         } else {
             ops.push(Op::Static(source_run_of(body)));
@@ -1688,6 +1702,93 @@ fn spread_expr(g: &proc_macro2::Group, span: Span) -> Result<TokenStream, Error>
         });
     }
     Ok(expr)
+}
+
+// ------------------------------------------------------------------ script
+// A script body written as a raw string: JavaScript verbatim, `@{…}` lifted.
+
+/// The contents of a raw string literal (`r"…"`, `r#"…"#`, …), or `None` for
+/// any other literal. Raw strings only: the body of a plain `"…"` would need
+/// unescaping, and a lone string *is* valid JavaScript.
+fn raw_string_contents(repr: &str) -> Option<String> {
+    if !repr.starts_with('r') {
+        return None;
+    }
+    unquote(repr)
+}
+
+/// Emit a raw-string script body: the JavaScript as written, with each
+/// `@{expr}` parsed as a Rust expression and lifted into an
+/// [`Op::ScriptText`], exactly as a token-written body would lift it.
+///
+/// Finding the end of an `@{…}` counts braces, skipping Rust string and char
+/// literals so `@{format!("{}", x)}` ends where it should.
+fn raw_script(js: &str, span: Span, ops: &mut Vec<Op>) -> Result<(), Error> {
+    let mut run = String::new();
+    let mut rest = js;
+    while let Some(at) = rest.find("@{") {
+        // `@@{` is an escaped, literal `@{`.
+        if rest[..at].ends_with('@') {
+            run.push_str(&rest[..at - 1]);
+            run.push_str("@{");
+            rest = &rest[at + 2..];
+            continue;
+        }
+        run.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        let Some(end) = closing_brace(after) else {
+            return Err(Error {
+                span,
+                msg: "rahti: `@{` in a raw-string `<script>` is never closed — \
+                      write `@{expr}`, or `@@{` for a literal `@{`"
+                    .into(),
+            });
+        };
+        let source = after[..end].trim();
+        let expr = TokenStream::from_str(source).map_err(|_| Error {
+            span,
+            msg: format!("rahti: `@{{{source}}}` in a `<script>` is not a Rust expression"),
+        })?;
+        if expr.is_empty() {
+            return Err(Error {
+                span,
+                msg: "rahti: `@{}` in a `<script>` is empty — write `@{expr}`".into(),
+            });
+        }
+        flush_text(&mut run, ops);
+        ops.push(Op::ScriptText(expr));
+        rest = &after[end + 1..];
+    }
+    run.push_str(rest);
+    flush_text(&mut run, ops);
+    Ok(())
+}
+
+/// The index of the `}` that closes an `@{` whose contents start at `text`.
+fn closing_brace(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 0 => return Some(i),
+            '}' => depth -= 1,
+            '"' => {
+                // A Rust string: skip to its unescaped closing quote.
+                while let Some((_, c)) = chars.next() {
+                    match c {
+                        '\\' => {
+                            chars.next();
+                        }
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 // ------------------------------------------------------------------ script

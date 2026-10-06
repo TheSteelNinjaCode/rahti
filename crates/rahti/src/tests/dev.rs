@@ -161,3 +161,41 @@ fn a_source_location_reads_like_a_browser_location() {
     });
     assert_eq!(source_of(&entry), " — http://127.0.0.1:3000/counter:14:9");
 }
+
+const MANIFEST: &str = r#"{
+  "routes": [{ "url": "/", "component": "page_33bf1147", "file": "src/app/page.rs" }],
+  "layouts": [{ "component": "layout_aa", "file": "src/app/layout.rs" }],
+  "errors": [],
+  "loading": [{ "component": "loading_bb", "file": "src/app/loading.rs" }]
+}"#;
+
+fn entry(fields: &[(&str, &str)]) -> Map<String, Value> {
+    fields
+        .iter()
+        .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
+        .collect()
+}
+
+/// A diagnostic that names a component is tied to the file it came from.
+#[test]
+fn a_named_component_resolves_to_its_file() {
+    let files = files_from_manifest(MANIFEST);
+    assert_eq!(files.len(), 3);
+    let from_field = entry(&[("component", "page_33bf1147 (main)")]);
+    assert_eq!(source_file(&from_field, &files).as_deref(), Some("src/app/page.rs"));
+}
+
+/// So does one whose stack runs through a compiled component script.
+#[test]
+fn a_component_stack_frame_resolves_to_its_file() {
+    let files = files_from_manifest(MANIFEST);
+    let from_stack = entry(&[(
+        "stack",
+        "TypeError: x is undefined\n    at walkIn (pp://component/loading_bb.js:12:7)",
+    )]);
+    assert_eq!(source_file(&from_stack, &files).as_deref(), Some("src/app/loading.rs"));
+
+    let unknown = entry(&[("stack", "at pp://component/nobody.js:1:1")]);
+    assert_eq!(source_file(&unknown, &files), None);
+    assert!(files_from_manifest("not json").is_empty());
+}
