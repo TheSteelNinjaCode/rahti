@@ -38,8 +38,7 @@ fn id(function: &str) -> String {
 
 #[test]
 fn the_markup_is_named_after_the_function() {
-    let out =
-        expanded("pub fn UserCard(name: &str) -> Html { html! {r##\"<article>x</article>\"##} }");
+    let out = expanded("pub fn UserCard(name: &str) -> Html { html! { <article>x</article> } }");
     assert!(
         out.contains(&format!("@ component \"{}\"", id("UserCard"))),
         "{out}"
@@ -51,7 +50,7 @@ fn the_markup_is_named_after_the_function() {
 #[test]
 fn the_function_is_otherwise_untouched() {
     let out = expanded(
-        "pub fn UserCard(name: &str, children: Html) -> Html { html! {r##\"<article><slot /></article>\"##} }",
+        "pub fn UserCard(name: &str, children: Html) -> Html { html! { <article><slot /></article> } }",
     );
     assert!(out.contains("pub fn UserCard"), "{out}");
     assert!(out.contains("name : & str"), "{out}");
@@ -63,13 +62,13 @@ fn the_function_is_otherwise_untouched() {
 /// silences the lint rather than every component file carrying an `#[allow]`.
 #[test]
 fn the_case_lint_is_silenced() {
-    let out = expanded("fn UserCard() -> Html { html! {r##\"<p>x</p>\"##} }");
+    let out = expanded("fn UserCard() -> Html { html! { <p>x</p> } }");
     assert!(out.contains("non_snake_case"), "{out}");
 }
 
 #[test]
 fn an_async_component_is_expanded_the_same_way() {
-    let out = expanded("pub async fn UserCard() -> Html { html! {r##\"<article>x</article>\"##} }");
+    let out = expanded("pub async fn UserCard() -> Html { html! { <article>x</article> } }");
     assert!(out.contains("async fn UserCard"), "{out}");
     assert!(out.contains("@ component"), "{out}");
 }
@@ -80,7 +79,7 @@ fn an_async_component_is_expanded_the_same_way() {
 #[test]
 fn every_branch_of_the_tail_is_named() {
     let out = expanded(
-        "fn Badge(on: bool) -> Html { if on { html! {r##\"<b>on</b>\"##} } else { html! {r##\"<i>off</i>\"##} } }",
+        "fn Badge(on: bool) -> Html { if on { html! { <b>on</b> } } else { html! { <i>off</i> } } }",
     );
     assert_eq!(out.matches("@ component").count(), 2, "{out}");
 }
@@ -90,17 +89,17 @@ fn every_branch_of_the_tail_is_named() {
 #[test]
 fn a_fragment_built_on_the_way_is_not_named() {
     let out = expanded(
-        "fn Badge() -> Html { let inner = html! {r##\"<i>x</i>\"##}; html! {r##\"<b>@{inner}</b>\"##} }",
+        "fn Badge() -> Html { let inner = html! { <i>x</i> }; html! { <b>@{inner}</b> } }",
     );
     assert_eq!(out.matches("@ component").count(), 1, "{out}");
     // The one that is named is the tail, not the `let`.
     let named = out.find("@ component").unwrap();
-    assert!(out[named..].contains("<b>@{inner}</b>"), "{out}");
+    assert!(out[named..].contains("@ { inner }"), "{out}");
 }
 
 #[test]
 fn an_explicit_return_is_named() {
-    let out = expanded("fn Badge() -> Html { return html! {r##\"<b>x</b>\"##}; }");
+    let out = expanded("fn Badge() -> Html { return html! { <b>x</b> }; }");
     assert_eq!(out.matches("@ component").count(), 1, "{out}");
 }
 
@@ -108,7 +107,7 @@ fn an_explicit_return_is_named() {
 /// already carries the name.
 #[test]
 fn a_nested_block_is_not_named_again() {
-    let out = expanded("fn Badge() -> Html { html! {r##\"<b>@{html! {r#\"<i>x</i>\"#}}</b>\"##} }");
+    let out = expanded("fn Badge() -> Html { html! { <b>@{html! { <i>x</i> }}</b> } }");
     assert_eq!(out.matches("@ component").count(), 1, "{out}");
 }
 
@@ -120,7 +119,7 @@ fn a_nested_block_is_not_named_again() {
 #[test]
 fn a_companion_struct_is_generated() {
     let out = expanded(
-        "pub fn UserCard(name: &str, children: Html) -> Html { html! {r##\"<article><slot /></article>\"##} }",
+        "pub fn UserCard(name: &str, children: Html) -> Html { html! { <article><slot /></article> } }",
     );
     assert!(out.contains("pub struct UserCard"), "{out}");
     assert!(out.contains("__rahti_call"), "{out}");
@@ -132,7 +131,7 @@ fn a_companion_struct_is_generated() {
 #[test]
 fn the_shim_knows_the_parameters_in_order() {
     let out = expanded(
-        "pub fn Card(title: &str, count: usize, children: Html) -> Html { html! {r##\"<b>x</b>\"##} }",
+        "pub fn Card(title: &str, count: usize, children: Html) -> Html { html! { <b>x</b> } }",
     );
     let title = out.find("pub title").expect("a title field");
     let count = out.find("pub count").expect("a count field");
@@ -147,7 +146,7 @@ fn the_shim_knows_the_parameters_in_order() {
 /// A `mut` pattern still names its parameter.
 #[test]
 fn a_mut_parameter_is_a_prop_by_its_name() {
-    let out = expanded("fn Badge(mut label: String) -> Html { html! {r##\"<b>x</b>\"##} }");
+    let out = expanded("fn Badge(mut label: String) -> Html { html! { <b>x</b> } }");
     assert!(out.contains("pub label"), "{out}");
 }
 
@@ -155,22 +154,22 @@ fn a_mut_parameter_is_a_prop_by_its_name() {
 /// component does not export a public struct.
 #[test]
 fn the_shim_mirrors_the_visibility() {
-    let out = expanded("fn Badge(label: &str) -> Html { html! {r##\"<b>x</b>\"##} }");
+    let out = expanded("fn Badge(label: &str) -> Html { html! { <b>x</b> } }");
     assert!(!out.contains("pub struct Badge"), "{out}");
-    let out = expanded("pub(crate) fn Badge(label: &str) -> Html { html! {r##\"<b>x</b>\"##} }");
+    let out = expanded("pub(crate) fn Badge(label: &str) -> Html { html! { <b>x</b> } }");
     assert!(out.contains("pub (crate) struct Badge"), "{out}");
 }
 
 #[test]
 fn a_component_with_no_props_still_gets_a_companion() {
-    let out = expanded("pub fn Logo() -> Html { html! {r##\"<b>x</b>\"##} }");
+    let out = expanded("pub fn Logo() -> Html { html! { <b>x</b> } }");
     assert!(out.contains("pub struct Logo"), "{out}");
     assert!(out.contains("__rahti_call"), "{out}");
 }
 
 #[test]
 fn a_self_parameter_is_refused() {
-    let msg = error("pub fn Badge(&self) -> Html { html! {r##\"<b>x</b>\"##} }");
+    let msg = error("pub fn Badge(&self) -> Html { html! { <b>x</b> } }");
     assert!(msg.contains("free function"), "{msg}");
 }
 
@@ -178,10 +177,7 @@ fn a_self_parameter_is_refused() {
 
 #[test]
 fn the_attribute_takes_no_arguments() {
-    let msg = error_with(
-        "\"name\"",
-        "fn Badge() -> Html { html! {r##\"<b>x</b>\"##} }",
-    );
+    let msg = error_with("\"name\"", "fn Badge() -> Html { html! { <b>x</b> } }");
     assert!(msg.contains("takes no arguments"), "{msg}");
     assert!(msg.contains("pp-component"), "{msg}");
 }
@@ -194,14 +190,14 @@ fn it_goes_on_a_function() {
 
 #[test]
 fn a_component_is_pascal_case() {
-    let msg = error("fn user_card() -> Html { html! {r##\"<b>x</b>\"##} }");
+    let msg = error("fn user_card() -> Html { html! { <b>x</b> } }");
     assert!(msg.contains("PascalCase"), "{msg}");
     assert!(msg.contains("`UserCard`"), "{msg}");
 }
 
 #[test]
 fn a_component_returns_html() {
-    let msg = error("fn Badge() { html! {r##\"<b>x</b>\"##}; }");
+    let msg = error("fn Badge() { html! { <b>x</b> }; }");
     assert!(msg.contains("returns nothing"), "{msg}");
     assert!(msg.contains("-> Html"), "{msg}");
 }
@@ -210,7 +206,7 @@ fn a_component_returns_html() {
 /// attribute, which then has nothing to name.
 #[test]
 fn a_component_has_to_end_in_its_markup() {
-    let msg = error("fn Badge() -> Html { let out = html! {r##\"<b>x</b>\"##}; out }");
+    let msg = error("fn Badge() -> Html { let out = html! { <b>x</b> }; out }");
     assert!(
         msg.contains("has to end with the markup it renders"),
         "{msg}"

@@ -247,16 +247,16 @@ render_via_display!(
 /// trait rather than overloading `Render`.
 ///
 /// ```ignore
-/// html! {r##"
+/// html! {
 ///     <section>
-///         <p>Logged in as @{user.name}</p>
-///         <script>
+///         <p>"Logged in as "@{user.name}</p>
+///         <script>r#"
 ///             const [count, setCount] = pp.state(@{42});
 ///             const [name, setName] = pp.state(@{"Ada"});
 ///             const user = @{Json(&user)};
-///         </script>
+///         "#</script>
 ///     </section>
-/// "##}
+/// }
 /// ```
 ///
 /// Primitives write themselves through `Display` — a number is `42`, a flag
@@ -337,12 +337,12 @@ render_js_via_display!(
 /// ```ignore
 /// let user = User { name: "Ada", admin: true };
 /// let rows: Vec<Row> = query().await?;
-/// html! {r##"
-///     <script>
+/// html! {
+///     <script>r#"
 ///         const user = @{Json(&user)};
 ///         const rows = @{Json(&rows)};
-///     </script>
-/// "##}
+///     "#</script>
+/// }
 /// ```
 ///
 /// `serde_json` spells booleans, `null`, numbers, strings and the rest the way

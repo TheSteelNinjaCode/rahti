@@ -48,13 +48,13 @@ When the query text exists only for an rpc, keep it and the timer in refs,
 debounce the request itself, and put only the accepted result in state:
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <input type="search" oninput="scheduleSearch(target.value)" />
+        <input type="search" oninput={scheduleSearch(target.value)} />
         <template pp-for="row in rows">
-            <article key="{row.id}">{row.label}</article>
+            <article key={row.id}>{row.label}</article>
         </template>
-        <script>
+        <script>r#"
             const [rows, setRows] = pp.state([]);
             const query = pp.ref('');
             const timer = pp.ref(null);
@@ -74,9 +74,9 @@ html! {r##"
             }
 
             pp.effect(() => () => clearTimeout(timer.current), []);
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 The input stays native and immediate, the bookkeeping never renders, and the
@@ -210,7 +210,7 @@ array, object or function builds a new one every render:
 - derive arrays and objects with `pp.memo(() => …, [deps])`;
 - create handlers that cross a boundary with `pp.callback(fn, [deps])`, or
   `pp.event(fn)` when the identity should never change;
-- primitives (`count="{items.length}"`, `active="{selected === row.id}"`)
+- primitives (`count={items.length}`, `active={selected === row.id}`)
   compare by value and need nothing;
 - inside one component's own markup an inline object or arrow function is
   harmless — identity only matters where something compares it.
@@ -225,7 +225,7 @@ const themeValue = pp.memo(() => ({ theme, setTheme }), [theme]);
 ```
 
 ```rust
-html! {r##"<themecontext.provider value="{themeValue}">…</themecontext.provider>"##}
+html! { <themecontext.provider value={themeValue}>"…"</themecontext.provider> }
 ```
 
 ## Diagnose the Owner Before Blaming the Runtime

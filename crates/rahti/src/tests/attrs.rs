@@ -499,3 +499,84 @@ fn a_data_spread_handler_is_dropped_in_release() {
     let out = list(|list| list.spread(&[("onclick", "steal()"), ("id", "a")]));
     assert_eq!(out, " id=\"a\"");
 }
+
+/// `Attrs::bind` is the explicit way a component writes client code it
+/// composed itself: live braces, a handler allowed, while `set` of the very
+/// same text stays data.
+#[test]
+fn a_bound_entry_is_live_and_a_set_one_is_data() {
+    let attrs = Attrs::new()
+        .bind("checked", "pp.props.checkedProp")
+        .bind("onclick", "save()")
+        .set("title", "{steal()}");
+    assert_eq!(
+        list(|list| list.spread(&attrs)),
+        " checked=\"{pp.props.checkedProp}\" onclick=\"{save()}\" title=\"&#123;steal()&#125;\""
+    );
+    assert!(attrs.is_bound("checked"));
+    assert!(!attrs.is_bound("title"));
+    assert_eq!(attrs.get("onclick"), Some(Some("{save()}")));
+}
+
+/// Whatever names an attribute last decides what it is: a `set` after a
+/// `bind` makes it data again, and an `unset` removes it.
+#[test]
+fn the_last_word_on_a_name_decides_whether_it_is_bound() {
+    let attrs = Attrs::new().bind("title", "label").set("title", "{label}");
+    assert!(!attrs.is_bound("title"));
+    assert_eq!(
+        list(|list| list.spread(&attrs)),
+        " title=\"&#123;label&#125;\""
+    );
+
+    let attrs = Attrs::new().bind("title", "label").unset("title");
+    assert!(!attrs.is_bound("title"));
+    assert_eq!(list(|list| list.spread(&attrs)), "");
+}
+
+/// `merge` folds a caller's set into a component's own: last-wins in place,
+/// removals remove, and a binding is still a binding afterwards.
+#[test]
+fn merge_keeps_order_removals_and_bindings() {
+    let own = Attrs::new()
+        .set("class", "base")
+        .set("role", "img")
+        .set("id", "a");
+    let caller = Attrs::new()
+        .bind("class", "cls")
+        .unset("role")
+        .set("data-x", "1");
+    let merged = own.merge(&caller);
+
+    assert_eq!(
+        merged.iter().collect::<Vec<_>>(),
+        [
+            ("class", Some("{cls}")),
+            ("role", None),
+            ("id", Some("a")),
+            ("data-x", Some("1")),
+        ]
+    );
+    assert!(merged.is_bound("class"));
+    assert_eq!(
+        list(|list| list.spread(&merged)),
+        " class=\"{cls}\" id=\"a\" data-x=\"1\""
+    );
+}
+
+/// `only` splits a set by name, keeping order, removals and bindings.
+#[test]
+fn only_keeps_the_named_entries_as_they_were() {
+    let attrs = Attrs::new()
+        .set("id", "a")
+        .bind("aria-label", "label")
+        .unset("aria-hidden")
+        .set("title", "t");
+    let aria = attrs.only(|name| name.starts_with("aria-"));
+
+    assert_eq!(
+        aria.iter().collect::<Vec<_>>(),
+        [("aria-label", Some("{label}")), ("aria-hidden", None)]
+    );
+    assert!(aria.is_bound("aria-label"));
+}

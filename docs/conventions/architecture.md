@@ -128,10 +128,10 @@ The server runtime exports:
 
 ### `rahti-macros`
 
-- `html!` reads a template — one raw string of HTML, `html! {r##"…"##}` —
-  through `template.rs`, which lexes it as text (so JavaScript, CSS and prose
-  never meet the Rust lexer), refuses authoring mistakes at their
-  `file:line:column`, and hands `parse.rs` the tokens it reads. It separates
+- `html!` reads a template written as tokens — markup, quoted text, `{…}`
+  bindings and `@{…}` values — with each `<script>`/`<style>` body one raw
+  string, so JavaScript and CSS never meet the Rust lexer. `parse.rs` refuses
+  authoring mistakes (`authoring.rs`) on the token that caused them. It separates
   Rust and client expressions, escapes interpolated data, and stamps component
   boundaries. An
   uppercase-named tag is a component call: props map to the function's

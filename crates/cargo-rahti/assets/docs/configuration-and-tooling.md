@@ -186,7 +186,7 @@ the input. It handles variants, `!important`, arbitrary values, and
 overlapping utility groups.
 
 ```rust
-<div class="{twMerge('p-2 px-4')}"></div>
+<div class={twMerge('p-2 px-4')}></div>
 ```
 
 The runtime is the shipped asset `public/js/pp-reactive-v2.min.js`, replaced

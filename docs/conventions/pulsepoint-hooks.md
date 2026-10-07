@@ -2,8 +2,8 @@
 
 The `pp.*` API inside a component `<script>`. It mirrors React hooks; the
 markup around it never does — see `pulsepoint.md` for the template contract.
-Examples are `html! {r##"…"##}` templates, whose `<script>` is plain
-JavaScript (see "Templates" in `rendering-and-components.md`).
+Examples are `html! { … }` templates, whose `<script>r#"…"#</script>` body
+is plain JavaScript (see "Templates" in `rendering-and-components.md`).
 
 ## The Whole List
 
@@ -61,10 +61,10 @@ effect reads the state of the render that created it, and so does
 `fn`, passing its arguments, return value and `this` through.
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <button onclick="setPaused(!paused)">{paused ? "Resume" : "Pause"}</button>
-        <script>
+        <button onclick={setPaused(!paused)}>{paused ? "Resume" : "Pause"}</button>
+        <script>r#"
             const [paused, setPaused] = pp.state(false);
             const engine = pp.ref(null);
             const tick = pp.event((time) => {
@@ -77,9 +77,9 @@ html! {r##"
                 });
                 return () => cancelAnimationFrame(id);
             }, [tick]);
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 - Call `pp.event` at the top level, like every hook; invoke the returned
@@ -96,11 +96,11 @@ Attach in the body, detach in the returned cleanup. The cleanup also runs on
 unmount, including the unmount an SPA navigation causes.
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <p>Elapsed: {seconds}s</p>
-        <button onclick="setRunning(!running)">{running ? "Pause" : "Resume"}</button>
-        <script>
+        <p>"Elapsed: "{seconds}"s"</p>
+        <button onclick={setRunning(!running)}>{running ? "Pause" : "Resume"}</button>
+        <script>r#"
             const [seconds, setSeconds] = pp.state(0);
             const [running, setRunning] = pp.state(true);
             pp.effect(() => {
@@ -108,9 +108,9 @@ html! {r##"
                 const id = setInterval(() => setSeconds((s) => s + 1), 1000);
                 return () => clearInterval(id);
             }, [running]);
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 ## Derived Values and Reducers
@@ -143,19 +143,19 @@ const [cart, dispatch] = pp.reducer((state, action) => {
 keeps its logical component ancestry: context, props and events keep working.
 
 ```rust
-html! {r##"
+html! {
     <div>
-        <button onclick="setOpen(true)">Open</button>
-        <div pp-ref="{dialog}" hidden="{!open}" class="modal">
-            <button onclick="setOpen(false)">Close</button>
+        <button onclick={setOpen(true)}>"Open"</button>
+        <div pp-ref={dialog} hidden={!open} class="modal">
+            <button onclick={setOpen(false)}>"Close"</button>
         </div>
-        <script>
+        <script>r#"
             const [open, setOpen] = pp.state(false);
             const dialog = pp.ref(null);
             pp.portal(dialog);
-        </script>
+        "#</script>
     </div>
-"##}
+}
 ```
 
 ## Stable Ids
@@ -165,17 +165,17 @@ renders, unique across instances. Use it for every `id`/`for` pair and
 `aria-*` reference; never derive ids from an index or a counter.
 
 ```rust
-html! {r##"
+html! {
     <div>
-        <label for="{emailId}">Email</label>
-        <input id="{emailId}" type="email" aria-describedby="{hintId}" />
-        <p id="{hintId}">We never share this.</p>
-        <script>
+        <label for={emailId}>"Email"</label>
+        <input id={emailId} type="email" aria-describedby={hintId} />
+        <p id={hintId}>"We never share this."</p>
+        <script>r#"
             const emailId = pp.id();
             const hintId = pp.id();
-        </script>
+        "#</script>
     </div>
-"##}
+}
 ```
 
 ## External Stores
@@ -239,10 +239,10 @@ the moment the server answered — and then drops the pending guesses, so the
 server value never double-counts:
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <button onclick="like()">Like ({likes})</button>
-        <script>
+        <button onclick={like()}>"Like ("{likes}")"</button>
+        <script>r#"
             const [confirmedLikes, setConfirmedLikes] = pp.state(@{likes});
             const [likes, addLike] = pp.optimistic(confirmedLikes, (state, delta) => state + delta);
             async function like() {
@@ -250,9 +250,9 @@ html! {r##"
                 const result = await pp.rpc('like_post', { post: @{post_id} });
                 setConfirmedLikes(result.likes);
             }
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 ## Error Boundaries
@@ -261,20 +261,20 @@ html! {r##"
 effect failures:
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <div hidden="{!error}">
-            <p>Something went wrong: {error?.message}</p>
-            <button onclick="reset()">Try again</button>
+        <div hidden={!error}>
+            <p>"Something went wrong: "{error?.message}</p>
+            <button onclick={reset()}>"Try again"</button>
         </div>
-        <div hidden="{!!error}">
+        <div hidden={!!error}>
             <ReportChart />
         </div>
-        <script>
+        <script>r#"
             const [error, reset] = pp.errorBoundary();
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 - A throw in a descendant's render or effects bubbles up the logical
@@ -296,17 +296,17 @@ The provider tag is the token's name in lowercase with `.provider` —
 `<themecontext.provider>` for `ThemeContext` — because markup is HTML:
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <themecontext.provider value="{theme}">
+        <themecontext.provider value={theme}>
             <ThemeBadge />
         </themecontext.provider>
-        <script>
+        <script>r#"
             const ThemeContext = pp.createContext("light");
             const [theme, setTheme] = pp.state("dark");
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 - Resolution walks the logical component ancestry, not the live DOM, so
@@ -327,21 +327,21 @@ html! {r##"
 - Refs are for imperative access: focus, measurement, media, canvas,
   third-party widgets, resetting a file input. They are not the way to read
   form fields on submit — that is `FormData` (see "Forms" in `pulsepoint.md`).
-- `pp-ref="{name}"` binds an element to the ref or callback `name` in scope;
-  `pp-ref="{(el) => setNode(el)}"` binds a callback expression.
+- `pp-ref={name}` binds an element to the ref or callback `name` in scope;
+  `pp-ref={(el) => setNode(el)}` binds a callback expression.
 - Refs attach before layout effects and passive effects run, and detach with
   `null` (or the callback's returned cleanup) when the element unmounts.
 - Ref bindings survive re-renders, including re-renders that change nothing.
 - The runtime writes `data-pp-ref` internally; never author it.
 
 ```rust
-html! {r##"
+html! {
     <div>
-        <input pp-ref="{nameInput}" />
-        <button onclick="nameInput.current?.focus()">Focus</button>
-        <script>
+        <input pp-ref={nameInput} />
+        <button onclick={nameInput.current?.focus()}>"Focus"</button>
+        <script>r#"
             const nameInput = pp.ref(null);
-        </script>
+        "#</script>
     </div>
-"##}
+}
 ```

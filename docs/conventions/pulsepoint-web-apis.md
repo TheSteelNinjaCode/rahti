@@ -54,12 +54,12 @@ pub async fn gpu_series(points: u32, phase: f32) -> Vec<f32> {
 
 pub async fn page() -> Html {
     let initial = series(48, 0.0);
-    html! {r##"
+    html! {
         <section>
-            <canvas pp-ref="{canvas}" width="640" height="240"></canvas>
-            <button onclick="load()">Refresh</button>
-            <p hidden="{gpuSupported}">WebGPU is unavailable; drawing with Canvas 2D.</p>
-            <script>
+            <canvas pp-ref={canvas} width="640" height="240"></canvas>
+            <button onclick={load()}>"Refresh"</button>
+            <p hidden={gpuSupported}>"WebGPU is unavailable; drawing with Canvas 2D."</p>
+            <script>r#"
                 const canvas = pp.ref(null);
                 const gpu = pp.ref(null);                // device, pipeline, buffers: never state
                 const [series, setSeries] = pp.state(@{Json(&initial)});
@@ -97,9 +97,9 @@ pub async fn page() -> Html {
                 // navigator.gpu.requestAdapter(), adapter.requestDevice(),
                 // canvas.getContext("webgpu"), a render pipeline,
                 // device.queue.writeBuffer(...), a render pass.
-            </script>
+            "#</script>
         </section>
-    "##}
+    }
 }
 ```
 
@@ -162,14 +162,14 @@ pp.effect(() => {
 Give an integration a dedicated element through `pp-ref`, and decide one
 owner for every attribute and every subtree:
 
-- **A library-sized canvas:** `<canvas pp-ref="{canvas}"></canvas>`. When the
+- **A library-sized canvas:** `<canvas pp-ref={canvas}></canvas>`. When the
   renderer sets the drawing-buffer `width` and `height`, leave them out of
   the template: a re-render removes only attributes the previous render
   wrote, so the renderer's values survive. An attribute the template renders
   stays the template's — the next render may overwrite it — so a library
   cannot take over a bound `width`, `class` or `style` by changing it. Put
   template layout styles on a wrapper.
-- **Library-built DOM:** `<div pp-ref="{host}"></div>`. An element with a ref
+- **Library-built DOM:** `<div pp-ref={host}></div>`. An element with a ref
   and **no authored children** keeps the children a library inserts — a
   terminal, an editor, a map, a chart — across every re-render. Keep the host
   literally empty: no text, no whitespace children, no bindings, no
@@ -194,12 +194,12 @@ template renders an empty canvas inside a sized wrapper and a Pause button
 beside it; the renderer owns the drawing-buffer size:
 
 ```rust
-html! {r##"
+html! {
     <section class="relative h-96">
-        <canvas pp-ref="{canvas}" class="block h-full w-full"></canvas>
-        <button onclick="setPaused(!paused)">{paused ? "Resume" : "Pause"}</button>
-        <p hidden="{!error}">{error}</p>
-        <script>
+        <canvas pp-ref={canvas} class="block h-full w-full"></canvas>
+        <button onclick={setPaused(!paused)}>{paused ? "Resume" : "Pause"}</button>
+        <p hidden={!error}>{error}</p>
+        <script>r#"
             const canvas = pp.ref(null);
             const engine = pp.ref(null);
             const [paused, setPaused] = pp.state(false);
@@ -255,9 +255,9 @@ html! {r##"
                     engine.current = null;
                 };
             }, [draw]);
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 The wrapper has a defined size, the canvas fills it through classes, and the

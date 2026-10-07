@@ -1197,7 +1197,7 @@ pub fn metadata() -> Metadata {{
 /// derived from this file's path. Nothing to write, and nothing to keep in
 /// step.
 pub fn layout(children: Html) -> Html {{
-    html! {{r##"
+    html! {{
         <!DOCTYPE html>
         <html lang="en">
             <head>
@@ -1211,7 +1211,7 @@ pub fn layout(children: Html) -> Html {{
                 <slot />
             </body>
         </html>
-    "##}}
+    }}
 }}
 "###
     )
@@ -1237,23 +1237,23 @@ pub fn page_rs(name: &str, tailwind: bool) -> String {
 /// The home page. Every `page.rs` under `src/app/` becomes a URL by where it
 /// sits, and this one sits at the root.
 pub async fn page() -> Html {{
-    html! {{r##"
+    html! {{
         <section class="{section}">
-            <h1 class="{heading}">{name}</h1>
-            <p class="{lede}">Edit src/app/page.rs and reload.</p>
+            <h1 class="{heading}">"{name}"</h1>
+            <p class="{lede}">"Edit src/app/page.rs and reload."</p>
 
-            <button class="{button}" onclick="greet()">Say hello</button>
+            <button class="{button}" onclick={{greet()}}>"Say hello"</button>
             <p class="{lede}">{{message}}</p>
 
-            <script>
+            <script>r#"
                 const [message, setMessage] = pp.state("");
 
                 async function greet() {{
                     setMessage(await pp.rpc("hello", {{}}));
                 }}
-            </script>
+            "#</script>
         </section>
-    "##}}
+    }}
 }}
 
 /// Called by `pp.rpc("hello")` above. It runs on the server, in Rust, and the
@@ -1837,14 +1837,16 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
-        "A template is one raw string of HTML, `html! {r##\"…\"##}` — the only\n\
-         form `html!` accepts. Text, JavaScript and CSS go in exactly as\n\
-         written; a binding is a whole quoted attribute value,\n\
-         `hidden=\"{!open}\"`; a handler is quoted JavaScript,\n\
-         `onclick=\"save()\"`; a server value is unquoted, `href=@{url}`. A\n\
-         template nested in `@{…}` uses one fewer `#`. Compute values in Rust\n\
-         above the template and interpolate names: a Rust error inside `@{…}`\n\
-         lands on the template's first line. `html!` has one authored root: a\n\
+        "A template is markup written as Rust tokens, `html! { … }`, and only\n\
+         a `<script>` or `<style>` body is a string: one raw literal,\n\
+         `<script>r#\"…\"#</script>`, JavaScript and CSS exactly as written.\n\
+         Text is a quoted string, `<p>\"Hello\"</p>`; a literal attribute is\n\
+         quoted, `class=\"card\"`; a binding is braced, `hidden={!open}`; a\n\
+         handler is a binding, `onclick={save()}`; a server value is\n\
+         `href=@{url}`. A binding is JavaScript the Rust lexer must accept —\n\
+         double-quoted strings, no template literals — so longer logic is a\n\
+         named function in the script. Compute values in Rust above the\n\
+         template and interpolate names. `html!` has one authored root: a\n\
          literal element, a single component tag, or a `<>…</>` fragment. The\n\
          root layout is the exception: it writes a literal `<html>` root,\n\
          optionally preceded by a doctype."
@@ -1860,7 +1862,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          escaped, braces included (`&#123;`), so no value can open a PulsePoint\n\
          expression; use `Html::from_raw` only for explicitly trusted markup,\n\
          whose braces stay live. A component forwards its tag's `{…}` props\n\
-         through a `bindings: Bindings` parameter."
+         through a `bindings: Bindings` parameter. Client code a component\n\
+         composes in Rust is written with `Attrs::bind`, never `Attrs::set`,\n\
+         whose values are data; `Attrs::merge` and `Attrs::only` compose sets\n\
+         and keep bindings live."
             .to_string(),
     );
     rules.push(
@@ -2018,7 +2023,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
     );
     rules.push(
         "PulsePoint markup is HTML with `{…}` bindings, never JSX: a binding\n\
-         renders text, a condition is `hidden=\"{…}\"` on the element, a list is\n\
+         renders text, a condition is `hidden={…}` on the element, a list is\n\
          `<template pp-for=\"item in items\">` with a `key` on the row, and a\n\
          form submit sends `Object.fromEntries(new FormData(event.currentTarget))`\n\
          through `pp.rpc`. Bind first-party events with `on…={…}`; never wire\n\
@@ -2027,9 +2032,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/pulsepoint.md` are closed, and `html!` refuses JSX\n\
          markup in a binding, JSX attribute names (`className`, `onClick`, …),\n\
          `pp-for` off a `<template>`, directives that do not exist\n\
-         (`pp-if`, `pp-show`, `pp-model`, …), and a server value inside client\n\
-         code (`onclick=@{…}`, `@{…}` within a `{…}` binding or a quoted\n\
-         handler), naming the form to write. A script reads a server value as\n\
+         (`pp-if`, `pp-show`, `pp-model`, …), a quoted handler, a template\n\
+         written as a string, a script body written as tokens, and a server\n\
+         value inside client code (`onclick=@{…}`, `@{…}` within a `{…}`\n\
+         binding), naming the form to write. A script reads a server value as\n\
          data: `const id = @{Json(&id)};`."
             .to_string(),
     );

@@ -18,7 +18,6 @@ mod component;
 mod parse;
 mod rpc;
 mod socket;
-mod template;
 
 #[cfg(test)]
 #[path = "tests/emit.rs"]
@@ -28,32 +27,33 @@ use parse::{COMPONENT_ATTR, EVENT_OWNER_ATTR, OWNER_ATTR, Op, Parsed, SlotKind, 
 use proc_macro2::TokenStream;
 use quote::quote;
 
-/// Build an `Html` value from a template: one raw string of HTML.
+/// Build an `Html` value from a template written as Rust tokens.
 ///
 /// ```ignore
-/// html! {r##"
+/// html! {
 ///     <main class="prose">
 ///         <h1>@{title}</h1>
-///         <p>Seen {views} times — it's that simple.</p>
+///         <p>"Seen "{views}" times — it's that simple."</p>
 ///         <slot />
 ///     </main>
-/// "##}
+/// }
 /// ```
 ///
-/// The template is read as text (see the `template` module), so nothing in it
-/// meets the Rust lexer: prose, JavaScript and CSS arrive as written. The
-/// token form is refused with the form to write.
+/// Markup is tokens, so Rust tooling reads all of it; only a `<script>` or
+/// `<style>` body is a string — one raw literal, `<script>r#"…"#</script>` —
+/// so JavaScript and CSS arrive as written. A template written as one string
+/// is refused with the form to write.
 ///
-/// - text — HTML text. Indentation is dropped and a space between words or
-///   beside a tag is kept, the way JSX treats it. Character references such
-///   as `&amp;` are left alone; a bare `&` is escaped. A brace reference —
-///   `&#123;`, `&lbrace;` and the rest — is sent doubled, as `&amp;#123;`, so
-///   the parser leaves it standing and the client runtime reads a reference
-///   rather than the start of one of its expressions.
-/// - `{expr}` — the client runtime's, in text or as a whole quoted attribute
-///   value (`hidden="{!open}"`). The macro does not read it: the source
-///   is copied through and escaped as text, so the runtime finds the
-///   expression the author wrote when it reads the element back off the page.
+/// - text — a quoted string, written to the page as it is. Character
+///   references such as `&amp;` are left alone; a bare `&` is escaped. A brace
+///   reference — `&#123;`, `&lbrace;` and the rest — is sent doubled, as
+///   `&amp;#123;`, so the parser leaves it standing and the client runtime
+///   reads a reference rather than the start of one of its expressions.
+/// - `{expr}` — the client runtime's, in text or as an attribute value
+///   (`hidden={!open}`); a handler is one too (`onclick={save()}`). The macro
+///   does not read it: its source is copied through and escaped as text, so
+///   the runtime finds the expression the author wrote when it reads the
+///   element back off the page.
 /// - `@{expr}` — Rust, rendered here. Any value implementing
 ///   `::rahti::Render`. Escaped in both text and attribute position; an
 ///   `Html` value passes through raw.
@@ -67,9 +67,10 @@ use quote::quote;
 ///   behind a wrapper element whose `display: contents` keeps it out of the
 ///   layout. Allowed as a block's root and as the root of a component tag's
 ///   children; inside an element, siblings need no wrapper.
-/// - `<script>` and `<style>` hold text, not markup. Their bodies are emitted
-///   as written — no escaping, and no `{…}`, which in JavaScript is a block
-///   and in CSS is a rule. `@{expr}` inside `<script>` is the one exception:
+/// - `<script>` and `<style>` hold text, not markup: each body is one raw
+///   string, `r#"…"#`, emitted as written — no escaping, and no `{…}`, which in
+///   JavaScript is a block and in CSS is a rule. `@{expr}` inside `<script>`
+///   is the one exception:
 ///   the Rust expression is rendered as JavaScript source through
 ///   `::rahti::RenderJs`, so a page can seed `pp.state(…)` with values known
 ///   at render rather than fetching them again. `<style>` keeps the raw rule.
@@ -90,65 +91,10 @@ pub fn html(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let file = proc_macro::Span::call_site().file();
     let input: TokenStream = input.into();
 
-    let tokens = match template_tokens(input, &file, |lit| {
-        let span = lit.span().unwrap();
-        (span.line(), span.column())
-    }) {
-        Ok(tokens) => tokens,
-        Err(err) => return err.to_compile_error().into(),
-    };
-    match parse::parse(tokens) {
+    match parse::parse(input) {
         Ok(parsed) => emit(stamp(parsed, &file)).into(),
         Err(err) => err.to_compile_error().into(),
     }
-}
-
-/// The tokens `parse` reads for `html! {r##"…"##}`: an optional `@component "id"` that
-/// `#[component]` writes in front, then the template's markup as the tokens
-/// `parse` reads. `position` says where the literal starts in its file.
-fn template_tokens(
-    input: TokenStream,
-    file: &str,
-    position: impl Fn(&proc_macro2::Literal) -> (usize, usize),
-) -> Result<TokenStream, parse::Error> {
-    use proc_macro2::TokenTree as Tt;
-
-    let toks: Vec<Tt> = input.clone().into_iter().collect();
-    let directive = match toks.as_slice() {
-        [Tt::Punct(at), Tt::Ident(id), Tt::Literal(_), ..]
-            if at.as_char() == '@' && id == "component" =>
-        {
-            3
-        }
-        _ => 0,
-    };
-    let refuse = |span: proc_macro2::Span| parse::Error {
-        span,
-        msg: "rahti: a template is one raw string of HTML: \
-              `html! {r##\"<section>…</section>\"##}`.\n  Text, JavaScript and CSS go in as \
-              written; `@{expr}` is a Rust value and `{expr}` a PulsePoint binding. See \
-              \"Templates\" in docs/conventions/rendering-and-components.md."
-            .into(),
-    };
-    let [Tt::Literal(lit)] = &toks[directive..] else {
-        let span = toks
-            .get(directive)
-            .map_or_else(proc_macro2::Span::call_site, Tt::span);
-        return Err(refuse(span));
-    };
-    let Some((source, prefix)) = template::raw_template(lit) else {
-        return Err(refuse(lit.span()));
-    };
-    let (line, column) = position(lit);
-    let origin = template::Origin {
-        file: file.replace('\\', "/"),
-        line,
-        column,
-        prefix,
-    };
-    let mut out: TokenStream = toks[..directive].iter().cloned().collect();
-    out.extend(template::tokens(&source, lit.span(), &origin)?);
-    Ok(out)
 }
 
 /// Turn a function into a component.
@@ -156,12 +102,12 @@ fn template_tokens(
 /// ```ignore
 /// #[component]
 /// pub fn UserCard(name: &str, children: Html) -> Html {
-///     html! {r##"
+///     html! {
 ///         <article class="user-card">
 ///             <h2>@{name}</h2>
 ///             <slot />
 ///         </article>
-///     "##}
+///     }
 /// }
 /// ```
 ///
@@ -324,7 +270,7 @@ fn stamp(mut parsed: Parsed, file: &str) -> Vec<Op> {
     let owner_id = parsed.forced_component.clone().or_else(|| file_id.clone());
 
     // Children written between component tags are their own blocks, named
-    // the way an inline `html! {r##"…"##}` child argument is: by the file alone.
+    // the way an inline `html! { … }` child argument is: by the file alone.
     // That keeps the two spellings byte-identical — and it is independent of
     // how this block itself is named, so it happens before any early return.
     stamp_component_children(&mut parsed.ops, file_id.as_deref(), owner_id.as_deref());
@@ -433,7 +379,7 @@ fn wrap_slot(mut ops: Vec<Op>, slot_at: Option<usize>, id: &str) -> Vec<Op> {
 ///   owner's, not a block of its own.
 /// - **Self-contained children** — the block carries its own `<script>`. It
 ///   is a reactive block of its own wherever it lands, so a single root gets
-///   `pp-component`, exactly where a separate `html! {r##"…"##}` child block
+///   `pp-component`, exactly where a separate `html! { … }` child block
 ///   would have carried it.
 /// - **Static children** — no bindings at all. Served inline as before,
 ///   visible without JavaScript, with a single root named for form's sake.

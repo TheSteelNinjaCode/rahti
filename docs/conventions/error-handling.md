@@ -17,7 +17,7 @@ pub async fn page() -> Result<Html> {
     let order = find_order().await?
         .ok_or_else(|| Error::new(StatusCode::NOT_FOUND, "Order not found"))?;
 
-    Ok(html! {r##"<h1>@{order.number}</h1>"##})
+    Ok(html! { <h1>@{order.number}</h1> })
 }
 ```
 
@@ -54,13 +54,13 @@ pub fn error(error: ErrorInfo) -> Html {
         .request_id()
         .map(|id| format!("Reference: {id}"));
 
-    html! {r##"
+    html! {
         <section>
             <h1>@{error.reason()}</h1>
             <p>@{error.message()}</p>
             <small>@{reference}</small>
         </section>
-    "##}
+    }
 }
 ```
 

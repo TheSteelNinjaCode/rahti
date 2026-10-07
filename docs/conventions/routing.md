@@ -148,7 +148,7 @@ pub async fn page(
     RawQuery(raw): RawQuery,
 ) -> Html {
     // `params` is the typed view, `pairs` every pair, `raw` the unparsed text.
-    html! {r##"<p>@{format!("{:?}", params.id)}</p>"##}
+    html! { <p>@{format!("{:?}", params.id)}</p> }
 }
 ```
 
@@ -193,7 +193,7 @@ pub async fn page(Query(params): Query<Params>) -> Result {
         Error::new(StatusCode::BAD_REQUEST, format!("`{}` is not an id", params.id))
     })?;
 
-    Ok(html! {r##"<p>@{id}</p>"##})
+    Ok(html! { <p>@{id}</p> })
 }
 ```
 
@@ -260,12 +260,12 @@ An application may have more than one. Two shapes are supported:
    pub const ROOT_LAYOUT: bool = true;
 
    pub fn layout(children: Html) -> Html {
-       html! {r##"
+       html! {
            <!DOCTYPE html>
            <html lang="en">
                <body><slot /></body>
            </html>
-       "##}
+       }
    }
    ```
 
@@ -349,16 +349,16 @@ Two pieces are needed:
 // marker wraps only the content pane, so the header stays on screen while
 // the swap is in flight.
 pub fn layout(children: Html) -> Html {
-    html! {r##"
+    html! {
         <div>
-            <header>Dashboard</header>
+            <header>"Dashboard"</header>
             <main>
                 <div pp-loading-content="true">
                     <slot />
                 </div>
             </main>
         </div>
-    "##}
+    }
 }
 ```
 
@@ -367,9 +367,9 @@ pub fn layout(children: Html) -> Html {
 use crate::rahti::{Html, html};
 
 pub fn loading() -> Html {
-    html! {r##"
-        <div class="spinner">Loading…</div>
-    "##}
+    html! {
+        <div class="spinner">"Loading…"</div>
+    }
 }
 ```
 
@@ -421,9 +421,9 @@ expression, so send it as a server value:
 const TRANSITION: &str = r#"{"fadeIn":"120ms","fadeOut":"120ms"}"#;
 
 pub fn loading() -> Html {
-    html! {r##"
-        <div pp-loading-transition=@{TRANSITION}>Loading…</div>
-    "##}
+    html! {
+        <div pp-loading-transition=@{TRANSITION}>"Loading…"</div>
+    }
 }
 ```
 

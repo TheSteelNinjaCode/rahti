@@ -26,52 +26,52 @@ use tower::ServiceExt;
 
 /// The document shell, as `app/layout.rs` writes it.
 fn layout(children: Html) -> Html {
-    html! {r##"
+    html! {
         <html lang="en">
             <body class="app">
                 <slot />
             </body>
         </html>
-    "##}
+    }
 }
 
 /// A section wrapper, as a nested `layout.rs` writes it.
 fn section_layout(children: Html) -> Html {
-    html! {r##"
+    html! {
         <main class="section">
             <slot />
         </main>
-    "##}
+    }
 }
 
 /// The nearest boundary, as `error.rs` writes it.
 fn boundary(error: ErrorInfo) -> Html {
-    html! {r##"
+    html! {
         <section class="error">
             <h1>@{error.reason()}</h1>
             <p>@{error.message()}</p>
         </section>
-    "##}
+    }
 }
 
 /// A component taking its tag's `{…}` props, as `Bindings`.
 #[component]
 fn Button(bindings: Bindings, children: Html) -> Html {
-    html! {r##"<button class="btn" @{..bindings}><slot /></button>"##}
+    html! { <button class="btn" @{..bindings}><slot /></button> }
 }
 
 async fn users() -> Html {
     let name = "Ada & <Lovelace>";
     let note = "{steal()}";
-    html! {r##"
+    html! {
         <section class="users">
-            <h1>Users</h1>
+            <h1>"Users"</h1>
             <p title=@{name}>@{name}</p>
-            <p>Seen {count} times</p>
+            <p>"Seen "{count}" times"</p>
             <p class="note" data-note=@{note}>@{note}</p>
-            <Button onclick="{save()}">Save</Button>
+            <Button onclick={save()}>"Save"</Button>
         </section>
-    "##}
+    }
 }
 
 async fn missing() -> rahti::Result {

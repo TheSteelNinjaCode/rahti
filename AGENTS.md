@@ -79,23 +79,28 @@ preserve them, and documentation or scaffold changes must teach them.
    `error.rs`; a navigation loading region is `loading.rs`; the root 404 is
    `not-found.rs`; an unwrapped API endpoint is `route.rs`. A route segment
    cannot contain both `page.rs` and `route.rs`.
-4. A template is one raw string of HTML, `html! {r##"…"##}` — the only form
-   `html!` accepts. Text, JavaScript and CSS go in exactly as written (no
-   quoted text, no lexer rules); a binding is a whole quoted attribute value,
-   `hidden="{!open}"`; a handler is quoted JavaScript, `onclick="save()"`; a
-   server value is unquoted, `href=@{url}`. A template nested in `@{…}` uses
-   one fewer `#` (`html! {r#"…"#}`). `html!` reports its own refusals at the
-   exact `file:line:column`, but a Rust error inside `@{…}` lands on the
-   template's first line. `html!` has one authored root: a literal element, a
-   single component tag, or a `<>…</>` fragment. The root layout is the exception: it writes a
-   literal `<html>` root, optionally preceded by a doctype.
+4. A template is markup written as Rust tokens, `html! { … }`, and only a
+   `<script>` or `<style>` body is a string: one raw literal,
+   `<script>r#"…"#</script>`, JavaScript and CSS exactly as written. Text is
+   a quoted string, `<p>"Hello"</p>`; a literal attribute is quoted,
+   `class="card"`; a binding is braced, `hidden={!open}`; a handler is a
+   binding, `onclick={save()}`; a server value is `href=@{url}`. A binding is
+   JavaScript the Rust lexer must accept — double-quoted strings, no template
+   literals — so longer logic is a named function in the script. Rust tooling
+   reads every token: errors land on the token that caused them, and
+   `macro_rules!` variables substitute into markup. `html!` has one authored
+   root: a literal element, a single component tag, or a `<>…</>` fragment.
+   The root layout is the exception: it writes a literal `<html>` root,
+   optionally preceded by a doctype.
 5. Server values use `@{rust_expression}`. PulsePoint/browser expressions use
    `{javascript_expression}`. Never interchange the two.
 6. Runtime values are escaped, braces included (`&#123;`), so no value can
    open a PulsePoint expression; `Html::from_raw` is only for explicitly
    trusted markup, whose braces stay live. A component forwards its tag's
-   `{…}` props through a `bindings: Bindings` parameter, the only spread
-   whose braces stay live.
+   `{…}` props through a `bindings: Bindings` parameter. Client code a
+   component composes in Rust is written with `Attrs::bind`, never with
+   `Attrs::set`, whose values are data; `Attrs::merge` and `Attrs::only`
+   compose sets and keep bindings live.
 7. An `@{…}` attribute value decides whether its attribute is written at all.
    `Option::None` writes none, and a `bool` on one of the names HTML reads by
    presence writes `name=""` or nothing. That list lives in `rahti-macros`'
@@ -282,24 +287,26 @@ preserve them, and documentation or scaffold changes must teach them.
     `pp.state`, the device or worker handle goes in `pp.ref`, and a
     `pp.effect` acquires it, feeds it, and releases it in its cleanup. See
     `docs/conventions/pulsepoint-web-apis.md`.
-42. A `<script>` body is JavaScript exactly as written — comments, single
-    quotes and template literals included — with `@{expr}` interpolated
-    (`@@{` is a literal `@{`). A function handed to a library or a
-    long-lived listener is wrapped in `pp.event(…)` so it reads current
-    state. A library mounts into an empty element of its own,
-    `<div pp-ref="{host}"></div>`; re-renders leave its children and the
+42. A `<script>` body is one raw string, `<script>r#"…"#</script>`:
+    JavaScript exactly as written — comments, single quotes and template
+    literals included — with `@{expr}` interpolated (`@@{` is a literal
+    `@{`). A body written as tokens is a compile error. A function handed to
+    a library or a long-lived listener is wrapped in `pp.event(…)` so it
+    reads current state. A library mounts into an empty element of its own,
+    `<div pp-ref={host}></div>`; re-renders leave its children and the
     attributes it sets alone.
 43. PulsePoint markup is HTML with `{…}` bindings, never JSX: a binding
-    renders text, a condition is `hidden="{…}"` on the element, a list is
+    renders text, a condition is `hidden={…}` on the element, a list is
     `<template pp-for="item in items">` with a `key` on the row, and a form
     submit sends `Object.fromEntries(new FormData(event.currentTarget))`
     through `pp.rpc`. The directive, hook and utility lists in
     `docs/conventions/pulsepoint.md` are closed. `html!` refuses JSX markup
     in a binding, JSX attribute names, `pp-for` off a `<template>`,
-    directives that do not exist, an unquoted binding, and a server value
-    inside client code (`onclick=@{…}`, `@{…}` within a `{…}` binding or a
-    quoted value) (`crates/rahti-macros/src/authoring.rs`,
-    `crates/rahti-macros/src/template.rs`); a refusal names the form to
+    directives that do not exist, a quoted handler, a template written as a
+    string, a script body written as tokens, and a server value inside
+    client code (`onclick=@{…}`, `@{…}` within a `{…}` binding or a quoted
+    value) (`crates/rahti-macros/src/authoring.rs`,
+    `crates/rahti-macros/src/parse.rs`); a refusal names the form to
     write, and a new one lands with tests for the refusal and for the
     ordinary code it must not catch.
 

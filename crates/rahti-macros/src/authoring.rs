@@ -4,10 +4,9 @@
 //! PulsePoint markup is HTML with `{…}` bindings, and its script API mirrors
 //! React. Code written from JSX habit compiles as HTML and then fails in the
 //! browser without an error: `className` is an attribute nothing reads, and
-//! `pp-if` is a directive that does not exist. The template lexer
-//! (`template.rs`) asks these questions as it reads each attribute, so the
-//! refusal carries the file, line and column; it checks bindings themselves —
-//! JSX markup, a style object, a server value — where it reads them.
+//! `pp-if` is a directive that does not exist. The parser (`parse.rs`) asks
+//! these questions as it reads each attribute and binding, and reports the
+//! refusal on the token that caused it.
 
 const NOT_JSX: &str = "See \"PulsePoint Is Not JSX\" in docs/conventions/pulsepoint.md.";
 
@@ -108,13 +107,77 @@ pub fn server_value_as_handler(name: &str) -> String {
     )
 }
 
-/// `onclick="pick('@{name}')"` — `@{…}` inside a quoted handler, where it is
-/// text and never interpolated.
-pub fn server_value_in_handler_text(name: &str, value: &str) -> Option<String> {
-    (crate::parse::is_native_event_name(name) && value.contains("@{")).then(|| {
-        format!(
-            "rahti: `@{{…}}` inside the quoted `{name}` handler is text, never interpolated, and \
-             a server value has no place in a handler.\n  {SERVER_VALUE_FIX}"
-        )
-    })
+/// `onclick="save()"` — a handler written as a string. A handler is client
+/// code, and every piece of client code in a template is a `{…}` binding.
+pub fn handler_as_text(name: &str) -> String {
+    format!(
+        "rahti: `{name}` is a handler, and a handler is client code: write it as a binding, \
+         `{name}={{save()}}`.\n  A quoted value is text. {NOT_JSX}"
+    )
+}
+
+/// `title="Hi @{name}"` — `@{…}` inside a quoted value, where it is text.
+pub fn server_value_in_text(name: &str) -> String {
+    format!(
+        "rahti: `@{{…}}` inside the quoted value of `{name}` is text, never interpolated.\n  A \
+         server value is the whole value, unquoted: `{name}=@{{expr}}` — build the text in \
+         Rust (`@{{format!(…)}}`) when it mixes with literal text."
+    )
+}
+
+/// The refusals a client `{…}` binding gets: markup inside it, a style
+/// object, or a server value. `attr` is the attribute it is the value of, or
+/// `None` for a binding in text. `source` is the binding with its braces.
+pub fn binding_mistake(attr: Option<&str>, source: &str) -> Option<String> {
+    let inner = source
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .unwrap_or(source);
+    let code = js_outside_strings(inner);
+    if code.contains("</") || code.contains("/>") {
+        return Some(format!(
+            "rahti: a `{{…}}` binding renders text, never elements, and this one contains \
+             markup.\n  Show or hide an element with `hidden={{…}}` on the element itself, and \
+             repeat one with `<template pp-for=\"item in items\">…</template>`. {NOT_JSX}"
+        ));
+    }
+    if let Some(name @ ("style" | "pp-style")) = attr {
+        let trimmed = inner.trim();
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            return Some(format!(
+                "rahti: `{name}` takes CSS text, not an object.\n  Bind a string: \
+                 `pp-style={{\"color: \" + color}}`."
+            ));
+        }
+    }
+    if code.contains("@{") || code.contains("@ {") {
+        return Some(format!(
+            "rahti: `@{{…}}` inside a client `{{…}}` binding is not interpolated: the binding is \
+             browser JavaScript, copied through as written.\n  {SERVER_VALUE_FIX}"
+        ));
+    }
+    None
+}
+
+/// `js` with the contents of its string and template literals blanked, so a
+/// check for markup does not trip on `"</not a tag>"`.
+fn js_outside_strings(js: &str) -> String {
+    let mut out = String::with_capacity(js.len());
+    let mut chars = js.chars();
+    while let Some(c) = chars.next() {
+        if matches!(c, '"' | '\'' | '`') {
+            out.push(c);
+            while let Some(inner) = chars.next() {
+                if inner == '\\' {
+                    chars.next();
+                } else if inner == c {
+                    break;
+                }
+            }
+            out.push(c);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }

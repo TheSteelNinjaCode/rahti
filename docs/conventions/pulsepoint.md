@@ -57,7 +57,7 @@ Apply these before writing any block, even without reading further:
    element. Context is `pp.createContext`, a lowercase `<token.provider>` tag
    and `pp.context(token)`.
 7. A `{…}` binding produces text, never elements. Conditionals are
-   `hidden="{…}"`; lists are `<template pp-for>`.
+   `hidden={…}`; lists are `<template pp-for>`.
 8. The lists below are closed. If an API is not in them, it does not exist:
    do not invent hooks, directives or globals.
 9. Verify behavior in a browser: a browser test with `rahti::browser`
@@ -73,22 +73,22 @@ first; a `{…}` binding is evaluated to a value and written as text.
 
 | JSX habit | What happens | Write instead |
 | --- | --- | --- |
-| `{open && <div>…</div>}` | the element is always in the page, beside stray text | `<div hidden="{!open}">…</div>` |
-| `{cond ? <A /> : <B />}` | both branches render | two elements with opposite `hidden="{…}"` |
-| `{items.map(i => <li>{i.name}</li>)}` | one `<li>`, plus stray text | `<template pp-for="item in items"><li key="{item.id}">{item.name}</li></template>` |
+| `{open && <div>…</div>}` | the element is always in the page, beside stray text | `<div hidden={!open}>…</div>` |
+| `{cond ? <A /> : <B />}` | both branches render | two elements with opposite `hidden={…}` |
+| `{items.map(i => <li>{i.name}</li>)}` | one `<li>`, plus stray text | `<template pp-for="item in items"><li key={item.id}>{item.name}</li></template>` |
 | `className=`, `htmlFor=` | attributes nothing reads | `class=`, `for=` |
-| `onClick={…}` | not a DOM event attribute | `onclick="…"` |
+| `onClick={…}` | not a DOM event attribute | `onclick={…}` |
 | `defaultValue=`, `defaultChecked=` | ignored | `defaultvalue=`, `defaultchecked=` |
-| `style={{color: 'red'}}` | an object is not CSS text | `pp-style="{"color: " + color}"` — a string |
+| `style={{color: 'red'}}` | an object is not CSS text | `pp-style={"color: " + color}` — a string |
 | `dangerouslySetInnerHTML` | does not exist | `@{Html::from_raw(…)}` on the server, for trusted markup only |
 
 `html!` refuses every row of this table at compile time, with the form to
 write instead, and so does every directive that does not exist (`pp-if`,
 `pp-show`, `pp-else`, `pp-model`, `pp-bind`, `pp-class`, `pp-text`,
 `pp-html`, `pp-on`, `pp-key`, `pp-context`) and `pp-for` on anything but a
-`<template>`. An attribute binding is the whole quoted value, as in HTML —
-`class="{expr}"`; an unquoted `class={expr}` is refused with the quoted form
-to write.
+`<template>`. An attribute binding is a braced expression, `class={expr}`,
+and so is a handler, `onclick={save()}`; a quoted handler is refused with the
+braced form to write.
 
 The one-line test: *would this markup be valid HTML if every `{…}` were
 deleted?* If not, it is JSX, and it will not work.
@@ -102,15 +102,15 @@ can end the string it sits in and execute. Hand the value over as data and
 write its name in the client code:
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <button onclick="pick(id)">Pick</button>
-        <script>
+        <button onclick={pick(id)}>"Pick"</button>
+        <script>r#"
             const id = @{Json(&user.id)};
             function pick(id) { /* … */ }
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 `html!` refuses each other form at compile time, with the form above as the
@@ -119,8 +119,9 @@ fix:
 | Written | Refused because |
 | --- | --- |
 | `onclick=@{handler}` | a server value would run as a handler |
-| `onclick="pick(@{id})"` | `@{…}` in a quoted value is text, never interpolated |
-| `{greet(@{name})}`, `title="{label + @{suffix}}"` | a `{…}` binding is browser source, copied through as written |
+| `title="Hi @{name}"` | `@{…}` in a quoted value is text, never interpolated |
+| `onclick="save()"` | a handler is client code, written as a binding: `onclick={save()}` |
+| `{greet(@{name})}`, `title={label + @{suffix}}` | a `{…}` binding is browser source, copied through as written |
 
 A spread that writes a native handler (`onclick`) from a string value is
 refused at render (a debug assertion; dropped in release); a caller's handler
@@ -139,13 +140,13 @@ do not infer it from React, Vue, Alpine or another runtime.
 | `{expression}` | text, and attribute values | reactive text or attribute value |
 | `on…={…}` (any native event: `onclick`, `oninput`, `onsubmit`, …) | any element | event handler |
 | `pp-for="item in items"` / `"(item, index) in items"` | **`<template>` only** | keyed list |
-| `key="{expression}"` | the repeated element inside `pp-for` | row identity |
-| `pp-ref="{ref}"` | elements | element handle (`pp.ref`) or callback ref |
-| `defaultvalue="{expression}"` | `<input>`, `<textarea>`, `<select>` | seed an **uncontrolled** field once |
-| `defaultchecked="{expression}"` | checkbox, radio | seed an **uncontrolled** control once |
-| `pp-style="{cssText}"` | any element | dynamic inline style, as a CSS **string** |
-| `pp-spread="{...object}"` | any element | spread an object into attributes |
-| `<token.provider value="{…}">` (lowercase) | markup | context provider |
+| `key={expression}` | the repeated element inside `pp-for` | row identity |
+| `pp-ref={ref}` | elements | element handle (`pp.ref`) or callback ref |
+| `defaultvalue={expression}` | `<input>`, `<textarea>`, `<select>` | seed an **uncontrolled** field once |
+| `defaultchecked={expression}` | checkbox, radio | seed an **uncontrolled** control once |
+| `pp-style={cssText}` | any element | dynamic inline style, as a CSS **string** |
+| `pp-spread={...object}` | any element | spread an object into attributes |
+| `<token.provider value={…}>` (lowercase) | markup | context provider |
 | `pp-spa="false"` | `<a>` | a normal browser navigation for that link |
 | `pp-reset-scroll="true"` | a scroll container or `<body>` | reset its scroll on navigation |
 | `pp-scroll-key="name"` | a scroll container | stable scroll-restoration identity |
@@ -191,15 +192,15 @@ browser directly (`pulsepoint-web-apis.md`).
 PulsePoint scripts are plain JavaScript inside the reactive root:
 
 ```rust
-html! {r##"
+html! {
     <section>
         <p>{count}</p>
-        <button onclick="setCount(value => value + 1)">Increment</button>
-        <script>
+        <button onclick={setCount(value => value + 1)}>"Increment"</button>
+        <script>r#"
             const [count, setCount] = pp.state(0);
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 The root and script are one component scope. Hooks must run in a stable order
@@ -251,7 +252,7 @@ an enhancement added afterwards:
 - put the button, form, input, menu, filter or list in the `html!` of the
   block that owns it;
 - bind its events with `on…={…}`, keep its values in `pp.state`, render
-  conditions with `hidden="{…}"` and lists with `pp-for`;
+  conditions with `hidden={…}` and lists with `pp-for`;
 - reach for `pp.ref` + `pp-ref` only for real imperative access: focus,
   measurement, media, canvas, third-party widgets, clearing a file input;
 - do lifecycle work in `pp.effect`, and call the server with `pp.rpc`.
@@ -265,22 +266,22 @@ integrations, and even then they live behind `pp.ref` + `pp.effect` in the
 owning component.
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <input value="{query}" oninput="setQuery(target.value)" />
-        <button onclick="setQuery('')" disabled="{query.length === 0}">Clear</button>
+        <input value={query} oninput={setQuery(target.value)} />
+        <button onclick={setQuery("")} disabled={query.length === 0}>"Clear"</button>
         <ul>
             <template pp-for="item in shown">
-                <li key="{item.id}">{item.label}</li>
+                <li key={item.id}>{item.label}</li>
             </template>
         </ul>
-        <script>
+        <script>r#"
             const [query, setQuery] = pp.state('');
             const items = @{Json(&items)};
             const shown = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 ## Bindings
@@ -330,7 +331,7 @@ always escaped, and an attribute value is escaped such that it cannot close its
 quote or introduce an event handler. Trusted markup is the server's job —
 `Html::from_raw` in Rust.
 
-**Attribute position.** `name="{expression}"` follows the same family of rules,
+**Attribute position.** `name={expression}` follows the same family of rules,
 split by the kind of attribute:
 
 | Attribute kind | Value | Result |
@@ -347,16 +348,16 @@ Two of those rows differ from React and are worth reading twice.
 
 A boolean on a non-boolean attribute is serialized rather than dropped, because
 `aria-pressed` and `data-` flags are string-valued in the DOM and an author
-writing `aria-expanded="{open}"` means `"true"`/`"false"`, not presence.
+writing `aria-expanded={open}` means `"true"`/`"false"`, not presence.
 
 A nullish value on a non-boolean attribute leaves the attribute present and
-empty — `title="{null}"` emits `title=""`, where React would omit the attribute.
+empty — `title={null}` emits `title=""`, where React would omit the attribute.
 It is harmless on `class` or `title` and is not harmless on a URL attribute:
 `src=""` re-requests the current document and `href=""` links to it. Guard the
 expression when the attribute is a URL:
 
 ```rust
-<img src="{avatar ? avatar : placeholder}" />
+<img src={avatar ? avatar : placeholder} />
 ```
 
 The same binding on a component boundary *does* remove the attribute when the
@@ -372,8 +373,8 @@ that is an object rather than an array is therefore a blank list, not an error.
 Rahti authoring commonly uses:
 
 ```rust
-onclick="save()"
-oninput="setName(target.value)"
+onclick={save()}
+oninput={setName(target.value)}
 ```
 
 Within an event expression PulsePoint exposes:
@@ -390,12 +391,12 @@ A handler on a block's root element runs in that block's scope, as in React:
 ```rust
 #[component]
 pub fn SubmitForm() -> Html {
-    html! {r##"
-        <form onsubmit="handleSubmit(event)">
-            …
-            <script>function handleSubmit(e) { e.preventDefault(); }</script>
+    html! {
+        <form onsubmit={handleSubmit(event)}>
+            "…"
+            <script>r#"function handleSubmit(e) { e.preventDefault(); }"#</script>
         </form>
-    "##}
+    }
 }
 ```
 
@@ -417,8 +418,8 @@ component writes there can never read the component's own state or
 `pp.props`. `html!` refuses it at compile time in a `#[component]`:
 
 ```rust
-<section hidden="{!open}">              // compile error in a component
-<section><div hidden="{!open}">…</div>  // bind an element inside the root
+<section hidden={!open}>              // compile error in a component
+<section><div hidden={!open}>…</div>  // bind an element inside the root
 ```
 
 A value the caller passes as a `{…}` prop and the component writes on its
@@ -440,14 +441,14 @@ with `pp.rpc`. The input `name`s are the payload, the rpc's parameter names
 receive them, and validation happens in Rust:
 
 ```rust
-html! {r##"
-    <form onsubmit="save(event)" novalidate>
+html! {
+    <form onsubmit={save(event)} novalidate>
         <input name="name" value=@{user.name} autocomplete="name" />
-        <p hidden="{!errors.name}">{errors.name}</p>
+        <p hidden={!errors.name}>{errors.name}</p>
         <input name="email" type="email" value=@{user.email} autocomplete="email" />
-        <p hidden="{!errors.email}">{errors.email}</p>
-        <button disabled="{saving}">{saving ? "Saving…" : "Save"}</button>
-        <script>
+        <p hidden={!errors.email}>{errors.email}</p>
+        <button disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+        <script>r#"
             const [saving, setSaving] = pp.state(false);
             const [errors, setErrors] = pp.state({});
 
@@ -465,9 +466,9 @@ html! {r##"
                     setSaving(false);
                 }
             }
-        </script>
+        "#</script>
     </form>
-"##}
+}
 ```
 
 ```rust
@@ -492,8 +493,8 @@ pub async fn save_profile(name: String, email: String) -> Result<()> {
   an effect.
 
 **A control is controlled or uncontrolled for its whole life.**
-`value="{state}"` / `checked="{state}"` with an `oninput` handler is controlled;
-`defaultvalue="{…}"` / `defaultchecked="{…}"` is uncontrolled, applied once and
+`value={state}` / `checked={state}` with an `oninput` handler is controlled;
+`defaultvalue={…}` / `defaultchecked={…}` is uncontrolled, applied once and
 then left to the user. Switching between them — usually by binding `value` to
 state that starts `undefined` — logs
 `[PP-WARN] <input#email> changed from uncontrolled to controlled.` Give the
@@ -511,20 +512,20 @@ and a checkbox or radio `click`) are not preceded by that commit.
 
 There is no conditional directive. In order of preference:
 
-1. **`hidden="{…}"`** — the default. The element stays in the DOM with its
+1. **`hidden={…}`** — the default. The element stays in the DOM with its
    state; only visibility changes. Guard expressions inside it
    (`{target?.name}`), because a hidden subtree still renders.
    `hidden` is `display: none` from the browser's own stylesheet, and any
    `display` rule on the element overrides it; Tailwind's preflight makes it
    `display: none !important`, so it wins over `flex` or `grid` there.
 2. **A ternary in a binding** — for text, classes and attributes:
-   `{saving ? "Saving…" : "Save"}`, `class="{"badge " + (admin ? "badge-admin" : "badge-user")}"`.
+   `{saving ? "Saving…" : "Save"}`, `class={"badge " + (admin ? "badge-admin" : "badge-user")}`.
 3. **`pp-for` over a zero-or-one list** — when the node must truly leave the
    DOM (an expensive child, a duplicate field name, media that must stop):
 
 ```rust
 <template pp-for="item in selected ? [selected] : []">
-    <section key="{item.id}">…</section>
+    <section key={item.id}>…</section>
 </template>
 ```
 
@@ -532,9 +533,9 @@ An empty state is a `hidden` placeholder beside the list, not a branch:
 
 ```rust
 <tbody>
-    <tr hidden="{rows.length !== 0}"><td colspan="5">No rows.</td></tr>
+    <tr hidden={rows.length !== 0}><td colspan="5">"No rows."</td></tr>
     <template pp-for="row in rows">
-        <tr key="{row.id}">…</tr>
+        <tr key={row.id}>…</tr>
     </template>
 </tbody>
 ```
@@ -546,7 +547,7 @@ For browser-owned reactive collections, use a template:
 ```rust
 <ul>
     <template pp-for="(item, index) in items">
-        <li key="{item.id}">{index}: {item.label}</li>
+        <li key={item.id}>{index}": "{item.label}</li>
     </template>
 </ul>
 ```
@@ -563,19 +564,19 @@ nesting:
 ```rust
 #[component]
 pub fn Code() -> Html {
-    html! {r##"
+    html! {
         <p>
             <template pp-for="(letter, index) in letters">
-                <span key="{index}">{letter}</span>
+                <span key={index}>{letter}</span>
             </template>
-            <script>const letters = ["K", "7", "Q"];</script>
+            <script>r#"const letters = ["K", "7", "Q"];"#</script>
         </p>
-    "##}
+    }
 }
 
 // In a page:
 <template pp-for="row in rows">
-    <article key="{row.id}"><Code /></article>
+    <article key={row.id}><Code /></article>
 </template>
 ```
 
@@ -617,14 +618,14 @@ like `props.x` in JSX:
 ```rust
 #[component]
 pub fn Greeting(user_name: &str) -> Html {
-    html! {r##"
+    html! {
         <div user-name=@{user_name}>
             <b>{pp.props.userName}</b>
             <p>{name}</p>
-            <button type="button" onclick="setName(pp.props.userName)">Reset</button>
-            <script>const [name, setName] = pp.state(pp.props.userName ?? "");</script>
+            <button type="button" onclick={setName(pp.props.userName)}>"Reset"</button>
+            <script>r#"const [name, setName] = pp.state(pp.props.userName ?? "");"#</script>
         </div>
-    "##}
+    }
 }
 ```
 

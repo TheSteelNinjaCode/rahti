@@ -17,13 +17,12 @@ fn show_tag_attr(attr: &parse::TagAttr) -> String {
     }
 }
 
-/// The tokens `parse` reads for `html! {r##"{src}"##}` written in `file`,
-/// optionally behind the `@component "id"` that `#[component]` writes.
-fn template(src: &str, file: &str, component: Option<&str>) -> Result<TokenStream, String> {
+/// The tokens `parse` reads for `html! { {src} }`, optionally behind the
+/// `@component "id"` that `#[component]` writes. The file only matters to
+/// [`stamp`], which names the block after it.
+fn template(src: &str, _file: &str, component: Option<&str>) -> Result<TokenStream, String> {
     let directive = component.map_or(String::new(), |id| format!("@component \"{id}\" "));
-    let input =
-        TokenStream::from_str(&format!("{directive}r##\"{src}\"##")).expect("one template literal");
-    template_tokens(input, file, |_| (1, 1)).map_err(|e| e.msg)
+    TokenStream::from_str(&format!("{directive}{src}")).map_err(|e| e.to_string())
 }
 
 /// A component's template, parsed, or the message it is refused with.
@@ -73,7 +72,7 @@ fn markup(src: &str, file: &str) -> String {
 /// A convention file under `app/` is named after its path.
 #[test]
 fn a_page_is_stamped_with_its_name() {
-    let out = markup(r#"<main class="a">x</main>"#, "src/app/users/page.rs");
+    let out = markup(r#"<main class="a">"x"</main>"#, "src/app/users/page.rs");
     let expected =
         component::identifier("src/app/users/page.rs").expect("page.rs is a convention file");
     assert_eq!(
@@ -86,14 +85,14 @@ fn a_page_is_stamped_with_its_name() {
 /// tells blocks apart by it.
 #[test]
 fn only_the_root_element_is_stamped() {
-    let out = markup("<main><article>x</article></main>", "src/app/page.rs");
+    let out = markup(r#"<main><article>"x"</article></main>"#, "src/app/page.rs");
     assert_eq!(out.matches("pp-component").count(), 1);
     assert!(out.starts_with("<main pp-component="), "{out}");
 }
 
 #[test]
 fn a_name_the_author_wrote_wins() {
-    let out = markup(r#"<div pp-component="mine">x</div>"#, "src/app/page.rs");
+    let out = markup(r#"<div pp-component="mine">"x"</div>"#, "src/app/page.rs");
     assert_eq!(out, "<div pp-component=\"mine\">x</div>");
 }
 
@@ -102,7 +101,7 @@ fn a_name_the_author_wrote_wins() {
 #[test]
 fn a_forced_name_beats_the_path() {
     let out = markup(
-        "@component user_card_3b91f0ae<article>x</article>",
+        r#"@component user_card_3b91f0ae <article>"x"</article>"#,
         "src/app/page.rs",
     );
     assert_eq!(
@@ -137,7 +136,7 @@ fn a_document_is_named_around_its_slot() {
 #[test]
 fn the_injected_name_is_the_one_derived_from_the_path() {
     let out = markup(
-        "<html><body><slot /></body></html>",
+        r#"<html><body><slot /></body></html>"#,
         "src/app/(portal)/layout.rs",
     );
     let expected = component::identifier("src/app/(portal)/layout.rs")
@@ -166,14 +165,14 @@ fn a_document_with_its_own_name_is_left_alone() {
 /// Nothing to own: a document that renders no children gets no boundary.
 #[test]
 fn a_document_without_a_slot_gets_no_template() {
-    let out = markup("<html><body>x</body></html>", "src/app/layout.rs");
+    let out = markup(r#"<html><body>"x"</body></html>"#, "src/app/layout.rs");
     assert_eq!(out, "<html><body>x</body></html>");
 }
 
 /// A helper module has no route, so there is nothing to name it after.
 #[test]
 fn markup_outside_the_app_directory_is_left_alone() {
-    let out = markup("<div>x</div>", "src/lib/widgets.rs");
+    let out = markup(r#"<div>"x"</div>"#, "src/lib/widgets.rs");
     assert_eq!(out, "<div>x</div>");
 }
 
@@ -183,7 +182,7 @@ fn markup_outside_the_app_directory_is_left_alone() {
 /// `push_str` into a string sized up front.
 #[test]
 fn static_markup_folds_into_one_write() {
-    let ops = ops_of("<main><p>hello</p></main>", "src/lib/widgets.rs");
+    let ops = ops_of(r#"<main><p>"hello"</p></main>"#, "src/lib/widgets.rs");
     let out = emit(ops).to_string();
     assert_eq!(out.matches("push_str").count(), 1, "{out}");
     assert!(out.contains("with_capacity (25usize)"), "{out}");
@@ -193,7 +192,7 @@ fn static_markup_folds_into_one_write() {
 /// Interpolation breaks the run, and each side is written on its own.
 #[test]
 fn interpolation_splits_the_static_runs() {
-    let ops = ops_of("<h1>@{title}</h1>", "src/lib/widgets.rs");
+    let ops = ops_of(r#"<h1>@{title}</h1>"#, "src/lib/widgets.rs");
     let out = emit(ops).to_string();
     assert_eq!(out.matches("push_str").count(), 2, "{out}");
     assert!(out.contains("render_into (& (title)"), "{out}");
@@ -203,7 +202,7 @@ fn interpolation_splits_the_static_runs() {
 /// decides whether the attribute is written at all.
 #[test]
 fn an_attribute_expression_writes_the_whole_attribute() {
-    let ops = ops_of("<a href=@{url}>x</a>", "src/lib/widgets.rs");
+    let ops = ops_of(r#"<a href=@{url}>"x"</a>"#, "src/lib/widgets.rs");
     let out = emit(ops).to_string();
     assert!(
         out.contains("attribute (\" href\" , & (url) , false ,"),
@@ -219,7 +218,7 @@ fn an_attribute_expression_writes_the_whole_attribute() {
 /// HTML reads by presence.
 #[test]
 fn a_boolean_attribute_expression_is_marked_as_one() {
-    let ops = ops_of("<input disabled=@{off} />", "src/lib/widgets.rs");
+    let ops = ops_of(r#"<input disabled=@{off} />"#, "src/lib/widgets.rs");
     let out = emit(ops).to_string();
     assert!(
         out.contains("attribute (\" disabled\" , & (off) , true ,"),
@@ -231,7 +230,10 @@ fn a_boolean_attribute_expression_is_marked_as_one() {
 /// that a later one replaces an earlier one.
 #[test]
 fn a_spread_builds_the_open_tag() {
-    let ops = ops_of(r#"<div class="a" @{..extra}>x</div>"#, "src/lib/widgets.rs");
+    let ops = ops_of(
+        r#"<div class="a" @{..extra}>"x"</div>"#,
+        "src/lib/widgets.rs",
+    );
     let out = emit(ops).to_string();
     assert!(out.contains("AttrList :: new ()"), "{out}");
     assert!(out.contains("set_source (\"class\" , \"a\")"), "{out}");
@@ -243,7 +245,7 @@ fn a_spread_builds_the_open_tag() {
 /// the feature is used.
 #[test]
 fn a_tag_without_a_spread_still_folds_into_static_markup() {
-    let ops = ops_of(r#"<div class="a" id="b">x</div>"#, "src/lib/widgets.rs");
+    let ops = ops_of(r#"<div class="a" id="b">"x"</div>"#, "src/lib/widgets.rs");
     let out = emit(ops).to_string();
     assert!(!out.contains("AttrList"), "{out}");
     assert_eq!(out.matches("push_str").count(), 1, "{out}");
@@ -253,7 +255,7 @@ fn a_tag_without_a_spread_still_folds_into_static_markup() {
 /// layout fails with rustc's ordinary "cannot find value".
 #[test]
 fn slot_renders_the_children_binding() {
-    let ops = ops_of("<main><slot /></main>", "src/lib/widgets.rs");
+    let ops = ops_of(r#"<main><slot /></main>"#, "src/lib/widgets.rs");
     let out = emit(ops).to_string();
     assert!(out.contains("render_into (& children"), "{out}");
 }
@@ -284,7 +286,7 @@ fn a_component_tag_calls_through_its_companion() {
 #[test]
 fn component_children_become_the_children_field() {
     let ops = ops_of(
-        r#"<main><Card title="x"><p>hi</p></Card></main>"#,
+        r#"<main><Card title="x"><p>"hi"</p></Card></main>"#,
         "src/lib/widgets.rs",
     );
     let out = emit(ops).to_string();
@@ -293,13 +295,13 @@ fn component_children_become_the_children_field() {
 }
 
 /// In a convention file, a single-rooted child fragment is named by the file
-/// — the same `pp-component` a separate `html! {r##"…"##}` child block carries, so
+/// — the same `pp-component` a separate `html! { … }` child block carries, so
 /// the two spellings ship byte-identical markup and keep the same reactive
 /// scope.
 #[test]
 fn component_children_are_stamped_like_an_inline_block() {
     let out = markup(
-        r#"<main><Card title="x"><p>hi</p></Card></main>"#,
+        r#"<main><Card title="x"><p>"hi"</p></Card></main>"#,
         "src/app/users/page.rs",
     );
     let expected =
@@ -315,11 +317,11 @@ fn component_children_are_stamped_like_an_inline_block() {
 }
 
 /// Outside the app directory there is no file name to stamp with — the same
-/// rule an inline `html! {r##"…"##}` block follows in a component file.
+/// rule an inline `html! { … }` block follows in a component file.
 #[test]
 fn component_children_outside_the_app_directory_are_left_alone() {
     let out = markup(
-        r#"<main><Card title="x"><p>hi</p></Card></main>"#,
+        r#"<main><Card title="x"><p>"hi"</p></Card></main>"#,
         "src/components/frame.rs",
     );
     assert!(!out.contains("pp-component"), "{out}");
@@ -329,7 +331,7 @@ fn component_children_outside_the_app_directory_are_left_alone() {
 #[test]
 fn multi_rooted_children_are_not_stamped() {
     let out = markup(
-        "<main><Card><b>a</b><i>b</i></Card></main>",
+        r#"<main><Card><b>"a"</b><i>"b"</i></Card></main>"#,
         "src/app/page.rs",
     );
     assert_eq!(
@@ -343,7 +345,7 @@ fn multi_rooted_children_are_not_stamped() {
 #[test]
 fn nested_component_children_are_stamped_too() {
     let out = markup(
-        "<main><Card><div><Panel><p>x</p></Panel></div></Card></main>",
+        r#"<main><Card><div><Panel><p>"x"</p></Panel></div></Card></main>"#,
         "src/app/page.rs",
     );
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
@@ -372,7 +374,7 @@ fn a_composition_root_dissolves_the_page_stamp() {
 #[test]
 fn a_composition_root_still_stamps_its_children() {
     let out = markup(
-        r#"<Panel title="x"><p>hi</p></Panel>"#,
+        r#"<Panel title="x"><p>"hi"</p></Panel>"#,
         "src/app/users/page.rs",
     );
     let expected =
@@ -388,7 +390,7 @@ fn a_composition_root_still_stamps_its_children() {
 #[test]
 fn a_forced_name_on_a_composition_root_goes_unused() {
     let out = markup(
-        r#"@component framed_41d26bb9<Panel title="x"><p>y</p></Panel>"#,
+        r#"@component framed_41d26bb9 <Panel title="x"><p>"y"</p></Panel>"#,
         "src/components/panel.rs",
     );
     assert!(!out.contains("pp-component"), "{out}");
@@ -401,7 +403,7 @@ fn a_forced_name_on_a_composition_root_goes_unused() {
 /// element root would carry the name as an attribute.
 #[test]
 fn a_fragment_root_takes_the_page_stamp() {
-    let out = markup("<><h1>a</h1><p>b</p></>", "src/app/users/page.rs");
+    let out = markup(r#"<><h1>"a"</h1><p>"b"</p></>"#, "src/app/users/page.rs");
     let expected =
         component::identifier("src/app/users/page.rs").expect("page.rs is a convention file");
     assert_eq!(
@@ -415,7 +417,7 @@ fn a_fragment_root_takes_the_page_stamp() {
 #[test]
 fn a_fragment_root_takes_a_forced_name() {
     let out = markup(
-        "@component tally_12345678<><button>x</button><p>y</p></>",
+        r#"@component tally_12345678 <><button>"x"</button><p>"y"</p></>"#,
         "src/components/tally.rs",
     );
     assert!(out.starts_with("<!--pp:tally_12345678-->"), "{out}");
@@ -425,7 +427,7 @@ fn a_fragment_root_takes_a_forced_name() {
 #[test]
 fn fragment_rooted_children_are_stamped() {
     let out = markup(
-        "<main><Card><><p>a</p><p>b</p></></Card></main>",
+        r#"<main><Card><><p>"a"</p><p>"b"</p></></Card></main>"#,
         "src/app/page.rs",
     );
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
@@ -441,7 +443,7 @@ fn fragment_rooted_children_are_stamped() {
 /// `{count}` child would render once and never update.
 #[test]
 fn binding_children_are_wrapped_for_their_owner() {
-    let out = markup("<main><Badge>{count}</Badge></main>", "src/app/page.rs");
+    let out = markup(r#"<main><Badge>{count}</Badge></main>"#, "src/app/page.rs");
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
     assert!(
         out.contains(&format!(
@@ -455,7 +457,10 @@ fn binding_children_are_wrapped_for_their_owner() {
 /// of its own — the owner wrap replaces the `pp-component` stamp.
 #[test]
 fn a_single_rooted_binding_child_is_owned_not_stamped() {
-    let out = markup("<main><Card><p>{seen}</p></Card></main>", "src/app/page.rs");
+    let out = markup(
+        r#"<main><Card><p>{seen}</p></Card></main>"#,
+        "src/app/page.rs",
+    );
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
     assert!(
         out.contains(&format!(
@@ -471,7 +476,7 @@ fn a_single_rooted_binding_child_is_owned_not_stamped() {
 #[test]
 fn an_attribute_binding_child_is_owned() {
     let out = markup(
-        r#"<main><Card><p hidden="{done}">x</p></Card></main>"#,
+        r#"<main><Card><p hidden={done}>"x"</p></Card></main>"#,
         "src/app/page.rs",
     );
     assert!(out.contains("<template pp-owner="), "{out}");
@@ -482,7 +487,7 @@ fn an_attribute_binding_child_is_owned() {
 #[test]
 fn a_component_prop_binding_child_is_owned() {
     let out = markup(
-        r#"<main><Card><Input value="{query}" /></Card></main>"#,
+        r#"<main><Card><Input value={query} /></Card></main>"#,
         "src/app/page.rs",
     );
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
@@ -498,7 +503,7 @@ fn a_component_prop_binding_child_is_owned() {
 #[test]
 fn scripted_children_stay_their_own_block() {
     let out = markup(
-        "<main><Card><div><p>{n}</p><script>const [n, setN] = pp.state(0);</script></div></Card></main>",
+        r##"<main><Card><div><p>{n}</p><script>r#"const [n, setN] = pp.state(0);"#</script></div></Card></main>"##,
         "src/app/page.rs",
     );
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
@@ -513,7 +518,10 @@ fn scripted_children_stay_their_own_block() {
 /// template hides them, and they are named the way any block is.
 #[test]
 fn static_children_take_no_owner_wrap() {
-    let out = markup("<main><Card><p>hi</p></Card></main>", "src/app/page.rs");
+    let out = markup(
+        r#"<main><Card><p>"hi"</p></Card></main>"#,
+        "src/app/page.rs",
+    );
     assert!(!out.contains("pp-owner"), "{out}");
 }
 
@@ -522,7 +530,7 @@ fn static_children_take_no_owner_wrap() {
 #[test]
 fn a_forced_name_owns_the_children_written_in_its_block() {
     let out = markup(
-        "@component shell_12345678<div><Card>{open}</Card></div>",
+        r#"@component shell_12345678 <div><Card>{open}</Card></div>"#,
         "src/components/shell.rs",
     );
     assert!(
@@ -537,7 +545,7 @@ fn a_forced_name_owns_the_children_written_in_its_block() {
 #[test]
 fn only_the_block_that_holds_the_binding_is_wrapped() {
     let out = markup(
-        "<main><Card><div><Panel><p>{x}</p></Panel></div></Card></main>",
+        r#"<main><Card><div><Panel><p>{x}</p></Panel></div></Card></main>"#,
         "src/app/page.rs",
     );
     assert_eq!(out.matches("pp-owner").count(), 1, "{out}");
@@ -556,7 +564,7 @@ fn only_the_block_that_holds_the_binding_is_wrapped() {
 #[test]
 fn a_root_that_handles_its_own_event_names_its_owner() {
     let out = markup(
-        r#"@component form_12345678<form onsubmit="save(event)"><button>go</button></form>"#,
+        r#"@component form_12345678 <form onsubmit={save(event)}><button>"go"</button></form>"#,
         "src/components/form.rs",
     );
     assert_eq!(
@@ -569,7 +577,7 @@ fn a_root_that_handles_its_own_event_names_its_owner() {
 /// A page root is a block root like any other.
 #[test]
 fn a_page_root_owns_its_own_handlers() {
-    let out = markup(r#"<main onclick="count()">x</main>"#, "src/app/page.rs");
+    let out = markup(r#"<main onclick={count()}>"x"</main>"#, "src/app/page.rs");
     let expected = component::identifier("src/app/page.rs").expect("page.rs is a convention file");
     assert!(
         out.starts_with(&format!(
@@ -584,12 +592,12 @@ fn a_page_root_owns_its_own_handlers() {
 #[test]
 fn inner_handlers_and_callback_props_leave_the_root_alone() {
     let inner = markup(
-        r#"<main><button onclick="go()">x</button></main>"#,
+        r#"<main><button onclick={go()}>"x"</button></main>"#,
         "src/app/page.rs",
     );
     assert!(!inner.contains("pp-event-owner"), "{inner}");
 
-    let prop = markup(r#"<main on-select="{pick}">x</main>"#, "src/app/page.rs");
+    let prop = markup(r#"<main on-select={pick}>"x"</main>"#, "src/app/page.rs");
     assert!(!prop.contains("pp-event-owner"), "{prop}");
 }
 
@@ -599,7 +607,7 @@ fn inner_handlers_and_callback_props_leave_the_root_alone() {
 #[test]
 fn events_are_recognized_by_naming_not_a_list() {
     let out = markup(
-        r#"@component x_12345678<div onsomefutureevent="react(event)">x</div>"#,
+        r#"@component x_12345678 <div onsomefutureevent={react(event)}>"x"</div>"#,
         "src/components/x.rs",
     );
     assert!(out.contains("pp-event-owner=\"x_12345678\""), "{out}");
@@ -610,7 +618,7 @@ fn events_are_recognized_by_naming_not_a_list() {
 #[test]
 fn a_self_contained_child_block_owns_its_root_handler() {
     let out = markup(
-        r#"<main><Card><div onclick="hit()"><script>function hit() {}</script></div></Card></main>"#,
+        r##"<main><Card><div onclick={hit()}><script>r#"function hit() {}"#</script></div></Card></main>"##,
         "src/app/page.rs",
     );
     let owners = out.matches("pp-event-owner=").count();
@@ -623,13 +631,13 @@ fn a_self_contained_child_block_owns_its_root_handler() {
 #[test]
 fn a_spread_beside_an_owned_handler_is_marked() {
     let out = markup(
-        r#"@component f_12345678<form onsubmit="save(event)" @{..attrs}>x</form>"#,
+        r#"@component f_12345678 <form onsubmit={save(event)} @{..attrs}>"x"</form>"#,
         "src/components/f.rs",
     );
     assert!(out.contains("pp-event-owner=\"f_12345678\""), "{out}");
     assert!(out.contains(" @owns-events"), "{out}");
 
-    let plain = markup("<div @{..attrs}>x</div>", "src/app/page.rs");
+    let plain = markup(r#"<div @{..attrs}>"x"</div>"#, "src/app/page.rs");
     assert!(!plain.contains("@owns-events"), "{plain}");
     assert!(!plain.contains("pp-event-owner"), "{plain}");
 }
@@ -641,7 +649,7 @@ fn a_spread_beside_an_owned_handler_is_marked() {
 #[test]
 fn a_scriptless_component_with_its_own_bindings_claims_its_markup() {
     let out = markup(
-        r#"@component label_12345678<p class="label"><b>{pp.props.label}</b></p>"#,
+        r#"@component label_12345678 <p class="label"><b>{pp.props.label}</b></p>"#,
         "src/components/label.rs",
     );
     assert!(
@@ -650,7 +658,7 @@ fn a_scriptless_component_with_its_own_bindings_claims_its_markup() {
     );
 
     let fragment = markup(
-        "@component pair_12345678<><dt>{pp.props.term}</dt><dd>x</dd></>",
+        r#"@component pair_12345678 <><dt>{pp.props.term}</dt><dd>"x"</dd></>"#,
         "src/components/pair.rs",
     );
     assert!(
@@ -664,15 +672,15 @@ fn a_scriptless_component_with_its_own_bindings_claims_its_markup() {
 fn a_component_without_bindings_of_its_own_is_left_alone() {
     let cases = [
         // No client binding at all.
-        "@component a_12345678<p>static</p>",
+        r#"@component a_12345678 <p>"static"</p>"#,
         // A script of its own already.
-        "@component b_12345678<p>{n}<script>const n = 1;</script></p>",
+        r##"@component b_12345678 <p>{n}<script>r#"const n = 1;"#</script></p>"##,
         // Children between a component tag are a block of their own.
         "@component c_12345678<div><Card><b>{count}</b></Card></div>",
         // A spread below the root may carry the caller's `bindings`.
         "@component d_12345678<label><input @{..bindings} /><span>{pp.props.hint}</span></label>",
         // Only the root's own attributes, which are the caller's.
-        r#"@component e_12345678<button onclick="pp.props.onPick()">go</button>"#,
+        r#"@component e_12345678 <button onclick={pp.props.onPick()}>"go"</button>"#,
     ];
     for src in cases {
         let out = markup(src, "src/components/x.rs");
@@ -683,7 +691,7 @@ fn a_component_without_bindings_of_its_own_is_left_alone() {
 /// A page is not a component and is not claimed.
 #[test]
 fn a_page_is_not_claimed() {
-    let out = markup("<main><p>{count}</p></main>", "src/app/page.rs");
+    let out = markup(r#"<main><p>{count}</p></main>"#, "src/app/page.rs");
     assert!(!out.contains("<script></script>"), "{out}");
 }
 
@@ -693,7 +701,7 @@ fn a_page_is_not_claimed() {
 fn a_component_binding_on_its_own_root_is_refused() {
     let Err(msg) = component_block(
         "dialog_12345678",
-        r#"<section hidden="{!open}"><script>const { open } = pp.props;</script></section>"#,
+        r##"<section hidden={!open}><script>r#"const { open } = pp.props;"#</script></section>"##,
     ) else {
         panic!("a root binding in a component must not compile");
     };
@@ -706,11 +714,11 @@ fn a_component_binding_on_its_own_root_is_refused() {
 #[test]
 fn allowed_root_attributes_still_compile() {
     let cases = [
-        r#"<form onsubmit="save(event)">x</form>"#,
-        r#"<div data-config='{"a": 1}'>x</div>"#,
-        r#"<div pp-ref="{root}">x</div>"#,
-        r#"<div class=@{cls}>x</div>"#,
-        r#"<section><div hidden="{!open}">x</div><script>const { open } = pp.props;</script></section>"#,
+        r#"<form onsubmit={save(event)}>"x"</form>"#,
+        r#"<div data-config="{\"a\": 1}">"x"</div>"#,
+        r#"<div pp-ref={root}>"x"</div>"#,
+        r#"<div class=@{cls}>"x"</div>"#,
+        r##"<section><div hidden={!open}>"x"</div><script>r#"const { open } = pp.props;"#</script></section>"##,
     ];
     for src in cases {
         assert!(component_block("a_12345678", src).is_ok(), "{src}");
@@ -720,7 +728,7 @@ fn allowed_root_attributes_still_compile() {
 /// A page's root is not a component's and is not checked.
 #[test]
 fn a_page_root_binding_compiles() {
-    let tokens = template(r#"<main class="{theme}">x</main>"#, "src/app/page.rs", None).unwrap();
+    let tokens = template(r#"<main class={theme}>"x"</main>"#, "src/app/page.rs", None).unwrap();
     assert!(parse::parse(tokens).is_ok());
 }
 
@@ -730,7 +738,7 @@ fn a_page_root_binding_compiles() {
 #[test]
 fn children_handed_on_are_not_wrapped_again() {
     let out = markup(
-        r#"@component framed_12345678<div><Panel title="t">@{children}</Panel></div>"#,
+        r#"@component framed_12345678 <div><Panel title="t">@{children}</Panel></div>"#,
         "src/components/panel.rs",
     );
     assert!(!out.contains("pp-owner"), "{out}");
@@ -749,6 +757,6 @@ fn a_document_slot_raises_its_childrens_brace_references() {
         assert!(ops.iter().any(|op| matches!(op, Op::DeferredSlot)), "{src}");
         assert!(!ops.iter().any(|op| matches!(op, Op::Slot)), "{src}");
     }
-    let ops = ops_of("<main><slot /></main>", "src/app/dashboard/layout.rs");
+    let ops = ops_of(r#"<main><slot /></main>"#, "src/app/dashboard/layout.rs");
     assert!(ops.iter().any(|op| matches!(op, Op::Slot)));
 }

@@ -354,10 +354,10 @@ compromised, because it has to be safe in that case too.
 ## `window.rahtiNative` from a page
 
 ```rust
-html! {r##"
+html! {
     <section>
-        <button onclick="openDocs()">Documentation</button>
-        <script>
+        <button onclick={openDocs()}>"Documentation"</button>
+        <script>r#"
             const native = window.rahtiNative;
 
             function openDocs() {
@@ -368,9 +368,9 @@ html! {r##"
                 window.open(url, "_blank", "noopener");
               }
             }
-        </script>
+        "#</script>
     </section>
-"##}
+}
 ```
 
 **The same page has to work as a website.** `window.rahtiNative` is undefined

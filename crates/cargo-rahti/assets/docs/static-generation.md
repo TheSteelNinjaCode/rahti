@@ -44,7 +44,7 @@ pub async fn static_paths() -> Vec<String> {
 }
 
 pub async fn page(Path(slug): Path<String>) -> Html {
-    html! {r##"<h1>@{slug}</h1>"##}
+    html! { <h1>@{slug}</h1> }
 }
 ```
 
