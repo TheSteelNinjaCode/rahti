@@ -59,7 +59,7 @@ pub const JSCONFIG: &str = r#"{
 /// by installing a separate tool, and the document is what tells the reader
 /// that the option exists and what it costs. Withholding it would leave
 /// somebody reaching for a Tauri tutorial and wiring the framework up by hand.
-pub const CORE_DOCS: [(&str, &str); 24] = [
+pub const CORE_DOCS: [(&str, &str); 28] = [
     ("routing.md", include_str!("../assets/docs/routing.md")),
     (
         "rendering-and-components.md",
@@ -85,6 +85,22 @@ pub const CORE_DOCS: [(&str, &str); 24] = [
     (
         "pulsepoint.md",
         include_str!("../assets/docs/pulsepoint.md"),
+    ),
+    (
+        "pulsepoint-hooks.md",
+        include_str!("../assets/docs/pulsepoint-hooks.md"),
+    ),
+    (
+        "pulsepoint-performance.md",
+        include_str!("../assets/docs/pulsepoint-performance.md"),
+    ),
+    (
+        "pulsepoint-web-apis.md",
+        include_str!("../assets/docs/pulsepoint-web-apis.md"),
+    ),
+    (
+        "pulsepoint-navigation.md",
+        include_str!("../assets/docs/pulsepoint-navigation.md"),
     ),
     (
         "diagnostics.md",
@@ -1157,7 +1173,7 @@ enum Todo {
 
 pub fn layout_rs(title: &str) -> String {
     format!(
-        r#"use crate::rahti::{{Html, Metadata, html}};
+        r###"use crate::rahti::{{Html, Metadata, html}};
 
 /// Site-wide metadata defaults. A nested layout or page only repeats the
 /// fields it needs to override.
@@ -1181,7 +1197,7 @@ pub fn metadata() -> Metadata {{
 /// derived from this file's path. Nothing to write, and nothing to keep in
 /// step.
 pub fn layout(children: Html) -> Html {{
-    html! {{
+    html! {{r##"
         <!DOCTYPE html>
         <html lang="en">
             <head>
@@ -1195,9 +1211,9 @@ pub fn layout(children: Html) -> Html {{
                 <slot />
             </body>
         </html>
-    }}
+    "##}}
 }}
-"#
+"###
     )
 }
 
@@ -1216,17 +1232,17 @@ pub fn page_rs(name: &str, tailwind: bool) -> String {
     };
 
     format!(
-        r#"use crate::rahti::{{Html, html, rpc}};
+        r###"use crate::rahti::{{Html, html, rpc}};
 
 /// The home page. Every `page.rs` under `src/app/` becomes a URL by where it
 /// sits, and this one sits at the root.
 pub async fn page() -> Html {{
-    html! {{
+    html! {{r##"
         <section class="{section}">
-            <h1 class="{heading}">"{name}"</h1>
-            <p class="{lede}">"Edit src/app/page.rs and reload."</p>
+            <h1 class="{heading}">{name}</h1>
+            <p class="{lede}">Edit src/app/page.rs and reload.</p>
 
-            <button class="{button}" onclick={{greet()}}>"Say hello"</button>
+            <button class="{button}" onclick="greet()">Say hello</button>
             <p class="{lede}">{{message}}</p>
 
             <script>
@@ -1237,7 +1253,7 @@ pub async fn page() -> Html {{
                 }}
             </script>
         </section>
-    }}
+    "##}}
 }}
 
 /// Called by `pp.rpc("hello")` above. It runs on the server, in Rust, and the
@@ -1246,7 +1262,7 @@ pub async fn page() -> Html {{
 pub async fn hello() -> String {{
     "Hello from Rust.".to_string()
 }}
-"#
+"###
     )
 }
 
@@ -1699,9 +1715,27 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/validation.md` |\n",
     );
     out.push_str(
-        "| Browser state, hooks, bindings, events, lists, refs, SPA navigation, \
-         native web APIs (WebGPU, Workers, WebAssembly) | \
+        "| PulsePoint markup: not JSX, the closed directive and API list, bindings, \
+         events, forms, conditionals, lists, props | \
          `docs/conventions/pulsepoint.md` |\n",
+    );
+    out.push_str(
+        "| Every `pp.*` hook with an example: `pp.event`, effects, context, refs, \
+         portals, error boundaries, external stores | \
+         `docs/conventions/pulsepoint-hooks.md` |\n",
+    );
+    out.push_str(
+        "| Slow inputs or lists, re-renders, keyed rows, identity, splitting a large \
+         page | `docs/conventions/pulsepoint-performance.md` |\n",
+    );
+    out.push_str(
+        "| WebGPU, Canvas/WebGL, workers, WebAssembly, media, third-party libraries, \
+         games and widgets (DOM ownership) | \
+         `docs/conventions/pulsepoint-web-apis.md` |\n",
+    );
+    out.push_str(
+        "| SPA navigation, scroll, loading regions, `pp.redirect` | \
+         `docs/conventions/pulsepoint-navigation.md` |\n",
     );
     out.push_str(
         "| Browser/backend development diagnostics and `.rahti/dev.log` | \
@@ -1803,9 +1837,17 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
-        "`html!` has one authored root: a literal element, a single component\n\
-         tag, or a `<>…</>` fragment. The root layout is the exception: it\n\
-         writes a literal `<html>` root, optionally preceded by a doctype."
+        "A template is one raw string of HTML, `html! {r##\"…\"##}` — the only\n\
+         form `html!` accepts. Text, JavaScript and CSS go in exactly as\n\
+         written; a binding is a whole quoted attribute value,\n\
+         `hidden=\"{!open}\"`; a handler is quoted JavaScript,\n\
+         `onclick=\"save()\"`; a server value is unquoted, `href=@{url}`. A\n\
+         template nested in `@{…}` uses one fewer `#`. Compute values in Rust\n\
+         above the template and interpolate names: a Rust error inside `@{…}`\n\
+         lands on the template's first line. `html!` has one authored root: a\n\
+         literal element, a single component tag, or a `<>…</>` fragment. The\n\
+         root layout is the exception: it writes a literal `<html>` root,\n\
+         optionally preceded by a doctype."
             .to_string(),
     );
     rules.push(
@@ -1814,8 +1856,11 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
-        "Author text in `html!` as quoted Rust strings. Runtime values are\n\
-         escaped; use `Html::from_raw` only for explicitly trusted markup."
+        "Runtime values are\n\
+         escaped, braces included (`&#123;`), so no value can open a PulsePoint\n\
+         expression; use `Html::from_raw` only for explicitly trusted markup,\n\
+         whose braces stay live. A component forwards its tag's `{…}` props\n\
+         through a `bindings: Bindings` parameter."
             .to_string(),
     );
     rules.push(
@@ -1884,9 +1929,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          response including public assets, probes, and failures, immediately\n\
          inside production observability.\n\
          Existing response headers win. Customize the baseline only through\n\
-         `rahti::security::configure` during startup; keep PulsePoint's\n\
-         `'unsafe-inline'` and `'unsafe-eval'` requirements, and never enable\n\
-         HSTS `includeSubDomains` unless every subdomain is HTTPS."
+         `rahti::security::configure` during startup. `script-src` is\n\
+         `'self' 'unsafe-eval'`: keep `'unsafe-eval'`, name a vendor SDK's exact\n\
+         host, and never add `https:` or `'unsafe-inline'`. Never enable HSTS\n\
+         `includeSubDomains` unless every subdomain is HTTPS."
             .to_string(),
     );
     rules.push(
@@ -1971,6 +2017,23 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
+        "PulsePoint markup is HTML with `{…}` bindings, never JSX: a binding\n\
+         renders text, a condition is `hidden=\"{…}\"` on the element, a list is\n\
+         `<template pp-for=\"item in items\">` with a `key` on the row, and a\n\
+         form submit sends `Object.fromEntries(new FormData(event.currentTarget))`\n\
+         through `pp.rpc`. Bind first-party events with `on…={…}`; never wire\n\
+         your own UI with ids, `querySelector`, `addEventListener` or\n\
+         `innerHTML`. The directive, hook and utility lists in\n\
+         `docs/conventions/pulsepoint.md` are closed, and `html!` refuses JSX\n\
+         markup in a binding, JSX attribute names (`className`, `onClick`, …),\n\
+         `pp-for` off a `<template>`, directives that do not exist\n\
+         (`pp-if`, `pp-show`, `pp-model`, …), and a server value inside client\n\
+         code (`onclick=@{…}`, `@{…}` within a `{…}` binding or a quoted\n\
+         handler), naming the form to write. A script reads a server value as\n\
+         data: `const id = @{Json(&id)};`."
+            .to_string(),
+    );
+    rules.push(
         "Do not write PulsePoint's runtime-managed DOM attributes by hand. In\n\
          particular, do not invent `data-pp-*`, `pp-owner`, or\n\
          `pp-ref-owner`, and write no root-layout marker — `html!` injects\n\
@@ -1988,20 +2051,17 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          Workers, WebAssembly, Web Audio, WebRTC, IndexedDB, and the device APIs.\n\
          PulsePoint wraps none of them; do not invent `pp.gpu` or similar. The\n\
          handle goes in `pp.ref`, a `pp.effect` acquires, feeds, and releases\n\
-         it, and data arrives through `#[rpc]`/`pp.rpc`. See \"Native Web APIs\"\n\
-         in `docs/conventions/pulsepoint.md`."
+         it, and data arrives through `#[rpc]`/`pp.rpc`. See\n\
+         `docs/conventions/pulsepoint-web-apis.md`."
             .to_string(),
     );
     rules.push(
-        "Write a `<script>` longer than a few lines as one raw string,\n\
-         `<script>r#\"…\"#</script>`: it reaches the browser exactly as written —\n\
-         single quotes, template literals and comments included — and\n\
-         `@{expr}` is still interpolated. A token-written script must survive\n\
-         the Rust lexer, which rejects `'text'` and backticks and drops\n\
-         comments. A function handed to a library or a long-lived listener is\n\
+        "A `<script>` body is JavaScript exactly as written — comments,\n\
+         single quotes and template literals included — with `@{expr}`\n\
+         interpolated. A function handed to a library or a long-lived listener is\n\
          wrapped in `pp.event(…)` so it reads current state, never a\n\
          hand-kept \"latest\" ref. A library mounts into an empty element of its\n\
-         own, `<div pp-ref={host}></div>`; re-renders leave its children and the\n\
+         own, `<div pp-ref=\"{host}\"></div>`; re-renders leave its children and the\n\
          attributes it sets alone."
             .to_string(),
     );

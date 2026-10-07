@@ -26,7 +26,10 @@ fn the_baseline_covers_browser_security_boundaries() {
 fn the_csp_keeps_pulsepoint_working_and_locks_down_injection_targets() {
     let policy = baseline(true).content_security_policy.unwrap();
 
-    assert!(policy.contains("script-src 'self' 'unsafe-inline' 'unsafe-eval'"));
+    // `'unsafe-eval'` for the runtime's `new Function`, and nothing else: no
+    // inline script and no other host, so injected markup cannot run script.
+    assert!(policy.contains("script-src 'self' 'unsafe-eval';"));
+    assert!(!policy.contains("'unsafe-inline' 'unsafe-eval'"));
     assert!(policy.contains("object-src 'none'"));
     assert!(policy.contains("base-uri 'self'"));
     assert!(policy.contains("form-action 'self'"));

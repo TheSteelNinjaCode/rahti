@@ -186,7 +186,7 @@ the input. It handles variants, `!important`, arbitrary values, and
 overlapping utility groups.
 
 ```rust
-<div class={twMerge("p-2 px-4")}></div>
+<div class="{twMerge('p-2 px-4')}"></div>
 ```
 
 The runtime is the shipped asset `public/js/pp-reactive-v2.min.js`, replaced
@@ -374,6 +374,11 @@ the render contract and output safety rules.
   files an upgrade writes are written against its own version. A pin left
   behind is the failure that hides best: the project compiles, runs locally on
   its configured port, and quietly does none of what its new `main.rs` says.
+  Every pin moves, in every dependency table: `[dependencies]`,
+  `[dev-dependencies]` (where a test-only feature such as `browser-test`
+  declares `rahti` a second time), `[build-dependencies]`, and their
+  `[target.….dependencies]` forms. `[patch]` and `[workspace.dependencies]`
+  entries are left alone.
   Only ever forward, never onto a `--local` path dependency, and never over a
   requirement you wrote to float — a caret, a wildcard, a pre-release — which
   is you asking for something other than one exact version. A shape it cannot

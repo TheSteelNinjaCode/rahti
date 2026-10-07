@@ -50,7 +50,7 @@ pub fn metadata() -> Metadata {
 }
 
 pub fn layout(children: Html) -> Html {
-    html! {
+    html! {r##"
         <!DOCTYPE html>
         <html lang="en">
             <head>
@@ -62,7 +62,7 @@ pub fn layout(children: Html) -> Html {
             </head>
             <body><slot /></body>
         </html>
-    }
+    "##}
 }
 ```
 
@@ -107,7 +107,7 @@ pub async fn page(Path(slug): Path<String>) -> Page<Html> {
     let post_title = load_title(&slug).await;
 
     Page::new(
-        html! { <article><h1>@{&post_title}</h1></article> },
+        html! {r##"<article><h1>@{&post_title}</h1></article>"##},
         Metadata::new()
             .title(&post_title)
             .description(format!("Read {post_title}")),

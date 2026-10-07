@@ -50,6 +50,11 @@ pub const TIMEOUT: Duration = Duration::from_secs(30);
 /// searching for Chrome and Edge.
 pub const BROWSER_ENV: &str = "RAHTI_BROWSER";
 
+/// Set (to anything but `0` or nothing) to make a missing browser an error
+/// rather than a skipped test, so a machine that is meant to run the browser
+/// suite cannot pass it without a browser.
+pub const BROWSER_REQUIRED_ENV: &str = "RAHTI_BROWSER_REQUIRED";
+
 /// What went wrong talking to the browser, in words a test failure can show.
 #[derive(Debug, Clone)]
 pub struct BrowserError(pub String);
@@ -107,6 +112,15 @@ pub async fn serve(router: axum::Router) -> SocketAddr {
     addr
 }
 
+/// Whether [`BROWSER_REQUIRED_ENV`] asks for a missing browser to fail.
+pub fn browser_required() -> bool {
+    required_by(std::env::var(BROWSER_REQUIRED_ENV).ok().as_deref())
+}
+
+fn required_by(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.is_empty() && value != "0")
+}
+
 /// The browser to drive: [`BROWSER_ENV`], else an installed Chrome, Chromium
 /// or Edge.
 pub fn find_browser() -> Option<PathBuf> {
@@ -152,12 +166,20 @@ impl Browser {
     /// Launch a headless browser with a fresh profile and open a blank page.
     ///
     /// `Ok(None)` when no browser is installed: skip the test rather than
-    /// fail it, and say so.
+    /// fail it, and say so. With [`BROWSER_REQUIRED_ENV`] set, a missing
+    /// browser is an error instead.
     pub async fn launch() -> BrowserResult<Option<Browser>> {
         let Some(executable) = find_browser() else {
+            if browser_required() {
+                return Err(BrowserError(format!(
+                    "no Chrome, Chromium or Edge found, and {BROWSER_REQUIRED_ENV} is set. \
+                     Install one, or set {BROWSER_ENV} to a browser executable."
+                )));
+            }
             eprintln!(
                 "rahti browser test skipped: no Chrome, Chromium or Edge found \
-                 (set {BROWSER_ENV} to a browser executable)"
+                 (set {BROWSER_ENV} to a browser executable, and \
+                 {BROWSER_REQUIRED_ENV}=1 to fail instead of skipping)"
             );
             return Ok(None);
         };
@@ -249,6 +271,9 @@ impl Browser {
         browser.session = attached["sessionId"].as_str().unwrap_or_default().to_string();
         browser.command("Page.enable", json!({}), true).await?;
         browser.command("Runtime.enable", json!({}), true).await?;
+        // The browser reports a Content Security Policy violation on this
+        // domain rather than the console's, so enable it to see one.
+        browser.command("Log.enable", json!({}), true).await?;
         browser
             .command(
                 "Emulation.setDeviceMetricsOverride",
@@ -525,6 +550,18 @@ impl Browser {
                     level: "exception".into(),
                     text: exception_text(&event["params"]["exceptionDetails"]),
                 });
+            }
+            // A blocked script, `eval`, handler or connection: the page's
+            // security policy refused it, which the page cannot catch and
+            // which is an error a test must see.
+            Some("Log.entryAdded") => {
+                let entry = &event["params"]["entry"];
+                if entry["source"] == "security" && entry["level"] == "error" {
+                    self.console.push(ConsoleEntry {
+                        level: "error".into(),
+                        text: entry["text"].as_str().unwrap_or_default().to_string(),
+                    });
+                }
             }
             _ => {}
         }

@@ -281,10 +281,9 @@ impl Wiring {
 /// Bring `Cargo.toml` and `.env` up to what `rahti.config.json` says.
 ///
 /// Driven by the config rather than by what this run added, so it repairs as
-/// well as completes: a project whose config already says `db` and whose
-/// manifest has no `sea-orm` — the state an earlier version of this command
-/// left behind, or a hand-edited config — is fixed by running `upgrade`
-/// again. Every edit is skipped when it is already there, so that is safe to
+/// well as completes: a project whose config says `db` and whose manifest has
+/// no `sea-orm` — a hand-edited config, or a run interrupted halfway — is
+/// fixed by running `upgrade` again. Every edit is skipped when it is already there, so that is safe to
 /// do any number of times.
 ///
 /// A dry run computes all of this and writes none of it.

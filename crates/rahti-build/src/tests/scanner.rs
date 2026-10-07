@@ -332,7 +332,7 @@ fn a_hand_written_name_is_what_gets_reported() {
     let tree = Tree::new("declared");
     tree.file(
         "layout.rs",
-        "pub fn layout(children: Html) -> Html { html! { <template pp-component=\"rahti_main\"><slot /></template> } }",
+        "pub fn layout(children: Html) -> Html { html! {r##\"<template pp-component=\"rahti_main\"><slot /></template>\"##} }",
     )
     .page("page.rs");
 
@@ -351,7 +351,7 @@ fn a_name_in_a_comment_is_not_a_declaration() {
     tree.file(
         "layout.rs",
         "/// Rahti injects `<template pp-component=\"…\">` around the slot.\n\
-         pub fn layout(children: Html) -> Html { html! { <html><body><slot /></body></html> } }",
+         pub fn layout(children: Html) -> Html { html! {r##\"<html><body><slot /></body></html>\"##} }",
     )
     .page("page.rs");
 
@@ -415,11 +415,11 @@ fn two_files_cannot_render_one_name() {
     let tree = Tree::new("dupname");
     tree.file(
         "a/layout.rs",
-        "pub fn layout(children: Html) -> Html { html! { <div pp-component=\"same\"><slot /></div> } }",
+        "pub fn layout(children: Html) -> Html { html! {r##\"<div pp-component=\"same\"><slot /></div>\"##} }",
     )
     .file(
         "b/layout.rs",
-        "pub fn layout(children: Html) -> Html { html! { <div pp-component=\"same\"><slot /></div> } }",
+        "pub fn layout(children: Html) -> Html { html! {r##\"<div pp-component=\"same\"><slot /></div>\"##} }",
     )
     .page("a/page.rs")
     .page("b/page.rs");
@@ -695,7 +695,7 @@ fn a_root_layout_interpolating_children_is_refused() {
     tree.page("page.rs").file(
         "layout.rs",
         "pub fn layout(children: Html) -> Html {\n\
-         \x20   html! { <html><body>@{children}</body></html> }\n\
+         \x20   html! {r##\"<html><body>@{children}</body></html>\"##}\n\
          }\n",
     );
     scan(tree.path());
@@ -707,7 +707,7 @@ fn a_root_layout_with_a_slot_is_kept() {
     tree.page("page.rs").file(
         "layout.rs",
         "pub fn layout(children: Html) -> Html {\n\
-         \x20   html! { <html><body><slot /></body></html> }\n\
+         \x20   html! {r##\"<html><body><slot /></body></html>\"##}\n\
          }\n",
     );
 
@@ -724,7 +724,7 @@ fn a_slot_in_a_comment_does_not_count() {
         "layout.rs",
         "// The page renders at `<slot />` below.\n\
          pub fn layout(children: Html) -> Html {\n\
-         \x20   html! { <html><body>@{children}</body></html> }\n\
+         \x20   html! {r##\"<html><body>@{children}</body></html>\"##}\n\
          }\n",
     );
     scan(tree.path());

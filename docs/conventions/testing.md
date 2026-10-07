@@ -258,11 +258,14 @@ async fn the_counter_counts() {
 - `eval::<T>(js)` reads a value back; `wait_for(js)` polls a condition for up
   to 30 seconds and, when it gives up, names the condition and any page
   errors.
-- `errors()` is every console error and uncaught exception so far. End a
-  journey by asserting it is empty.
+- `errors()` is every console error, uncaught exception and Content Security
+  Policy violation so far. End a journey by asserting it is empty: a script or
+  handler the page's policy blocked fails the test there.
 - `RAHTI_BROWSER` names a browser executable when the search does not find
   one. Without a browser, `launch` answers `None` and the test returns early,
-  so the suite still passes on a machine that has none.
+  so the suite still passes on a machine that has none. Set
+  `RAHTI_BROWSER_REQUIRED=1` where the browser suite must run (CI, a release
+  check): a missing browser then fails the test instead of skipping it.
 
 Test a journey — sign in, act, check what the page shows — and use the
 browser for what only a browser can show; keep rules and data in the router

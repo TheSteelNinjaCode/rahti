@@ -1,17 +1,38 @@
 //! The grammar `html!` accepts, and the markup it produces.
 //!
-//! Every test here goes through [`parse`], which is everything the macro does
-//! before it emits Rust: what comes back is the list of writes, and joining it
-//! back together with [`show`] is the markup a page would send.
+//! Every test here writes a template, as an author does, and goes through the
+//! macro's own entry — the template lexer, then [`parse`] — which is everything
+//! the macro does before it emits Rust: what comes back is the list of writes,
+//! and joining it back together with [`show`] is the markup a page would send.
 
 use super::*;
 use proc_macro2::TokenStream;
 use std::str::FromStr;
 
-/// Parse a block, or fail the test with the message the author would see.
+/// The tokens `parse` reads for the template `html! {r##"{src}"##}`, or the
+/// message the template lexer refused it with.
+fn template(src: &str) -> Result<TokenStream, String> {
+    // A leading `@component <id>` stands for the directive `#[component]`
+    // writes in front of the template.
+    let (directive, src) = match src.strip_prefix("@component ") {
+        Some(rest) => {
+            let end = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(rest.len());
+            (format!("@component \"{}\" ", &rest[..end]), &rest[end..])
+        }
+        None => (String::new(), src),
+    };
+    let input =
+        TokenStream::from_str(&format!("{directive}r##\"{src}\"##")).expect("one template literal");
+    crate::template_tokens(input, "src/lib/widgets.rs", |_| (1, 1)).map_err(|e| e.msg)
+}
+
+/// Parse a template, or fail the test with the message the author would see.
 fn parse_ok(src: &str) -> Parsed {
-    let stream = TokenStream::from_str(src).expect("test source does not tokenize");
-    match parse(stream) {
+    let tokens =
+        template(src).unwrap_or_else(|msg| panic!("expected `{src}` to parse, got:\n{msg}"));
+    match parse(tokens) {
         Ok(parsed) => parsed,
         Err(err) => panic!("expected `{src}` to parse, got:\n{}", err.msg),
     }
@@ -46,7 +67,7 @@ fn show(ops: &[Op]) -> String {
                 }
             }
             Op::ScriptText(expr) => out.push_str(&format!("@{{{expr}}}")),
-            Op::Slot => out.push_str("<slot/>"),
+            Op::Slot | Op::DeferredSlot => out.push_str("<slot/>"),
             Op::Component(call) => {
                 out.push('<');
                 out.push_str(&call.name.to_string());
@@ -75,9 +96,12 @@ fn render(src: &str) -> String {
     show(&parse_ok(src).ops)
 }
 
-/// The message a block fails with, or a failure if it parsed.
+/// The message a template fails with, or a failure if it parsed.
 fn error(src: &str) -> String {
-    let stream = TokenStream::from_str(src).expect("test source does not tokenize");
+    let stream = match template(src) {
+        Ok(tokens) => tokens,
+        Err(msg) => return msg,
+    };
     match parse(stream) {
         Ok(parsed) => panic!(
             "expected `{src}` to fail, it rendered:\n{}",
@@ -119,7 +143,7 @@ fn hyphenated_tag_name() {
 fn void_element_gets_no_closing_tag() {
     assert_eq!(render("<div><br></div>"), "<div><br></div>");
     assert_eq!(
-        render("<div><img src=\"a.png\" /></div>"),
+        render(r#"<div><img src="a.png" /></div>"#),
         "<div><img src=\"a.png\"></div>"
     );
 }
@@ -144,7 +168,7 @@ fn doctype_is_emitted_verbatim() {
 #[test]
 fn string_attribute() {
     assert_eq!(
-        render("<a href=\"/users\">u</a>"),
+        render(r#"<a href="/users">u</a>"#),
         "<a href=\"/users\">u</a>"
     );
 }
@@ -152,7 +176,7 @@ fn string_attribute() {
 #[test]
 fn several_attributes_keep_their_order() {
     assert_eq!(
-        render("<input type=\"text\" name=\"q\" />"),
+        render(r#"<input type="text" name="q" />"#),
         "<input type=\"text\" name=\"q\">"
     );
 }
@@ -166,7 +190,7 @@ fn boolean_attribute() {
 #[test]
 fn non_string_literal_attribute_is_written_as_it_stands() {
     assert_eq!(
-        render("<div tabindex=0>x</div>"),
+        render(r#"<div tabindex="0">x</div>"#),
         "<div tabindex=\"0\">x</div>"
     );
 }
@@ -174,7 +198,7 @@ fn non_string_literal_attribute_is_written_as_it_stands() {
 #[test]
 fn hyphenated_and_numbered_attribute_names() {
     assert_eq!(
-        render("<div data-user-id=\"7\" aria-level-2=\"x\">y</div>"),
+        render(r#"<div data-user-id="7" aria-level-2="x">y</div>"#),
         "<div data-user-id=\"7\" aria-level-2=\"x\">y</div>"
     );
 }
@@ -182,7 +206,7 @@ fn hyphenated_and_numbered_attribute_names() {
 #[test]
 fn attribute_values_are_escaped() {
     assert_eq!(
-        render(r#"<div title="a \" b & c < d">x</div>"#),
+        render(r#"<div title='a " b & c < d'>x</div>"#),
         "<div title=\"a &quot; b &amp; c &lt; d\">x</div>"
     );
 }
@@ -193,18 +217,20 @@ fn attribute_values_are_escaped() {
 #[test]
 fn namespaced_attribute_names() {
     assert_eq!(
-        render("<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=\"#a\" /></svg>"),
+        render(
+            r##"<svg xmlns:xlink="http://www.w3.org/1999/xlink"><use xlink:href="#a" /></svg>"##
+        ),
         "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=\"#a\"></use></svg>"
     );
     assert_eq!(
-        render("<svg xml:space=\"preserve\">x</svg>"),
+        render(r#"<svg xml:space="preserve">x</svg>"#),
         "<svg xml:space=\"preserve\">x</svg>"
     );
 }
 
 #[test]
 fn a_namespace_prefix_with_nothing_after_it_is_refused() {
-    assert!(error("<svg xmlns:>x</svg>").contains("expected a name after `:`"));
+    assert!(error("<svg xmlns:>x</svg>").contains("`xmlns:` is not a name markup can carry"));
 }
 
 // ------------------------------------------------------------- boolean names
@@ -292,7 +318,7 @@ fn the_boolean_table_leaves_the_enumerated_ones_out() {
 #[test]
 fn a_spread_is_an_attribute_of_its_own() {
     assert_eq!(
-        render("<div class=\"a\" @{..extra}>x</div>"),
+        render(r#"<div class="a" @{..extra}>x</div>"#),
         "<div class=\"a\" @{..extra}>x</div>"
     );
 }
@@ -301,7 +327,7 @@ fn a_spread_is_an_attribute_of_its_own() {
 /// have to go through the same list for a later one to replace an earlier one.
 #[test]
 fn a_spread_takes_the_whole_tag_with_it() {
-    let parsed = parse_ok("<div class=\"a\" id=@{n} @{..extra}>x</div>");
+    let parsed = parse_ok(r#"<div class="a" id=@{n} @{..extra}>x</div>"#);
     let attrs = parsed
         .ops
         .iter()
@@ -321,7 +347,7 @@ fn a_spread_takes_the_whole_tag_with_it() {
 /// static markup, and only an `@{…}` value survives to runtime.
 #[test]
 fn a_tag_without_a_spread_builds_nothing() {
-    let parsed = parse_ok("<div class=\"a\" id=@{n}>x</div>");
+    let parsed = parse_ok(r#"<div class="a" id=@{n}>x</div>"#);
 
     assert!(!parsed.ops.iter().any(|op| matches!(op, Op::OpenTag(_))));
 }
@@ -330,13 +356,13 @@ fn a_tag_without_a_spread_builds_nothing() {
 fn a_spread_may_stand_alone_or_beside_a_binding() {
     assert_eq!(render("<div @{..extra}>x</div>"), "<div @{..extra}>x</div>");
     assert_eq!(
-        render("<div><button onclick={save()} @{..extra}>x</button></div>"),
+        render(r#"<div><button onclick="save()" @{..extra}>x</button></div>"#),
         "<div><button onclick=\"{save()}\" @{..extra}>x</button></div>"
     );
     // As the block's root, the button owns its `onclick`, so the tag built at
     // runtime is marked to refuse a handler the spread would bring.
     assert_eq!(
-        render("<button onclick={save()} @{..extra}>x</button>"),
+        render(r#"<button onclick="save()" @{..extra}>x</button>"#),
         "<button @owns-events onclick=\"{save()}\" @{..extra}>x</button>"
     );
 }
@@ -426,7 +452,7 @@ fn client_binding_is_copied_through_as_text() {
 #[test]
 fn client_binding_in_an_attribute_is_copied_through() {
     assert_eq!(
-        render("<button onclick={setCount(count + 1)}>+</button>"),
+        render(r#"<button onclick="setCount(count + 1)">+</button>"#),
         "<button onclick=\"{setCount(count + 1)}\">+</button>"
     );
 }
@@ -436,7 +462,7 @@ fn client_binding_in_an_attribute_is_copied_through() {
 #[test]
 fn client_binding_contents_are_not_interpreted() {
     assert_eq!(
-        render("<p>{user.name ?? \"anon\"}</p>"),
+        render(r#"<p>{user.name ?? "anon"}</p>"#),
         "<p>{user.name ?? &quot;anon&quot;}</p>".replace("&quot;", "\"")
     );
 }
@@ -444,7 +470,7 @@ fn client_binding_contents_are_not_interpreted() {
 #[test]
 fn expressions_may_be_arbitrary_rust() {
     assert_eq!(
-        render("<p>@{format!(\"{}-{}\", a, b)}</p>"),
+        render(r#"<p>@{format!("{}-{}", a, b)}</p>"#),
         "<p>@{format ! (\"{}-{}\" , a , b)}</p>"
     );
 }
@@ -461,7 +487,13 @@ fn bare_at_sign_is_text() {
 /// Indentation is the shape of the source, not of the page.
 #[test]
 fn a_newline_between_words_collapses_to_one_space() {
-    assert_eq!(render("<p>one\n   two</p>"), "<p>one two</p>");
+    assert_eq!(
+        render(
+            r#"<p>one
+   two</p>"#
+        ),
+        "<p>one two</p>"
+    );
 }
 
 /// A gap the author typed on one line survives, so `Hello <b>world</b>`
@@ -476,35 +508,40 @@ fn a_space_beside_a_tag_is_kept() {
 
 #[test]
 fn text_on_its_own_line_picks_up_no_space() {
-    assert_eq!(render("<p>\n    Hello\n</p>"), "<p>Hello</p>");
-}
-
-#[test]
-fn touching_tokens_stay_touching() {
-    assert_eq!(render("<p>100%</p>"), "<p>100%</p>");
-}
-
-/// Quoting keeps the spacing exactly, and is the way to write text the Rust
-/// lexer would refuse.
-#[test]
-fn quoted_text_is_kept_verbatim() {
     assert_eq!(
-        render("<p>\"  it's  spaced  \"</p>"),
-        "<p>  it's  spaced  </p>"
+        render(
+            r#"<p>
+    Hello
+</p>"#
+        ),
+        "<p>Hello</p>"
     );
 }
 
 #[test]
-fn raw_string_text() {
+fn adjacent_characters_stay_together() {
+    assert_eq!(render("<p>100%</p>"), "<p>100%</p>");
+}
+
+/// Spaces typed on one line are the author's, and stay as written.
+#[test]
+fn spaces_on_one_line_are_kept() {
+    assert_eq!(render("<p>  it's  spaced  </p>"), "<p>  it's  spaced  </p>");
+}
+
+/// A quote or an apostrophe in text is a character, not the start of a
+/// string.
+#[test]
+fn quotes_in_text_are_text() {
     assert_eq!(
-        render("<p>r#\"a \"quote\" here\"#</p>"),
+        render(r#"<p>a "quote" here</p>"#),
         "<p>a \"quote\" here</p>"
     );
 }
 
 #[test]
 fn text_is_escaped() {
-    assert_eq!(render("<p>\"1 < 2 > 0\"</p>"), "<p>1 &lt; 2 &gt; 0</p>");
+    assert_eq!(render("<p>1 &lt; 2 &gt; 0</p>"), "<p>1 &lt; 2 &gt; 0</p>");
 }
 
 /// `&amp;` is how you write an ampersand in HTML; escaping it again would put
@@ -512,7 +549,7 @@ fn text_is_escaped() {
 #[test]
 fn character_references_are_left_alone() {
     assert_eq!(
-        render("<p>\"a &amp; b &nbsp; &#160; &#x2014;\"</p>"),
+        render("<p>a &amp; b &nbsp; &#160; &#x2014;</p>"),
         "<p>a &amp; b &nbsp; &#160; &#x2014;</p>"
     );
 }
@@ -524,11 +561,11 @@ fn character_references_are_left_alone() {
 #[test]
 fn brace_references_are_sent_doubled() {
     assert_eq!(
-        render("<p>\"&#123;user&#125;\"</p>"),
+        render("<p>&#123;user&#125;</p>"),
         "<p>&amp;#123;user&amp;#125;</p>"
     );
     assert_eq!(
-        render("<p>\"&#x7B;a&#x7d; &lbrace;b&rbrace;\"</p>"),
+        render("<p>&#x7B;a&#x7d; &lbrace;b&rbrace;</p>"),
         "<p>&amp;#x7B;a&amp;#x7d; &amp;lbrace;b&amp;rbrace;</p>"
     );
 }
@@ -538,19 +575,19 @@ fn brace_references_are_sent_doubled() {
 #[test]
 fn a_brace_reference_in_an_attribute_is_escaped_once() {
     assert_eq!(
-        render("<p title=\"&#123;user&#125;\">x</p>"),
+        render(r#"<p title="&#123;user&#125;">x</p>"#),
         "<p title=\"&amp;#123;user&amp;#125;\">x</p>"
     );
 }
 
 #[test]
 fn a_bare_ampersand_is_escaped() {
-    assert_eq!(render("<p>\"Tom & Jerry\"</p>"), "<p>Tom &amp; Jerry</p>");
+    assert_eq!(render("<p>Tom & Jerry</p>"), "<p>Tom &amp; Jerry</p>");
     assert_eq!(
-        render("<p>\"a &notanentity b\"</p>"),
+        render("<p>a &notanentity b</p>"),
         "<p>a &amp;notanentity b</p>"
     );
-    assert_eq!(render("<p>\"a &amp b\"</p>"), "<p>a &amp;amp b</p>");
+    assert_eq!(render("<p>a &amp b</p>"), "<p>a &amp;amp b</p>");
 }
 
 // ---------------------------------------------------------------- raw text
@@ -677,28 +714,33 @@ fn style_keeps_at_braces_raw() {
     );
 }
 
-// ------------------------------------------------------- raw-string scripts
+// ------------------------------------------------------------------ scripts
 
-/// A script body written as one raw string is JavaScript verbatim: single
-/// quotes, template literals and comments, none of which survive the Rust
-/// lexer in a token-written body.
+/// A script body is JavaScript verbatim: single quotes, template literals and
+/// comments included.
 #[test]
-fn a_raw_string_script_is_javascript_verbatim() {
-    let out = render(r###"<script>r##"
+fn a_script_is_javascript_verbatim() {
+    let out = render(
+        r#"<script>
         // a comment that stays
         const greeting = 'hi';
         const line = `${greeting}, it's ${new Date().getFullYear()}`;
-    "##</script>"###);
+    </script>"#,
+    );
     assert!(out.contains("// a comment that stays"), "{out}");
     assert!(out.contains("const greeting = 'hi';"), "{out}");
-    assert!(out.contains("`${greeting}, it's ${new Date().getFullYear()}`"), "{out}");
+    assert!(
+        out.contains("`${greeting}, it's ${new Date().getFullYear()}`"),
+        "{out}"
+    );
     assert!(!out.contains("r##"), "{out}");
 }
 
-/// `@{expr}` is lifted out of a raw-string body the same way as from tokens.
+/// `@{expr}` in a script is a Rust value, lifted out of the JavaScript.
 #[test]
-fn a_raw_string_script_lifts_at_braces() {
-    let parsed = parse_ok(r##"<script>r#"const [n, setN] = pp.state(@{initial}); const s = 'ok';"#</script>"##);
+fn a_script_lifts_at_braces() {
+    let parsed =
+        parse_ok("<script>const [n, setN] = pp.state(@{initial}); const s = 'ok';</script>");
     let lifted = parsed
         .ops
         .iter()
@@ -713,38 +755,42 @@ fn a_raw_string_script_lifts_at_braces() {
 
 /// The end of an `@{…}` is found by counting braces, past Rust strings.
 #[test]
-fn a_raw_string_script_finds_the_end_of_a_nested_expression() {
-    let parsed = parse_ok(r##"<script>r#"const a = @{format!("{}}", Json(&x))}; const b = 1;"#</script>"##);
+fn a_script_finds_the_end_of_a_nested_expression() {
+    let parsed =
+        parse_ok(r#"<script>const a = @{format!("{}}", Json(&x))}; const b = 1;</script>"#);
     assert_eq!(
-        parsed.ops.iter().filter(|op| matches!(op, Op::ScriptText(_))).count(),
+        parsed
+            .ops
+            .iter()
+            .filter(|op| matches!(op, Op::ScriptText(_)))
+            .count(),
         1,
         "got ops: {:?}",
         parsed.ops
     );
-    assert!(show(&parsed.ops).ends_with("; const b = 1;</script>"), "{}", show(&parsed.ops));
+    assert!(
+        show(&parsed.ops).ends_with("; const b = 1;</script>"),
+        "{}",
+        show(&parsed.ops)
+    );
 }
 
 /// `@@{` is a literal `@{`, for the rare script that needs one.
 #[test]
-fn a_raw_string_script_escapes_a_literal_at_brace() {
-    let out = render(r##"<script>r#"const css = '@@{ not rust }';"#</script>"##);
+fn a_script_escapes_a_literal_at_brace() {
+    let out = render("<script>const css = '@@{ not rust }';</script>");
     assert!(out.contains("const css = '@{ not rust }';"), "{out}");
 }
 
 #[test]
-fn an_unclosed_at_brace_in_a_raw_string_script_is_an_error() {
-    let stream = TokenStream::from_str(r##"<script>r#"const a = @{x;"#</script>"##).unwrap();
-    let err = match parse(stream) {
-        Ok(_) => panic!("expected an error"),
-        Err(err) => err,
-    };
-    assert!(err.msg.contains("never closed"), "{}", err.msg);
+fn an_unclosed_at_brace_in_a_script_is_an_error() {
+    let msg = error("<script>const a = @{x;</script>");
+    assert!(msg.contains("never closed"), "{msg}");
 }
 
-/// A plain string body is ordinary JavaScript (an expression statement), so
-/// only raw strings switch to the verbatim form.
+/// A body that is one JavaScript string is still just JavaScript.
 #[test]
-fn a_plain_string_script_body_stays_a_token_body() {
+fn a_script_that_is_one_string_is_javascript() {
     let out = render(r#"<script>"use strict";</script>"#);
     assert_eq!(out, r#"<script>"use strict";</script>"#);
 }
@@ -752,7 +798,7 @@ fn a_plain_string_script_body_stays_a_token_body() {
 #[test]
 fn empty_script_body() {
     assert_eq!(
-        render("<script src=\"/js/main.js\"></script>"),
+        render(r#"<script src="/js/main.js"></script>"#),
         "<script src=\"/js/main.js\"></script>"
     );
 }
@@ -778,7 +824,7 @@ fn slot_takes_no_children() {
 
 #[test]
 fn slot_takes_no_attributes() {
-    assert!(error("<main><slot name=\"a\" /></main>").contains("takes no attributes"));
+    assert!(error(r#"<main><slot name="a" /></main>"#).contains("takes no attributes"));
 }
 
 // -------------------------------------------------------------- components
@@ -797,7 +843,7 @@ fn an_uppercase_tag_is_a_component() {
 
 #[test]
 fn component_props_keep_their_order_and_values() {
-    let parsed = parse_ok("<div><Card title=\"Profile\" count=3 wide flag=@{is_on} /></div>");
+    let parsed = parse_ok(r#"<div><Card title="Profile" count=3 wide flag=@{is_on} /></div>"#);
     let Some(Op::Component(call)) = parsed.ops.iter().find(|op| matches!(op, Op::Component(_)))
     else {
         panic!("expected a component op");
@@ -818,7 +864,7 @@ fn component_props_keep_their_order_and_values() {
 
 #[test]
 fn component_children_are_a_block_of_their_own() {
-    let parsed = parse_ok("<div><Card title=\"x\"><p>\"hi\"</p></Card></div>");
+    let parsed = parse_ok(r#"<div><Card title="x"><p>hi</p></Card></div>"#);
     let Some(Op::Component(call)) = parsed.ops.iter().find(|op| matches!(op, Op::Component(_)))
     else {
         panic!("expected a component op");
@@ -858,7 +904,7 @@ fn multi_rooted_children_offer_no_name_slot() {
 #[test]
 fn components_nest() {
     assert_eq!(
-        render("<div><Panel title=\"a\"><Badge label=\"b\" /></Panel></div>"),
+        render(r#"<div><Panel title="a"><Badge label="b" /></Panel></div>"#),
         "<div><Panel title=\"a\"><Badge label=\"b\"/></Panel></div>"
     );
 }
@@ -883,7 +929,7 @@ fn a_component_does_not_disturb_the_outer_root() {
 /// handler on the button.
 #[test]
 fn a_client_binding_prop_is_carried_as_source() {
-    let parsed = parse_ok("<div><Button onclick={setCount(count + 1)}>x</Button></div>");
+    let parsed = parse_ok(r#"<div><Button onclick="{setCount(count + 1)}">x</Button></div>"#);
     let Some(Op::Component(call)) = parsed.ops.iter().find(|op| matches!(op, Op::Component(_)))
     else {
         panic!("expected a component call in {:?}", parsed.ops);
@@ -899,7 +945,7 @@ fn a_client_binding_prop_is_carried_as_source() {
 /// Rust props and client bindings on the same tag stay in their own lanes.
 #[test]
 fn a_tag_may_carry_both_kinds_of_prop() {
-    let parsed = parse_ok(r#"<Button variant="outline" onclick={save()} />"#);
+    let parsed = parse_ok(r#"<Button variant="outline" onclick="{save()}" />"#);
     let [Op::Component(call)] = parsed.ops.as_slice() else {
         panic!("expected one component call in {:?}", parsed.ops);
     };
@@ -916,7 +962,7 @@ fn a_tag_may_carry_both_kinds_of_prop() {
 /// the way a React component returns another component.
 #[test]
 fn a_component_tag_may_be_the_root() {
-    let parsed = parse_ok("<Card title=\"x\" />");
+    let parsed = parse_ok(r#"<Card title="x" />"#);
     assert!(matches!(parsed.ops.as_slice(), [Op::Component(_)]));
     assert!(
         parsed.component_slot.is_none(),
@@ -927,7 +973,7 @@ fn a_component_tag_may_be_the_root() {
 
 #[test]
 fn a_composition_root_takes_children() {
-    let parsed = parse_ok("<Panel title=\"x\"><p>\"hi\"</p></Panel>");
+    let parsed = parse_ok(r#"<Panel title="x"><p>hi</p></Panel>"#);
     let [Op::Component(call)] = parsed.ops.as_slice() else {
         panic!("expected one component op, got {:?}", parsed.ops);
     };
@@ -940,7 +986,7 @@ fn a_composition_root_takes_children() {
 
 #[test]
 fn a_component_root_beside_an_element_is_rejected() {
-    let msg = error("<Card title=\"x\" /><div>y</div>");
+    let msg = error(r#"<Card title="x" /><div>y</div>"#);
     assert!(msg.contains("single parent element"), "{msg}");
     assert!(msg.contains("<Card>, <div>"), "{msg}");
 }
@@ -962,7 +1008,7 @@ fn a_doctype_does_not_precede_a_component_root() {
 /// A component named `Html` is a component, not the document element.
 #[test]
 fn a_component_named_html_is_not_a_document() {
-    let parsed = parse_ok("<Html lang=\"en\" />");
+    let parsed = parse_ok(r#"<Html lang="en" />"#);
     assert!(!parsed.renders_document);
 }
 
@@ -984,7 +1030,7 @@ fn an_uppercase_tag_with_a_hyphen_is_refused() {
 
 #[test]
 fn a_prop_needs_a_usable_value() {
-    assert!(error("<div><Card title= /></div>").contains("needs a literal or `@{expr}`"));
+    assert!(error("<div><Card title= /></div>").contains("`title=` has no value"));
 }
 
 // --------------------------------------------------------------- fragments
@@ -1121,29 +1167,27 @@ fn closing_tag_without_an_opening_one() {
 
 #[test]
 fn unterminated_tag() {
-    assert!(error("<div class=\"a\"").contains("unterminated tag"));
+    assert!(error("<div class=\"a\"").contains("`<div` is never finished"));
 }
 
-/// A `<` always opens a tag, exactly as in HTML.
+/// A `<` that opens nothing is text, and is escaped on the way out.
 #[test]
-fn a_less_than_sign_in_text_must_be_written_out() {
-    let msg = error("<p>a < 2</p>");
-    assert!(msg.contains("expected a tag name after `<`"), "{msg}");
-    assert!(msg.contains("&lt;"), "{msg}");
+fn a_less_than_sign_before_a_space_is_text() {
+    assert_eq!(render("<p>a < 2</p>"), "<p>a &lt; 2</p>");
 }
 
-/// `a < b` reads as the tag `<b`, so the block fails on what follows it
-/// rather than on the `<` itself. The hint above is the one that explains
-/// this, and this input does not reach it.
+/// `a <b` opens the tag `<b`, exactly as in HTML, which is never closed
+/// here. A literal `<` before a letter is written `&lt;`.
 #[test]
-fn a_less_than_sign_before_a_word_fails_further_along() {
-    let msg = error("<p>a < b</p>");
-    assert!(msg.contains("expected an attribute name"), "{msg}");
+fn a_less_than_sign_before_a_word_opens_a_tag() {
+    let msg = error("<p>a <b</p>");
+    assert!(msg.contains("<b"), "{msg}");
+    assert_eq!(render("<p>a &lt;b</p>"), "<p>a &lt;b</p>");
 }
 
 #[test]
 fn attribute_without_a_usable_value() {
-    assert!(error("<div class=>x</div>").contains("needs a string literal"));
+    assert!(error("<div class=>x</div>").contains("`class=` has no value"));
 }
 
 #[test]
@@ -1160,13 +1204,13 @@ fn unterminated_doctype() {
 
 #[test]
 fn a_hand_written_component_name_is_recorded() {
-    let parsed = parse_ok("<div pp-component=\"my_block\">x</div>");
+    let parsed = parse_ok(r#"<div pp-component="my_block">x</div>"#);
     assert!(parsed.declares_component);
 }
 
 #[test]
 fn a_component_name_must_be_a_javascript_identifier() {
-    let msg = error("<div pp-component=\"my-block\">x</div>");
+    let msg = error(r#"<div pp-component="my-block">x</div>"#);
     assert!(msg.contains("not a valid JavaScript identifier"), "{msg}");
     // The suggestion has to be usable as written.
     assert!(msg.contains("`my_block`"), "{msg}");
@@ -1175,14 +1219,14 @@ fn a_component_name_must_be_a_javascript_identifier() {
 #[test]
 fn a_reserved_word_is_not_a_component_name() {
     assert!(
-        error("<div pp-component=\"class\">x</div>").contains("not a valid JavaScript identifier")
+        error(r#"<div pp-component="class">x</div>"#).contains("not a valid JavaScript identifier")
     );
 }
 
 /// `#[component]` writes this in front of the markup; nobody types it.
 #[test]
 fn the_component_directive_names_the_block() {
-    let parsed = parse_ok("@component \"user_card_3b91f0ae\" <article>x</article>");
+    let parsed = parse_ok("@component user_card_3b91f0ae<article>x</article>");
     assert_eq!(
         parsed.forced_component.as_deref(),
         Some("user_card_3b91f0ae")
@@ -1192,7 +1236,7 @@ fn the_component_directive_names_the_block() {
 
 #[test]
 fn the_root_element_offers_a_slot_for_its_name() {
-    let parsed = parse_ok("<article class=\"card\">x</article>");
+    let parsed = parse_ok(r#"<article class="card">x</article>"#);
     let (index, offset, kind) = parsed
         .component_slot
         .expect("the root element takes a name");
@@ -1327,12 +1371,167 @@ fn suggest_identifier_offers_something_usable() {
     ));
 }
 
-/// A root cannot own one handler and take another from a Rust value: one
-/// element has one event owner, and nothing at compile time says whose the
-/// value's handler is.
+// ---------------------------------------------- server values in client code
+
+/// A server value as a native handler: the browser decodes the HTML escaping
+/// before the handler runs, so the value could end its string and execute.
 #[test]
-fn an_owned_root_handler_beside_a_rust_valued_one_is_refused() {
-    let msg = error("<form onsubmit={save(event)} onclick=@{handler}>x</form>");
-    assert!(msg.contains("one element has one event owner"), "{msg}");
-    assert!(msg.contains("onclick"), "{msg}");
+fn a_server_value_cannot_be_a_handler() {
+    for src in [
+        "<button onclick=@{handler}>x</button>",
+        r#"<form onsubmit="save(event)" onclick=@{handler}>x</form>"#,
+    ] {
+        let msg = error(src);
+        assert!(
+            msg.contains("makes a server value a JavaScript handler"),
+            "{msg}"
+        );
+        assert!(msg.contains("@{Json(&name)}"), "{msg}");
+    }
+}
+
+/// `@{…}` inside a client binding is copied through as browser source, never
+/// interpolated — in text, in an attribute, nested in a call, or quoted in a
+/// handler.
+#[test]
+fn a_server_value_inside_client_code_is_refused() {
+    for src in [
+        "<p>{greet(@{name})}</p>",
+        r#"<p title="{label + @{suffix}}">x</p>"#,
+        "<p>{items.filter((i) => i.id === @{id})}</p>",
+    ] {
+        let msg = error(src);
+        assert!(msg.contains("is not interpolated"), "{src}: {msg}");
+    }
+    let msg = error(r#"<button onclick="pick(@{id})">x</button>"#);
+    assert!(msg.contains("quoted `onclick` handler"), "{msg}");
+}
+
+/// The refusals must not catch the ordinary forms around them.
+#[test]
+fn server_values_beside_client_code_still_parse() {
+    parse_ok(r#"<button onclick="pick(id)" title=@{name}>@{label}</button>"#);
+    parse_ok(r#"<p data-email="a@b.c" on-select="{choose}">{user.email}</p>"#);
+    parse_ok(r#"<input value="{draft}" oninput="setDraft(event.target.value)" />"#);
+}
+
+// ---------------------------------------------------------------- context
+
+/// A context provider is a lowercase `<token.provider>` tag, the form the
+/// runtime reads; the dot is part of the tag name, closing tag included.
+#[test]
+fn a_context_provider_tag_keeps_its_dotted_name() {
+    let out = render(
+        r#"<section><themecontext.provider value="{theme}"><p>in</p></themecontext.provider></section>"#,
+    );
+    assert!(
+        out.contains("<themecontext.provider value=\"{theme}\">"),
+        "{out}"
+    );
+    assert!(out.contains("</themecontext.provider>"), "{out}");
+}
+
+#[test]
+fn a_provider_tag_must_close_with_the_same_name() {
+    error(r#"<section><themecontext.provider value="{theme}"></themecontext></section>"#);
+}
+
+// ------------------------------------------------- authoring refusals
+
+fn refusal(src: &str) -> String {
+    let stream = match template(src) {
+        Ok(tokens) => tokens,
+        Err(msg) => return msg,
+    };
+    match parse(stream) {
+        Ok(_) => panic!("expected `{src}` to be refused"),
+        Err(err) => err.msg,
+    }
+}
+
+/// A binding renders text; JSX markup inside one is refused with the
+/// PulsePoint form to write instead.
+#[test]
+fn jsx_markup_in_a_binding_is_refused() {
+    for src in [
+        "<div>{open && <p>hi</p>}</div>",
+        "<ul>{items.map(i => <li>{i}</li>)}</ul>",
+        "<div>{open ? <br/> : null}</div>",
+        r#"<div title="{open && <b>x</b>}"></div>"#,
+    ] {
+        let msg = refusal(src);
+        assert!(msg.contains("renders text, never elements"), "{src}: {msg}");
+        assert!(msg.contains("pp-for"), "{msg}");
+    }
+}
+
+/// Comparisons, arrows, division and strings are ordinary JavaScript.
+#[test]
+fn ordinary_expressions_are_not_mistaken_for_jsx() {
+    for src in [
+        "<p>{a < b ? \"less\" : \"more\"}</p>",
+        "<p>{a <= b && c >= d}</p>",
+        "<p>{(total / 2) > limit}</p>",
+        "<p>{items.filter((i) => i.done).length}</p>",
+        "<p>{\"</not a tag>\"}</p>",
+        r#"<p hidden="{count < max}"></p>"#,
+    ] {
+        parse_ok(src);
+    }
+}
+
+#[test]
+fn jsx_attribute_names_are_refused_with_the_html_name() {
+    for (src, html) in [
+        ("<div className=\"card\"></div>", "class"),
+        ("<label htmlFor=\"x\"></label>", "for"),
+        ("<button onClick={save()}></button>", "onclick"),
+        ("<input defaultValue={name} />", "defaultvalue"),
+        ("<input defaultChecked={on} />", "defaultchecked"),
+    ] {
+        let msg = refusal(src);
+        assert!(msg.contains(&format!("write `{html}`")), "{src}: {msg}");
+    }
+    assert!(refusal(r#"<div dangerouslySetInnerHTML="{x}"></div>"#).contains("Html::from_raw"));
+}
+
+/// SVG's camelCase attributes are real HTML, not JSX.
+#[test]
+fn svg_attributes_keep_their_case() {
+    parse_ok(r#"<svg viewBox="0 0 10 10" preserveAspectRatio="none"></svg>"#);
+}
+
+#[test]
+fn invented_directives_are_refused() {
+    for (directive, hint) in [
+        ("pp-if", "hidden={…}"),
+        ("pp-show", "hidden={…}"),
+        ("pp-model", "oninput"),
+        ("pp-class", "class={…}"),
+        ("pp-key", "key={…}"),
+        ("pp-context", "<token.provider"),
+    ] {
+        let msg = refusal(&format!("<div {directive}={{x}}></div>"));
+        assert!(
+            msg.contains("is not a PulsePoint directive"),
+            "{directive}: {msg}"
+        );
+        assert!(msg.contains(hint), "{directive}: {msg}");
+    }
+}
+
+#[test]
+fn pp_for_goes_only_on_a_template() {
+    let msg = refusal(r#"<ul><li pp-for="item in items">{item}</li></ul>"#);
+    assert!(msg.contains("only on a `<template>`"), "{msg}");
+    parse_ok(
+        r#"<ul><template pp-for="item in items"><li key="{item}">{item}</li></template></ul>"#,
+    );
+}
+
+#[test]
+fn a_style_object_is_refused_for_css_text() {
+    let msg = refusal(r#"<p style="{{color: 'red'}}"></p>"#);
+    assert!(msg.contains("takes CSS text, not an object"), "{msg}");
+    parse_ok(r#"<p pp-style="{'color: ' + color}"></p>"#);
 }

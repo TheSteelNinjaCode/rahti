@@ -19,50 +19,59 @@ use axum::middleware::map_response;
 use axum::response::Response;
 use axum::routing::get;
 use http_body_util::BodyExt;
-use rahti::{Error, ErrorInfo, Html, html};
+use rahti::{Bindings, Error, ErrorInfo, Html, component, html};
 use tower::ServiceExt;
 
 // ------------------------------------------------------------ the app
 
 /// The document shell, as `app/layout.rs` writes it.
 fn layout(children: Html) -> Html {
-    html! {
+    html! {r##"
         <html lang="en">
             <body class="app">
                 <slot />
             </body>
         </html>
-    }
+    "##}
 }
 
 /// A section wrapper, as a nested `layout.rs` writes it.
 fn section_layout(children: Html) -> Html {
-    html! {
+    html! {r##"
         <main class="section">
             <slot />
         </main>
-    }
+    "##}
 }
 
 /// The nearest boundary, as `error.rs` writes it.
 fn boundary(error: ErrorInfo) -> Html {
-    html! {
+    html! {r##"
         <section class="error">
             <h1>@{error.reason()}</h1>
             <p>@{error.message()}</p>
         </section>
-    }
+    "##}
+}
+
+/// A component taking its tag's `{…}` props, as `Bindings`.
+#[component]
+fn Button(bindings: Bindings, children: Html) -> Html {
+    html! {r##"<button class="btn" @{..bindings}><slot /></button>"##}
 }
 
 async fn users() -> Html {
     let name = "Ada & <Lovelace>";
-    html! {
+    let note = "{steal()}";
+    html! {r##"
         <section class="users">
             <h1>Users</h1>
             <p title=@{name}>@{name}</p>
             <p>Seen {count} times</p>
+            <p class="note" data-note=@{note}>@{note}</p>
+            <Button onclick="{save()}">Save</Button>
         </section>
-    }
+    "##}
 }
 
 async fn missing() -> rahti::Result {
@@ -156,6 +165,29 @@ async fn interpolated_values_are_escaped() {
     );
     assert!(body.contains(">Ada &amp; &lt;Lovelace&gt;</p>"), "{body}");
     assert!(!body.contains("<Lovelace>"), "{body}");
+}
+
+/// A value's braces are references, never a client expression, and inside
+/// the root layout's slot they ride one encoding layer up so the browser's
+/// parse of the deferred template leaves the reference for the runtime.
+#[tokio::test]
+async fn a_value_cannot_open_a_client_expression() {
+    let (_, body, _) = get_url("/users").await;
+    assert!(
+        body.contains(
+            "<p class=\"note\" data-note=\"&amp;#123;steal()&amp;#125;\">&amp;#123;steal()&amp;#125;</p>"
+        ),
+        "{body}"
+    );
+    assert!(!body.contains("{steal()}"), "{body}");
+}
+
+/// A component tag's `{…}` props reach the element the component renders,
+/// as live source.
+#[tokio::test]
+async fn bindings_put_a_callers_handler_on_the_element() {
+    let (_, body, _) = get_url("/users").await;
+    assert!(body.contains("onclick=\"save()\""), "{body}");
 }
 
 /// A `{…}` binding belongs to the client runtime: it is still in the HTML,

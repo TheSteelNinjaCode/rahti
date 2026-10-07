@@ -432,8 +432,8 @@ fn config_of(db: Option<Backend>, mcp: bool) -> Result<Config, String> {
 
 /// A project's manifest and `.env` are brought up to what its config says,
 /// so the files this command just wrote actually compile and run. Driven by
-/// the config rather than by what this run added, which is what makes it
-/// repair a project an older `cargo rahti upgrade` left half-wired.
+/// the config rather than by what this run added, which is what makes a
+/// second run repair whatever a first one left half-wired.
 #[test]
 fn the_manifest_and_env_are_wired_to_the_config() {
     let root = std::env::temp_dir().join(format!("cargo-rahti-wire-{}", std::process::id()));

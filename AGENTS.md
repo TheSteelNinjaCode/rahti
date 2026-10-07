@@ -35,7 +35,11 @@ application, which is the perspective every rule below serves.
 | Cache stores, page caching, expiration, invalidation | `docs/conventions/caching.md` |
 | Locales, Fluent catalogs, fallback, localized routes, language direction | `docs/conventions/localization.md` |
 | Typed input rules, field errors, HTTP 422 validation failures | `docs/conventions/validation.md` |
-| Browser state, hooks, bindings, events, lists, refs, SPA navigation, native web APIs (WebGPU, Workers, WebAssembly) | `docs/conventions/pulsepoint.md` |
+| PulsePoint markup: not JSX, the closed directive and API list, bindings, events, forms, conditionals, lists, props | `docs/conventions/pulsepoint.md` |
+| Every `pp.*` hook with an example: `pp.event`, effects, context, refs, portals, error boundaries, external stores | `docs/conventions/pulsepoint-hooks.md` |
+| Slow inputs or lists, re-renders, keyed rows, identity, splitting a large page | `docs/conventions/pulsepoint-performance.md` |
+| WebGPU, Canvas/WebGL, workers, WebAssembly, media, third-party libraries, games and widgets (DOM ownership) | `docs/conventions/pulsepoint-web-apis.md` |
+| SPA navigation, scroll, loading regions, `pp.redirect` | `docs/conventions/pulsepoint-navigation.md` |
 | Browser/backend development diagnostics and `.rahti/dev.log` | `docs/conventions/diagnostics.md` |
 | `#[rpc]`, errors, component RPCs, streams, files | `docs/conventions/rpc-and-uploads.md` |
 | WebSockets: `#[socket]`, `pp.socket`, the optional `ws` feature | `docs/conventions/websockets.md` |
@@ -75,13 +79,23 @@ preserve them, and documentation or scaffold changes must teach them.
    `error.rs`; a navigation loading region is `loading.rs`; the root 404 is
    `not-found.rs`; an unwrapped API endpoint is `route.rs`. A route segment
    cannot contain both `page.rs` and `route.rs`.
-4. `html!` has one authored root: a literal element, a single component tag,
-   or a `<>…</>` fragment. The root layout is the exception: it writes a
+4. A template is one raw string of HTML, `html! {r##"…"##}` — the only form
+   `html!` accepts. Text, JavaScript and CSS go in exactly as written (no
+   quoted text, no lexer rules); a binding is a whole quoted attribute value,
+   `hidden="{!open}"`; a handler is quoted JavaScript, `onclick="save()"`; a
+   server value is unquoted, `href=@{url}`. A template nested in `@{…}` uses
+   one fewer `#` (`html! {r#"…"#}`). `html!` reports its own refusals at the
+   exact `file:line:column`, but a Rust error inside `@{…}` lands on the
+   template's first line. `html!` has one authored root: a literal element, a
+   single component tag, or a `<>…</>` fragment. The root layout is the exception: it writes a
    literal `<html>` root, optionally preceded by a doctype.
 5. Server values use `@{rust_expression}`. PulsePoint/browser expressions use
    `{javascript_expression}`. Never interchange the two.
-6. Text in `html!` is authored as quoted Rust strings. Runtime values are
-   escaped; `Html::from_raw` is only for explicitly trusted markup.
+6. Runtime values are escaped, braces included (`&#123;`), so no value can
+   open a PulsePoint expression; `Html::from_raw` is only for explicitly
+   trusted markup, whose braces stay live. A component forwards its tag's
+   `{…}` props through a `bindings: Bindings` parameter, the only spread
+   whose braces stay live.
 7. An `@{…}` attribute value decides whether its attribute is written at all.
    `Option::None` writes none, and a `bool` on one of the names HTML reads by
    presence writes `name=""` or nothing. That list lives in `rahti-macros`'
@@ -239,7 +253,10 @@ preserve them, and documentation or scaffold changes must teach them.
 36. The generated router applies security headers once around every response,
     with rate limiting and the application pipeline in their documented
     order. Applications customize policies during startup rather than editing
-    generated code or bypassing framework boundaries.
+    generated code or bypassing framework boundaries. `script-src` is
+    `'self' 'unsafe-eval'`: keep `'unsafe-eval'` (the runtime compiles with
+    `new Function`), name a vendor SDK's exact host, and never add `https:`
+    or `'unsafe-inline'`, either of which lets injected markup run script.
 37. Production observability owns request correlation, bounded events and
     metrics, plus liveness/readiness routes. Error handling preserves RPC
     shapes, uses Problem Details elsewhere, redacts private production
@@ -264,16 +281,27 @@ preserve them, and documentation or scaffold changes must teach them.
     data arrives through `#[rpc]`/`pp.rpc`, displayed values go in
     `pp.state`, the device or worker handle goes in `pp.ref`, and a
     `pp.effect` acquires it, feeds it, and releases it in its cleanup. See
-    "Native Web APIs" in `docs/conventions/pulsepoint.md`.
-42. Write a `<script>` longer than a few lines as one raw string,
-    `<script>r#"…"#</script>`: it reaches the browser exactly as written —
-    single quotes, template literals and comments included — and `@{expr}`
-    is still interpolated. A token-written script must survive the Rust
-    lexer, which rejects `'text'` and backticks and drops comments. A
-    function handed to a library or a long-lived listener is wrapped in
-    `pp.event(…)` so it reads current state. A library mounts into an empty
-    element of its own, `<div pp-ref={host}></div>`; re-renders leave its
-    children and the attributes it sets alone.
+    `docs/conventions/pulsepoint-web-apis.md`.
+42. A `<script>` body is JavaScript exactly as written — comments, single
+    quotes and template literals included — with `@{expr}` interpolated
+    (`@@{` is a literal `@{`). A function handed to a library or a
+    long-lived listener is wrapped in `pp.event(…)` so it reads current
+    state. A library mounts into an empty element of its own,
+    `<div pp-ref="{host}"></div>`; re-renders leave its children and the
+    attributes it sets alone.
+43. PulsePoint markup is HTML with `{…}` bindings, never JSX: a binding
+    renders text, a condition is `hidden="{…}"` on the element, a list is
+    `<template pp-for="item in items">` with a `key` on the row, and a form
+    submit sends `Object.fromEntries(new FormData(event.currentTarget))`
+    through `pp.rpc`. The directive, hook and utility lists in
+    `docs/conventions/pulsepoint.md` are closed. `html!` refuses JSX markup
+    in a binding, JSX attribute names, `pp-for` off a `<template>`,
+    directives that do not exist, an unquoted binding, and a server value
+    inside client code (`onclick=@{…}`, `@{…}` within a `{…}` binding or a
+    quoted value) (`crates/rahti-macros/src/authoring.rs`,
+    `crates/rahti-macros/src/template.rs`); a refusal names the form to
+    write, and a new one lands with tests for the refusal and for the
+    ordinary code it must not catch.
 
 ## Repository Map
 

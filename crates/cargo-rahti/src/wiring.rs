@@ -189,63 +189,89 @@ fn declares_feature(value: &str, feature: &str) -> bool {
 /// compiles, runs locally on its configured port, and quietly does none of
 /// what the new files say it does.
 ///
-/// `Ok(None)` when there is nothing to do: no such dependency, a path
-/// dependency (a `--local` checkout, which a version would break), a pin that
-/// is already `current` or newer, or a requirement the author wrote to float
-/// on its own. `Err` names a shape this will not guess at, for the caller to
-/// print.
+/// Every pin of `name` moves, in every dependency table — `[dependencies]`,
+/// `[dev-dependencies]` (where a test-only feature such as `browser-test`
+/// declares the crate a second time), `[build-dependencies]`, and their
+/// `[target.….dependencies]` forms — because two pins of one crate at two
+/// versions do not resolve. The version returned is the first one moved.
+///
+/// `Ok(None)` when there is nothing to do: no such dependency, path
+/// dependencies only (a `--local` checkout or a `[patch]`, which a version
+/// would break), pins already `current` or newer, or requirements the author
+/// wrote to float on their own. `Err` names a shape this will not guess at,
+/// for the caller to print.
 pub fn with_version(
     manifest: &str,
     name: &str,
     current: &str,
 ) -> Result<Option<(String, String)>, String> {
-    if manifest
-        .lines()
-        .any(|l| l.trim() == format!("[dependencies.{name}]"))
-    {
-        return Err(format!(
-            "`{name}` is declared as a [dependencies.{name}] table"
-        ));
-    }
-
-    // The whole key, with only an `=` after it — so `rahti-build` is not
-    // found while looking for `rahti`.
-    let Some(at) = manifest.lines().position(|l| {
-        l.trim_start()
-            .strip_prefix(name)
-            .is_some_and(|rest| rest.trim_start().starts_with('='))
-    }) else {
-        return Ok(None);
-    };
-
     let mut lines: Vec<String> = manifest.lines().map(str::to_string).collect();
-    let line = &lines[at];
-    let (key, value) = line.split_once('=').expect("the line was found by its `=`");
-    let value = value.trim();
+    let mut table = String::new();
+    let mut first_moved: Option<String> = None;
 
-    if value.starts_with('{') && !value.ends_with('}') {
-        return Err(format!("the `{name}` dependency spans more than one line"));
-    }
-    // A checkout is the one pin that must not become a version: a project made
-    // with `--local` exists to test an unpublished framework.
-    if value.contains("path") {
-        return Ok(None);
+    for index in 0..lines.len() {
+        let trimmed = lines[index].trim();
+        if trimmed.starts_with('[') {
+            table = trimmed.trim_matches(|c| c == '[' || c == ']').to_string();
+            if table.ends_with(&format!("dependencies.{name}")) {
+                return Err(format!("`{name}` is declared as a [{table}] table"));
+            }
+            continue;
+        }
+        if !is_dependency_table(&table) {
+            continue;
+        }
+        // The whole key, with only an `=` after it — so `rahti-build` is not
+        // found while looking for `rahti`.
+        let Some(rest) = lines[index].trim_start().strip_prefix(name) else {
+            continue;
+        };
+        if !rest.trim_start().starts_with('=') {
+            continue;
+        }
+
+        let (key, value) = lines[index]
+            .split_once('=')
+            .map(|(k, v)| (k.to_string(), v.trim().to_string()))
+            .expect("the line was found by its `=`");
+        if value.starts_with('{') && !value.ends_with('}') {
+            return Err(format!(
+                "the `{name}` dependency in [{table}] spans more than one line"
+            ));
+        }
+        // A checkout is the one pin that must not become a version: a project
+        // made with `--local` exists to test an unpublished framework.
+        if value.contains("path") {
+            continue;
+        }
+        let Some(pinned) = pinned_version(&value) else {
+            continue;
+        };
+        if !is_older(&pinned, current) {
+            continue;
+        }
+        lines[index] = format!("{key}= {}", value.replacen(&pinned, current, 1));
+        first_moved.get_or_insert(pinned);
     }
 
-    let Some(pinned) = pinned_version(value) else {
+    let Some(pinned) = first_moved else {
         return Ok(None);
     };
-    if !is_older(&pinned, current) {
-        return Ok(None);
-    }
-
-    lines[at] = format!("{key}= {}", value.replacen(&pinned, current, 1));
-
     let mut out = lines.join("\n");
     if manifest.ends_with('\n') {
         out.push('\n');
     }
     Ok(Some((out, pinned)))
+}
+
+/// A Cargo table that declares dependencies: `dependencies`,
+/// `dev-dependencies`, `build-dependencies`, or any of them under
+/// `target.<cfg>`. Not `workspace.dependencies` or `patch.*`, which say
+/// something else about a crate than "this project uses this version".
+fn is_dependency_table(table: &str) -> bool {
+    let last = table.rsplit('.').next().unwrap_or(table);
+    let kind = matches!(last, "dependencies" | "dev-dependencies" | "build-dependencies");
+    kind && (table == last || table.starts_with("target."))
 }
 
 /// The version inside a dependency value, in either form the scaffold writes:

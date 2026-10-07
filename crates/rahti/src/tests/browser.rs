@@ -39,7 +39,9 @@ async fn page() -> Option<(Browser, String)> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_click_is_a_trusted_click_that_changes_the_page() {
-    let Some((mut browser, url)) = page().await else { return };
+    let Some((mut browser, url)) = page().await else {
+        return;
+    };
     browser.goto(&url).await.unwrap();
 
     browser.click("#count").await.unwrap();
@@ -57,7 +59,9 @@ async fn a_click_is_a_trusted_click_that_changes_the_page() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn keys_and_mouse_movement_reach_the_page() {
-    let Some((mut browser, url)) = page().await else { return };
+    let Some((mut browser, url)) = page().await else {
+        return;
+    };
     browser.goto(&url).await.unwrap();
 
     browser.press("Escape").await.unwrap();
@@ -81,12 +85,17 @@ async fn keys_and_mouse_movement_reach_the_page() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn console_errors_are_collected() {
-    let Some((mut browser, url)) = page().await else { return };
+    let Some((mut browser, url)) = page().await else {
+        return;
+    };
     browser.goto(&url).await.unwrap();
     // An evaluation after load, so the error's event has arrived.
     let _: bool = browser.eval("true").await.unwrap();
     assert!(
-        browser.errors().iter().any(|e| e.text.contains("a deliberate error")),
+        browser
+            .errors()
+            .iter()
+            .any(|e| e.text.contains("a deliberate error")),
         "{:?}",
         browser.console()
     );
@@ -109,10 +118,15 @@ async fn console_errors_are_collected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn failures_say_what_went_wrong() {
-    let Some((mut browser, url)) = page().await else { return };
+    let Some((mut browser, url)) = page().await else {
+        return;
+    };
     browser.goto(&url).await.unwrap();
 
-    let thrown = browser.eval::<Value>("missingFunction()").await.unwrap_err();
+    let thrown = browser
+        .eval::<Value>("missingFunction()")
+        .await
+        .unwrap_err();
     assert!(thrown.0.contains("missingFunction"), "{thrown}");
 
     let missing = browser.click("#nothing-here").await.unwrap_err();
@@ -125,4 +139,58 @@ async fn failures_say_what_went_wrong() {
     assert!(waited.0.contains("never became true"), "{waited}");
 
     assert!(Key::of("NotAKey").is_err());
+}
+
+/// `RAHTI_BROWSER_REQUIRED` turns a missing browser from a skip into a
+/// failure; empty and `0` leave it a skip.
+#[test]
+fn a_required_browser_is_any_value_but_empty_or_zero() {
+    assert!(!required_by(None));
+    assert!(!required_by(Some("")));
+    assert!(!required_by(Some("0")));
+    assert!(required_by(Some("1")));
+    assert!(required_by(Some("true")));
+}
+
+/// A script the page's Content Security Policy blocks is an error a test sees:
+/// the browser reports it outside the console, and `errors()` collects it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_content_security_policy_violation_is_an_error() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                [("content-security-policy", "script-src 'self'")],
+                Html(
+                    "<button id=b onclick=\"console.log('ran')\">b</button>\
+                      <script>console.log('inline ran')</script>",
+                ),
+            )
+        }),
+    );
+    let addr = serve(app).await;
+    let Some(mut browser) = Browser::launch().await.expect("the browser starts") else {
+        return;
+    };
+    browser.goto(&format!("http://{addr}/")).await.unwrap();
+    browser.click("#b").await.unwrap();
+    browser.wait_for("true").await.unwrap();
+
+    let errors = browser.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.text.contains("Executing inline script violates")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.text.contains("Executing inline event handler violates")),
+        "{errors:?}"
+    );
+    assert!(
+        !browser.console().iter().any(|e| e.text.contains("ran")),
+        "a blocked script ran"
+    );
 }

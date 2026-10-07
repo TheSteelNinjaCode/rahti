@@ -10,11 +10,11 @@ bundler, no JavaScript build step.
 use crate::rahti::{Html, html, rpc};
 
 pub async fn page() -> Html {
-    html! {
+    html! {r##"
         <section class="page">
-            <h1 class="title">"Hello"</h1>
+            <h1 class="title">Hello</h1>
 
-            <button class="button" onclick={greet()}>"Say hello"</button>
+            <button class="button" onclick="greet()">Say hello</button>
             <p class="lede">{message}</p>
 
             <script>
@@ -25,7 +25,7 @@ pub async fn page() -> Html {
                 }
             </script>
         </section>
-    }
+    "##}
 }
 
 /// Runs on the server, in Rust. The browser calls it by name over a typed,

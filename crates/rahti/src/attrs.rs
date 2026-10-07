@@ -21,7 +21,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::html::{Render, escape_attr_into};
+use crate::html::{Render, escape_attr_into, escape_source_attr_into};
 
 #[cfg(test)]
 #[path = "tests/attrs.rs"]
@@ -72,7 +72,7 @@ pub fn attribute<T: Render + ?Sized>(name: &str, value: &T, boolean: bool, out: 
 ///
 /// ```ignore
 /// let extra = Attrs::new().set("id", "avatar").unset("stroke-width");
-/// html! { <svg class="size-4" @{..extra}>…</svg> }
+/// html! {r##"<svg class="size-4" @{..extra}>…</svg>"##}
 /// ```
 ///
 /// [`set`](Attrs::set) writes an attribute, replacing one the tag already had;
@@ -205,6 +205,44 @@ impl Attributes for Attrs {
     }
 }
 
+/// The `{…}` props a component tag wrote, as source. `<Button
+/// onclick={save()}>` hands the `Button` function `("onclick", "save()")`,
+/// and spreading them — `@{..bindings}` — puts the handler on
+/// the element the component renders, where the runtime runs it in the
+/// caller's scope.
+///
+/// A component takes them as a `bindings: Bindings` parameter. Only `html!`
+/// builds one, from the literal source at the tag, which is why its braces
+/// are written live where every other spread's values are data and have
+/// theirs escaped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Bindings(&'static [(&'static str, &'static str)]);
+
+impl Bindings {
+    #[doc(hidden)]
+    pub const fn __from_html(source: &'static [(&'static str, &'static str)]) -> Self {
+        Bindings(source)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Each binding as `(name, source)`: the expression the tag wrote
+    /// between its braces.
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        self.0.iter().copied()
+    }
+}
+
+impl Attributes for Bindings {
+    fn write_attributes(&self, list: &mut AttrList) {
+        for (name, source) in self.0 {
+            list.set_source(name, source);
+        }
+    }
+}
+
 impl<T: Attributes + ?Sized> Attributes for &T {
     fn write_attributes(&self, list: &mut AttrList) {
         (**self).write_attributes(list);
@@ -308,11 +346,34 @@ impl AttrList {
         self.owns_events = true;
     }
 
-    /// Write an attribute whose value is already known as text. The value is
-    /// escaped here; callers pass what the author wrote.
+    /// Write an attribute from a string value. It is data: escaped here,
+    /// braces included, so no value can open a client expression.
+    ///
+    /// A native handler (`onclick`) is refused: the runtime runs its value as
+    /// JavaScript, which HTML escaping does not make safe. A caller's handler
+    /// travels as [`Bindings`]. Loud in development, dropped in a release
+    /// build, like the other spread refusals.
     pub fn set(&mut self, name: &str, value: &str) {
+        if is_native_event_name(name) {
+            debug_assert!(
+                false,
+                "rahti: a spread wrote `{name}` from a string value, and the runtime would run \
+                 it as JavaScript. Forward a caller's handler with `bindings: Bindings` and \
+                 `@{{..bindings}}`, or write the handler as a client binding: `{name}={{…}}`."
+            );
+            return;
+        }
         let mut escaped = String::with_capacity(value.len());
         escape_attr_into(value, &mut escaped);
+        self.put(name, escaped);
+    }
+
+    /// Write an attribute the author typed — a literal on the tag, or a
+    /// [`Bindings`] entry. Escaped for the attribute, with its braces kept:
+    /// they are a client `{…}` binding.
+    pub fn set_source(&mut self, name: &str, source: &str) {
+        let mut escaped = String::with_capacity(source.len());
+        escape_source_attr_into(source, &mut escaped);
         self.put(name, escaped);
     }
 

@@ -13,10 +13,12 @@
 //! That is what lets components ship as an ordinary library.
 
 mod attribute;
+mod authoring;
 mod component;
 mod parse;
 mod rpc;
 mod socket;
+mod template;
 
 #[cfg(test)]
 #[path = "tests/emit.rs"]
@@ -26,31 +28,30 @@ use parse::{COMPONENT_ATTR, EVENT_OWNER_ATTR, OWNER_ATTR, Op, Parsed, SlotKind, 
 use proc_macro2::TokenStream;
 use quote::quote;
 
-/// Build an `Html` value from inline markup.
+/// Build an `Html` value from a template: one raw string of HTML.
 ///
 /// ```ignore
-/// html! {
+/// html! {r##"
 ///     <main class="prose">
 ///         <h1>@{title}</h1>
-///         <p>"Seen "{views}" times"</p>
+///         <p>Seen {views} times — it's that simple.</p>
 ///         <slot />
 ///     </main>
-/// }
+/// "##}
 /// ```
 ///
-/// - `"text"` — the convention: text content is a quoted string. The contents
-///   land exactly as written, spacing included. Character references such as
-///   `&amp;` are left alone; a bare `&` is escaped. A brace reference —
+/// The template is read as text (see the `template` module), so nothing in it
+/// meets the Rust lexer: prose, JavaScript and CSS arrive as written. The
+/// token form is refused with the form to write.
+///
+/// - text — HTML text. Indentation is dropped and a space between words or
+///   beside a tag is kept, the way JSX treats it. Character references such
+///   as `&amp;` are left alone; a bare `&` is escaped. A brace reference —
 ///   `&#123;`, `&lbrace;` and the rest — is sent doubled, as `&amp;#123;`, so
 ///   the parser leaves it standing and the client runtime reads a reference
 ///   rather than the start of one of its expressions.
-/// - `text` — the same text written plainly, as in HTML, is also accepted:
-///   indentation is dropped and a space between words or beside a tag is kept,
-///   the way JSX treats it. Prefer the quoted form. Unlike JSX text, this goes
-///   through the Rust lexer first, so an apostrophe, a `"` or an arrow is a
-///   compile error before the macro sees it, and rewrapping a long line can
-///   change the spacing that reaches the page.
-/// - `{expr}` — the client runtime's. The macro does not read it: the source
+/// - `{expr}` — the client runtime's, in text or as a whole quoted attribute
+///   value (`hidden="{!open}"`). The macro does not read it: the source
 ///   is copied through and escaped as text, so the runtime finds the
 ///   expression the author wrote when it reads the element back off the page.
 /// - `@{expr}` — Rust, rendered here. Any value implementing
@@ -87,11 +88,67 @@ use quote::quote;
 #[proc_macro]
 pub fn html(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let file = proc_macro::Span::call_site().file();
+    let input: TokenStream = input.into();
 
-    match parse::parse(input.into()) {
+    let tokens = match template_tokens(input, &file, |lit| {
+        let span = lit.span().unwrap();
+        (span.line(), span.column())
+    }) {
+        Ok(tokens) => tokens,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    match parse::parse(tokens) {
         Ok(parsed) => emit(stamp(parsed, &file)).into(),
         Err(err) => err.to_compile_error().into(),
     }
+}
+
+/// The tokens `parse` reads for `html! {r##"…"##}`: an optional `@component "id"` that
+/// `#[component]` writes in front, then the template's markup as the tokens
+/// `parse` reads. `position` says where the literal starts in its file.
+fn template_tokens(
+    input: TokenStream,
+    file: &str,
+    position: impl Fn(&proc_macro2::Literal) -> (usize, usize),
+) -> Result<TokenStream, parse::Error> {
+    use proc_macro2::TokenTree as Tt;
+
+    let toks: Vec<Tt> = input.clone().into_iter().collect();
+    let directive = match toks.as_slice() {
+        [Tt::Punct(at), Tt::Ident(id), Tt::Literal(_), ..]
+            if at.as_char() == '@' && id == "component" =>
+        {
+            3
+        }
+        _ => 0,
+    };
+    let refuse = |span: proc_macro2::Span| parse::Error {
+        span,
+        msg: "rahti: a template is one raw string of HTML: \
+              `html! {r##\"<section>…</section>\"##}`.\n  Text, JavaScript and CSS go in as \
+              written; `@{expr}` is a Rust value and `{expr}` a PulsePoint binding. See \
+              \"Templates\" in docs/conventions/rendering-and-components.md."
+            .into(),
+    };
+    let [Tt::Literal(lit)] = &toks[directive..] else {
+        let span = toks
+            .get(directive)
+            .map_or_else(proc_macro2::Span::call_site, Tt::span);
+        return Err(refuse(span));
+    };
+    let Some((source, prefix)) = template::raw_template(lit) else {
+        return Err(refuse(lit.span()));
+    };
+    let (line, column) = position(lit);
+    let origin = template::Origin {
+        file: file.replace('\\', "/"),
+        line,
+        column,
+        prefix,
+    };
+    let mut out: TokenStream = toks[..directive].iter().cloned().collect();
+    out.extend(template::tokens(&source, lit.span(), &origin)?);
+    Ok(out)
 }
 
 /// Turn a function into a component.
@@ -99,12 +156,12 @@ pub fn html(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// ```ignore
 /// #[component]
 /// pub fn UserCard(name: &str, children: Html) -> Html {
-///     html! {
+///     html! {r##"
 ///         <article class="user-card">
 ///             <h2>@{name}</h2>
 ///             <slot />
 ///         </article>
-///     }
+///     "##}
 /// }
 /// ```
 ///
@@ -267,10 +324,21 @@ fn stamp(mut parsed: Parsed, file: &str) -> Vec<Op> {
     let owner_id = parsed.forced_component.clone().or_else(|| file_id.clone());
 
     // Children written between component tags are their own blocks, named
-    // the way an inline `html! { … }` child argument is: by the file alone.
+    // the way an inline `html! {r##"…"##}` child argument is: by the file alone.
     // That keeps the two spellings byte-identical — and it is independent of
     // how this block itself is named, so it happens before any early return.
     stamp_component_children(&mut parsed.ops, file_id.as_deref(), owner_id.as_deref());
+
+    // A document's slot always lands in a deferred `<template pp-component>`
+    // — the one injected below or one the layout wrote itself — so its
+    // children are raised one encoding layer however the block is named.
+    if parsed.renders_document {
+        for op in &mut parsed.ops {
+            if matches!(op, Op::Slot) {
+                *op = Op::DeferredSlot;
+            }
+        }
+    }
 
     if parsed.declares_component {
         return parsed.ops;
@@ -365,12 +433,12 @@ fn wrap_slot(mut ops: Vec<Op>, slot_at: Option<usize>, id: &str) -> Vec<Op> {
 ///   owner's, not a block of its own.
 /// - **Self-contained children** — the block carries its own `<script>`. It
 ///   is a reactive block of its own wherever it lands, so a single root gets
-///   `pp-component`, exactly where a separate `html! { … }` child block
+///   `pp-component`, exactly where a separate `html! {r##"…"##}` child block
 ///   would have carried it.
 /// - **Static children** — no bindings at all. Served inline as before,
 ///   visible without JavaScript, with a single root named for form's sake.
 ///
-/// A fragment-rooted child block keeps the old stamping even when it carries
+/// A fragment-rooted child block is named like any block even when it carries
 /// bindings: its comment markers are what the runtime raises into a
 /// boundary, and that shape has a name slot rather than an element to wrap.
 /// An author-written `pp-component` inside the children turns every
@@ -444,7 +512,7 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                             // A bare boolean attribute has no value to carry,
                             // and `name=""` is how HTML spells the same thing.
                             let value = value.unwrap_or_default();
-                            quote! { __rahti_attrs.set(#name, #value); }
+                            quote! { __rahti_attrs.set_source(#name, #value); }
                         }
                         TagAttr::Value {
                             name,
@@ -475,6 +543,9 @@ fn emit(ops: Vec<Op>) -> TokenStream {
             Op::Slot => body.extend(quote! {
                 ::rahti::Render::render_into(&children, &mut __rahti);
             }),
+            Op::DeferredSlot => body.extend(quote! {
+                ::rahti::render_deferred_children(&children, &mut __rahti);
+            }),
             // `<Card …>` — a call through the named-props companion that
             // `#[component]` generates beside the function: a struct literal
             // sharing the function's name takes the props in written order,
@@ -503,7 +574,7 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                     fields.extend(quote! { #prop: #value, });
                 }
                 // Every `{…}` prop, as source, in one field. A component
-                // takes them with `bindings: &[(&str, &str)]` and writes
+                // takes them with `bindings: rahti::Bindings` and writes
                 // them onto whatever element it renders, which is what puts
                 // `<Button onclick={save()}>` on the button itself.
                 //
@@ -515,13 +586,11 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                     let entries = call.bindings.iter().map(|(name, expr)| {
                         quote! { (#name, #expr), }
                     });
-                    // Spelled out as a slice. The props struct is generic
-                    // over every field, so there is no slice type for the
-                    // array literal to coerce towards and inference would
-                    // otherwise pin the field to `&[_; N]`.
+                    // `Bindings` keeps the source's braces live when it is
+                    // spread, which only literal source may claim; every
+                    // other spread value is data and has its braces escaped.
                     fields.extend(quote! {
-                        bindings: &[#(#entries)*]
-                            as &'static [(&'static str, &'static str)],
+                        bindings: ::rahti::Bindings::__from_html(&[#(#entries)*]),
                     });
                 }
                 if let Some(child) = call.children {

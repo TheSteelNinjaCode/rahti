@@ -148,7 +148,7 @@ pub async fn page(
     RawQuery(raw): RawQuery,
 ) -> Html {
     // `params` is the typed view, `pairs` every pair, `raw` the unparsed text.
-    html! { <p>@{format!("{:?}", params.id)}</p> }
+    html! {r##"<p>@{format!("{:?}", params.id)}</p>"##}
 }
 ```
 
@@ -193,7 +193,7 @@ pub async fn page(Query(params): Query<Params>) -> Result {
         Error::new(StatusCode::BAD_REQUEST, format!("`{}` is not an id", params.id))
     })?;
 
-    Ok(html! { <p>@{id}</p> })
+    Ok(html! {r##"<p>@{id}</p>"##})
 }
 ```
 
@@ -260,7 +260,12 @@ An application may have more than one. Two shapes are supported:
    pub const ROOT_LAYOUT: bool = true;
 
    pub fn layout(children: Html) -> Html {
-       html! { /* <!DOCTYPE html> ... <slot /> ... */ }
+       html! {r##"
+           <!DOCTYPE html>
+           <html lang="en">
+               <body><slot /></body>
+           </html>
+       "##}
    }
    ```
 
@@ -279,7 +284,7 @@ ways on every page that layout wraps:
 - `<meta name="pp-root-layout" content="...">`, injected into the `<head>`.
 
 This is what makes cross-shell navigation a full browser load rather than a
-body swap; see `pulsepoint.md`. A root layout that writes the meta tag itself
+body swap; see `pulsepoint-navigation.md`. A root layout that writes the meta tag itself
 keeps its own value, and is then responsible for keeping it in step with the
 header.
 
@@ -344,16 +349,16 @@ Two pieces are needed:
 // marker wraps only the content pane, so the header stays on screen while
 // the swap is in flight.
 pub fn layout(children: Html) -> Html {
-    html! {
+    html! {r##"
         <div>
-            <header>"Dashboard"</header>
+            <header>Dashboard</header>
             <main>
                 <div pp-loading-content="true">
                     <slot />
                 </div>
             </main>
         </div>
-    }
+    "##}
 }
 ```
 
@@ -362,9 +367,9 @@ pub fn layout(children: Html) -> Html {
 use crate::rahti::{Html, html};
 
 pub fn loading() -> Html {
-    html! {
-        <div class="spinner">"Loading…"</div>
-    }
+    html! {r##"
+        <div class="spinner">Loading…</div>
+    "##}
 }
 ```
 
@@ -416,9 +421,9 @@ expression, so send it as a server value:
 const TRANSITION: &str = r#"{"fadeIn":"120ms","fadeOut":"120ms"}"#;
 
 pub fn loading() -> Html {
-    html! {
-        <div pp-loading-transition=@{TRANSITION}>"Loading…"</div>
-    }
+    html! {r##"
+        <div pp-loading-transition=@{TRANSITION}>Loading…</div>
+    "##}
 }
 ```
 

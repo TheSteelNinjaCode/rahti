@@ -127,13 +127,13 @@ Set the document language and direction in the root layout:
 pub fn layout(children: Html) -> Html {
     let locale = rahti::i18n::locale();
 
-    html! {
+    html! {r##"
         <!DOCTYPE html>
         <html lang=@{locale.as_str()} dir=@{locale.direction()}>
             <head></head>
             <body><slot /></body>
         </html>
-    }
+    "##}
 }
 ```
 

@@ -19,7 +19,7 @@ per-response value without the framework overwriting it.
 | `Permissions-Policy` | camera, geolocation, microphone, payment, and USB limited to this origin | Prevents embedded third-party frames from receiving those capabilities |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Keeps paths and queries out of cross-origin referrers |
 | `X-Content-Type-Options` | `nosniff` | Prevents browser MIME guessing |
-| `X-Frame-Options` | `SAMEORIGIN` | Legacy clickjacking protection alongside CSP `frame-ancestors` |
+| `X-Frame-Options` | `SAMEORIGIN` | Clickjacking protection for browsers that do not read CSP `frame-ancestors` |
 | `Strict-Transport-Security` | one year, including subdomains | Enforces HTTPS outside development mode only |
 
 HSTS is intentionally absent when Rahti development mode is active. In a
@@ -35,23 +35,30 @@ allowlist. Its important locked directives are:
 
 ```text
 default-src 'self'
+script-src 'self' 'unsafe-eval'
 object-src 'none'
 base-uri 'self'
 form-action 'self'
 frame-ancestors 'self'
 ```
 
-PulsePoint compiles reactive expressions in the browser, so `script-src` must
-currently include both `'unsafe-eval'` and `'unsafe-inline'`. Removing either
-does not harden a working Rahti application; it stops reactive blocks from
-working. The default also permits HTTPS scripts, styles, fonts, images, media,
-frames, and connections so ordinary SDKs and CDNs work without the framework
-guessing vendor hostnames. Images and media additionally permit `data:` and
-`blob:` where appropriate, and connections permit `ws:`/`wss:`.
+`script-src` is `'self' 'unsafe-eval'` and nothing else. PulsePoint compiles
+reactive expressions with `new Function`, which needs `'unsafe-eval'`; removing
+it stops every reactive block. Nothing else in a page needs more: component
+scripts are evaluated by the runtime, which also binds and removes every `on…`
+attribute, and the document loads only same-origin scripts. So an injected
+inline `<script>`, an `onerror=` attribute, or a `<script src>` on another host
+is blocked — the browser refuses it and reports a violation, which
+`rahti::browser` surfaces in `errors()`.
 
-Applications that know their external dependencies should replace this broad
-scheme allowance with exact hosts. Keep the PulsePoint requirements and the
-locked directives above. In development, loopback HTTP connection sources and
+An application that loads a vendor SDK names that host in `script-src`
+(`script-src 'self' 'unsafe-eval' https://js.stripe.com`); never `https:` or
+`'unsafe-inline'`, either of which lets injected markup run script. The default
+permits HTTPS styles, fonts, images, media, frames, and connections, which
+cannot run script in the page. Images and media additionally permit `data:` and
+`blob:` where appropriate, and connections permit `ws:`/`wss:`. Applications
+that know their external dependencies can replace these scheme allowances with
+exact hosts. Keep `'unsafe-eval'` and the locked directives above. In development, loopback HTTP connection sources and
 cleartext media/frames are admitted for local tooling; production omits them.
 
 ## Application configuration
@@ -66,7 +73,7 @@ use rahti::security::SecurityHeaders;
 rahti::security::configure(SecurityHeaders {
     content_security_policy: Some(
         "default-src 'self'; \
-         script-src 'self' 'unsafe-inline' 'unsafe-eval'; \
+         script-src 'self' 'unsafe-eval' https://js.stripe.com; \
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data:; \
          connect-src 'self' ws: wss:; \

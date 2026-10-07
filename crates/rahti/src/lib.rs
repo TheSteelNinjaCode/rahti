@@ -51,7 +51,7 @@ pub use rahti_mcp as mcp;
 /// Attributes decided at runtime: whether one is written, and what a
 /// `@{..spread}` brings. `AttrList` and `attribute` are what `html!` expands
 /// into; `Attrs` and `Attributes` are what an application writes.
-pub use attrs::{AttrList, Attributes, Attrs, Presence, attribute};
+pub use attrs::{AttrList, Attributes, Attrs, Bindings, Presence, attribute};
 pub use auth::guard as auth_guard;
 pub use dev::{DEV_ENV, revalidate, routes as dev_routes};
 /// `.env` into the process environment, once. Called by `AuthSettings::from_env`
@@ -59,7 +59,7 @@ pub use dev::{DEV_ENV, revalidate, routes as dev_routes};
 /// whether or not it has a database.
 pub use env::load_env;
 pub use error::{Error, ErrorInfo, ErrorSource, Result, apply_error, panic_response};
-pub use html::{Html, Json, PageBody, Render, RenderJs};
+pub use html::{Html, Json, PageBody, Render, RenderJs, render_deferred_children};
 pub use layout::{
     ROOT_LAYOUT_HEADER, apply_layout, apply_layout_metadata, apply_root_layout,
     apply_root_layout_metadata, root_document, root_document_metadata,

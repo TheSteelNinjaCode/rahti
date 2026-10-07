@@ -1,8 +1,9 @@
-//! Turn the token stream inside `html! { .. }` into a flat list of writes.
+//! Turn a template's tokens into a flat list of writes.
 //!
-//! The grammar is deliberately small. Everything that is known at compile
-//! time collapses into one `&'static str`; only interpolation survives to
-//! runtime.
+//! The template lexer (`template.rs`) reads `html! {r##"…"##}` as text and
+//! hands this module tokens of a few fixed shapes. The grammar is deliberately
+//! small. Everything that is known at compile time collapses into one
+//! `&'static str`; only interpolation survives to runtime.
 //!
 //! ```text
 //! markup  := directive? node*
@@ -12,14 +13,13 @@
 //!            // Name starts with a capital: the `#[component]` fn it calls
 //! fragment := '<' '>' node* '</' '>'  // a block's root only — see
 //!            // [`Parser::fragment`]
-//! prop    := ident ('=' (literal | block))?  // no '=' means `ident=@{true}`
+//! prop    := ident ('=' (literal | block | binding))?  // no '=' means `true`
 //! attr    := name ('=' (string | binding | block))?
-//! text    := string-literal | word+  // `"quoted"` — see the note below
-//! binding := '{' tokens '}'          // client-side; passed through verbatim
+//! text    := string-literal          // one run of template text
+//! binding := '{' marker '}'          // client-side; its source, verbatim
 //! block   := '@' '{' expr '}'        // server-side; a Rust expression
-//! raw     := tokens                  // the body of `<script>` / `<style>`;
-//   `@{expr}` is lifted in `<script>` — see
-//   [`Parser::raw_text`]
+//! raw     := raw-string-literal      // a `<script>` / `<style>` body;
+//!            // `@{expr}` is lifted in `<script>` — see [`Parser::raw_text`]
 //! directive := '@component' string   // written by `#[component]`, not by hand
 //! ```
 //!
@@ -28,21 +28,6 @@
 //! inside one: it copies the source through and escapes it as text, so what
 //! reaches the browser is the expression the author wrote. Rust interpolation
 //! is `@{…}` — see [`Op::Text`].
-//!
-//! Text content is written as a quoted string — `<h1>"Rahti"</h1>`. That is
-//! the convention the `app/` tree follows, and it is the only spelling with no
-//! failure mode: the contents arrive verbatim, from one token, whatever the
-//! expander knows about positions.
-//!
-//! Text may also be written the way it is in HTML — `<h1>Rahti</h1>`. A token
-//! stream has no whitespace in it, so the words come back from each token's
-//! own source text and the spaces between them from the line and column the
-//! spans report; see [`Parser::text`]. It stays supported, but it is not what
-//! the docs teach, for three reasons: the words have to survive the Rust lexer
-//! first, so an apostrophe or an em dash fails before this code runs; the
-//! spacing is reconstructed, so rewrapping a line can change the output; and
-//! the reconstruction needs span positions, which an expander may not carry
-//! (see [`Gap::Unknown`]).
 
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use std::str::FromStr;
@@ -114,7 +99,7 @@ pub const FRAGMENT_CLOSE: &str = "<!--/pp-->";
 pub const FRAGMENT_NAME_AT: usize = 7;
 
 /// Tags HTML5 forbids a closing tag on.
-const VOID: [&str; 14] = [
+pub const VOID: [&str; 14] = [
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
     "track", "wbr",
 ];
@@ -238,6 +223,12 @@ pub enum Op {
     ScriptText(TokenStream),
     /// `<slot />` — the child content this layout wraps.
     Slot,
+    /// A root layout's `<slot />`, which always sits in a deferred `<template
+    /// pp-component>` (injected by `wrap_slot`, or written by the layout). The children are
+    /// written through `rahti::render_deferred_children`, which raises each
+    /// brace reference one encoding layer so a value's `&#123;` survives the
+    /// browser's parse and the runtime never reads it as an expression.
+    DeferredSlot,
     /// `<Card …>` — a call to the `#[component]` function of that name,
     /// rendered where the tag stands.
     Component(ComponentCall),
@@ -300,7 +291,7 @@ pub struct ComponentCall {
     /// when it fires.
     ///
     /// They do not become fields of their own. All of them arrive as one
-    /// `bindings: &[(&str, &str)]` — see `lib.rs` — so a component opts into
+    /// `bindings: rahti::Bindings` — see `lib.rs` — so a component opts into
     /// the whole surface with one parameter instead of naming forty events.
     pub bindings: Vec<(String, String)>,
     /// `None` for `<Card />`: nothing is passed, so a component that takes
@@ -310,7 +301,7 @@ pub struct ComponentCall {
 }
 
 /// The children between a component tag pair — a block of its own, exactly
-/// as if the caller had written them in a separate `html! { … }` and passed
+/// as if the caller had written them in a separate `html! {r##"…"##}` and passed
 /// that. The stamping that keeps the two shapes byte-identical happens in
 /// `lib.rs`.
 #[derive(Debug)]
@@ -520,23 +511,6 @@ fn check_single_root(roots: &[Root], call_site: Span) -> Result<(), Error> {
     Ok(())
 }
 
-/// What sat between two tokens in the source.
-///
-/// Only ever asked of tokens that make up one run of text, so this is the
-/// whole of what a token stream forgets and the markup needs back.
-#[derive(PartialEq)]
-enum Gap {
-    /// The tokens touch: `100` and `%`.
-    None,
-    /// Space or tab — something the author typed between two words.
-    Space,
-    /// A line break, so the gap is the indentation of the markup.
-    Newline,
-    /// No position information, which is what a tool that expands macros
-    /// without the source reports. Words still need separating.
-    Unknown,
-}
-
 struct Parser {
     toks: Vec<TokenTree>,
     pos: usize,
@@ -662,7 +636,12 @@ impl Parser {
                     self.mark_root(Root::Loose(span, "this text"));
                     ops.push(Op::Static(escape_text(&text)));
                 }
-                Some(_) => self.text(ops),
+                Some(other) => {
+                    return Err(Error {
+                        span: other.span(),
+                        msg: format!("rahti: unexpected `{other}` in a template"),
+                    });
+                }
             }
         }
     }
@@ -707,68 +686,6 @@ impl Parser {
             }
             Some(TokenTree::Group(g)) => g.delimiter() == Delimiter::Brace,
             _ => false,
-        }
-    }
-
-    /// Text written the way it is in HTML: `<h1>Rahti</h1>`.
-    ///
-    /// Each token knows its own source text; what a token stream forgets is
-    /// the space between them, and that is what [`Parser::gap`] works out
-    /// from the positions. Nothing else about the file is needed, so this
-    /// keeps working wherever the macro is expanded.
-    ///
-    /// Whitespace touching the tags follows JSX: a gap holding a newline is
-    /// the indentation of the markup and disappears, a gap on one line is a
-    /// space the author typed and survives. So `Hello <b>world</b>` keeps its
-    /// space, while text sitting on its own line does not pick one up.
-    fn text(&mut self, ops: &mut Vec<Op>) {
-        let span = self.span_now();
-        let first = self.pos;
-        while !self.ends_text_run(0) {
-            self.next();
-        }
-        let last = self.pos - 1;
-
-        let mut text = String::new();
-        if self.gap(first.wrapping_sub(1), first) == Gap::Space {
-            text.push(' ');
-        }
-        for i in first..=last {
-            if i > first && self.gap(i - 1, i) != Gap::None {
-                text.push(' ');
-            }
-            text.push_str(&token_text(&self.toks[i]));
-        }
-        if self.gap(last, last + 1) == Gap::Space {
-            text.push(' ');
-        }
-
-        self.mark_root(Root::Loose(span, "this text"));
-        ops.push(Op::Static(escape_text(&text)));
-    }
-
-    /// What separated two tokens, by index.
-    ///
-    /// An index outside the block reads as a line break: text at the very
-    /// start or end of an `html!` has the macro's own braces beside it, not
-    /// anything the author put there.
-    fn gap(&self, before: usize, after: usize) -> Gap {
-        let (Some(before), Some(after)) = (self.toks.get(before), self.toks.get(after)) else {
-            return Gap::Newline;
-        };
-        let end = before.span().end();
-        let start = after.span().start();
-
-        // Lines are numbered from one, so a zero means the expander does not
-        // track positions at all.
-        if end.line == 0 || start.line == 0 {
-            Gap::Unknown
-        } else if end.line != start.line {
-            Gap::Newline
-        } else if start.column > end.column {
-            Gap::Space
-        } else {
-            Gap::None
         }
     }
 
@@ -817,6 +734,8 @@ impl Parser {
 
         let mut markup = format!("<{name}");
         let bindings_before = self.client_bindings;
+        // The template lexer refused JSX names and unknown directives, with
+        // their position, before these tokens were made.
         let mut attrs = self.tag_attributes()?;
         if is_root {
             self.root_attr_bindings = self.client_bindings - bindings_before;
@@ -829,7 +748,7 @@ impl Parser {
                 }
                 _ => None,
             });
-            self.claim_root_events(&mut attrs, &name, open)?;
+            self.claim_root_events(&mut attrs);
         } else if attrs.iter().any(|attr| matches!(attr, TagAttr::Spread(_))) {
             self.inner_spread = true;
         }
@@ -902,18 +821,11 @@ impl Parser {
 
     /// The body of a `<script>` or `<style>`, up to its closing tag.
     ///
-    /// HTML calls these raw text elements, and the browser treats them that
-    /// way: nothing inside is markup, and `&lt;` inside a script is a literal
-    /// `&lt;`, not a `<`. So the body is copied out and emitted as it was
-    /// written — no elements, no escaping, and no `{…}`, which in JavaScript
-    /// is a block and in CSS is a rule.
-    ///
-    /// What comes back is the source of each token with the spacing between
-    /// them worked out from the spans, the same way [`Parser::text`] does it.
-    /// That is as close to verbatim as a proc macro gets: the body still has
-    /// to survive the Rust lexer to reach here at all, so a comment is dropped
-    /// before the macro runs and a lone `'` fails to tokenize. Write `<script
-    /// src="…">` and keep anything substantial in its own file.
+    /// HTML calls these raw text elements: nothing inside is markup, and
+    /// `&lt;` inside a script is a literal `&lt;`. The template lexer hands the
+    /// body over as one raw string literal, so it arrives exactly as written —
+    /// comments, quotes and template literals included — with no `{…}`
+    /// binding, which in JavaScript is a block and in CSS is a rule.
     ///
     /// One form *is* interpolated: `@{expr}` inside `<script>` renders the
     /// Rust expression as JavaScript source through `::rahti::RenderJs`, the
@@ -921,25 +833,10 @@ impl Parser {
     /// `Display`, strings quote themselves as JSON literals, and anything
     /// larger (`Json(&v)`) serialises through `serde_json`. That is the door
     /// page-side data walks through to seed `pp.state(…)` with values known
-    /// at render, instead of paying an RPC roundtrip for them.
+    /// at render. `@@{` is a literal `@{`. See [`raw_script`].
     ///
-    /// `<style>` keeps the raw-text rule even there. `@media` and the brace
-    /// of a `@keyframes` block are CSS, not Rust; lifting `@{…}` in a style
-    /// would need a `RenderCss` trait and a different escape rule, and is
-    /// held back until there is a reason to add it.
-    ///
-    /// A body written as one raw string literal — `<script>r#"…"#</script>` —
-    /// is JavaScript exactly as written, because the Rust lexer never looks
-    /// inside it: single-quoted strings, template literals and comments all
-    /// survive, where a token-written body would fail to compile or lose its
-    /// comments. `@{expr}` is still lifted from it (and `@@{` is a literal
-    /// `@{`). A raw string is not valid JavaScript, so this form can never be
-    /// mistaken for a script that meant something else. See [`raw_script`].
-    ///
-    /// Inside `<script>`, the `@{…}` lift has to descend into Groups: `pp.
-    /// state(@{x})` — the shape most pages actually write — arrives as one
-    /// `Group{ Parenthesis }` token wrapping the `@` and the brace, so the
-    /// top-level scan never sees the `@` directly. See [`scan_script_tokens`].
+    /// `<style>` is copied as written: `@media` and the brace of a
+    /// `@keyframes` block are CSS, not Rust.
     fn raw_text(&mut self, name: &str, ops: &mut Vec<Op>) -> Result<(), Error> {
         if name == "script" {
             self.scripts += 1;
@@ -950,20 +847,19 @@ impl Parser {
                 return self.err(format!("rahti: `<{name}>` is never closed"));
             }
         }
-        if self.pos <= first {
-            return Ok(());
-        }
         let body = &self.toks[first..self.pos];
+        let contents = match body {
+            [] => return Ok(()),
+            [TokenTree::Literal(lit)] => raw_string_contents(&lit.to_string()).map(|c| (c, lit.span())),
+            _ => None,
+        };
+        let Some((contents, span)) = contents else {
+            return self.err(format!("rahti: unexpected tokens in the `<{name}>` body"));
+        };
         if name == "script" {
-            if let [TokenTree::Literal(lit)] = body
-                && let Some(js) = raw_string_contents(&lit.to_string())
-            {
-                return raw_script(&js, lit.span(), ops);
-            }
-            scan_script_tokens(body, ops);
-        } else {
-            ops.push(Op::Static(source_run_of(body)));
+            return raw_script(&contents, span, ops);
         }
+        ops.push(Op::Static(contents));
         Ok(())
     }
 
@@ -1084,7 +980,7 @@ impl Parser {
     ///
     /// The tag names a `#[component]` function; props name its parameters.
     /// Children, when the tag has any, are parsed as a block of their own —
-    /// the same block an inline `html! { … }` child argument is today — and
+    /// the same block an inline `html! {r##"…"##}` child argument is — and
     /// become the `children` argument. A self-closing tag passes no
     /// `children` at all, which is the shape for a component that declares
     /// none.
@@ -1126,7 +1022,7 @@ impl Parser {
 
         // The children are a fresh block: their own roots, their own name
         // slot. Save this block's bookkeeping and hand the parser a clean
-        // slate, the way a nested `html! { … }` would have started with one.
+        // slate, the way a nested `html! {r##"…"##}` would have started with one.
         let outer_roots = std::mem::take(&mut self.roots);
         let outer_slot = self.component_slot.take();
         let outer_declares = std::mem::replace(&mut self.declares_component, false);
@@ -1331,50 +1227,22 @@ impl Parser {
     ///
     /// A handler written literally on the tag — `onsubmit={save(event)}` or
     /// `onsubmit="save(event)"` — is this block's source, so the block owns
-    /// it. A caller's handler can only arrive at runtime, through a spread
-    /// or an `@{…}` value, and one element has one event owner:
-    ///
-    /// - an `on…=@{expr}` beside an owned handler is refused here, since
-    ///   nothing at compile time says whose it is;
-    /// - a spread beside one is marked, so the open tag built at runtime
-    ///   refuses an event handler the spread brings (see
-    ///   `rahti::AttrList::own_events`).
-    fn claim_root_events(
-        &mut self,
-        attrs: &mut Vec<TagAttr>,
-        tag: &str,
-        span: Span,
-    ) -> Result<(), Error> {
-        let owned: Vec<&str> = attrs
-            .iter()
-            .filter_map(|attr| match attr {
-                TagAttr::Literal { name, .. } if is_native_event_name(name) => Some(name.as_str()),
-                _ => None,
-            })
-            .collect();
-        if owned.is_empty() {
-            return Ok(());
-        }
-        if let Some(TagAttr::Value { name, .. }) = attrs
-            .iter()
-            .find(|attr| matches!(attr, TagAttr::Value { name, .. } if is_native_event_name(name)))
-        {
-            return Err(Error {
-                span,
-                msg: format!(
-                    "rahti: `<{tag}>` handles `{}` itself and also takes `{name}` from a Rust \
-                     value, and one element has one event owner.\n  The root's own handlers \
-                     run in this block's scope; move `{name}` to an inner element, or call the \
-                     caller's handler from this block's own.",
-                    owned.join("`, `")
-                ),
-            });
+    /// it. A caller's handler can only arrive at runtime, through a spread of
+    /// its `Bindings` (an `on…=@{expr}` is refused while parsing), and one
+    /// element has one event owner: a spread beside an owned handler is
+    /// marked, so the open tag built at runtime refuses an event handler the
+    /// spread brings (see `rahti::AttrList::own_events`).
+    fn claim_root_events(&mut self, attrs: &mut Vec<TagAttr>) {
+        let owns = attrs.iter().any(
+            |attr| matches!(attr, TagAttr::Literal { name, .. } if is_native_event_name(name)),
+        );
+        if !owns {
+            return;
         }
         self.root_owns_events = true;
         if attrs.iter().any(|attr| matches!(attr, TagAttr::Spread(_))) {
             attrs.insert(0, TagAttr::OwnsEvents);
         }
-        Ok(())
     }
 
     /// Refuse a client binding a component wrote on its own root element.
@@ -1536,14 +1404,18 @@ impl Parser {
                 );
             }
         };
-        while self.is_punct(0, '-') {
+        // `-` joins custom-element names; `.` joins a context provider's,
+        // `<themecontext.provider value={theme}>`, the tag PulsePoint reads
+        // as `ThemeContext`'s provider.
+        while self.is_punct(0, '-') || self.is_punct(0, '.') {
+            let joiner = if self.is_punct(0, '-') { '-' } else { '.' };
             self.next();
             match self.next() {
                 Some(TokenTree::Ident(id)) => {
-                    name.push('-');
+                    name.push(joiner);
                     name.push_str(&id.to_string());
                 }
-                _ => return self.err("rahti: expected a name after `-`"),
+                _ => return self.err(format!("rahti: expected a name after `{joiner}`")),
             }
         }
         Ok(name)
@@ -1719,7 +1591,7 @@ fn raw_string_contents(repr: &str) -> Option<String> {
 
 /// Emit a raw-string script body: the JavaScript as written, with each
 /// `@{expr}` parsed as a Rust expression and lifted into an
-/// [`Op::ScriptText`], exactly as a token-written body would lift it.
+/// [`Op::ScriptText`].
 ///
 /// Finding the end of an `@{…}` counts braces, skipping Rust string and char
 /// literals so `@{format!("{}", x)}` ends where it should.
@@ -1764,126 +1636,61 @@ fn raw_script(js: &str, span: Span, ops: &mut Vec<Op>) -> Result<(), Error> {
     Ok(())
 }
 
+/// [`closing_brace`], for the template lexer's `@{…}`.
+pub fn closing_brace_of(text: &str) -> Option<usize> {
+    closing_brace(text)
+}
+
 /// The index of the `}` that closes an `@{` whose contents start at `text`.
+///
+/// Counts braces in Rust, so it skips what Rust skips: string literals, raw
+/// strings (a template nested in `@{…}` is one: `html! {r#"<li>…</li>"#}`), and
+/// char literals such as `'{'`.
 fn closing_brace(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
     let mut depth = 0usize;
-    let mut chars = text.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        match c {
-            '{' => depth += 1,
-            '}' if depth == 0 => return Some(i),
-            '}' => depth -= 1,
-            '"' => {
-                // A Rust string: skip to its unescaped closing quote.
-                while let Some((_, c)) = chars.next() {
-                    match c {
-                        '\\' => {
-                            chars.next();
-                        }
-                        '"' => break,
-                        _ => {}
-                    }
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' if depth == 0 => return Some(i),
+            b'}' => depth -= 1,
+            b'r' if !(i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_')) => {
+                let hashes = bytes[i + 1..].iter().take_while(|&&b| b == b'#').count();
+                if bytes.get(i + 1 + hashes) == Some(&b'"') {
+                    let close = format!("\"{}", "#".repeat(hashes));
+                    let from = i + 2 + hashes;
+                    i = text[from..]
+                        .find(&close)
+                        .map_or(bytes.len(), |at| from + at + close.len());
+                    continue;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'\'' => {
+                // A char literal, `'{'` or `'\n'`; a lifetime has no closing quote.
+                let escaped = bytes.get(i + 1) == Some(&b'\\');
+                let width = if escaped { 2 } else { 1 };
+                if bytes.get(i + 1 + width) == Some(&b'\'') {
+                    i += 2 + width;
+                    continue;
                 }
             }
             _ => {}
         }
+        i += 1;
     }
     None
 }
 
-// ------------------------------------------------------------------ script
-// The recursive half of the `@{…}` lift inside a `<script>`. See
-// [`Parser::raw_text`] for why the lift is split off from the regular walk.
-
-/// Walk a slice of tokens from a `<script>` body, emitting literal JS source
-/// for everything except `@{…}` lifts.
-///
-/// `@{…}` sits at the top level of the body in the simple case — `<script>const
-/// c = @{42};</script>` — and the `@` and the brace arrive as two tokens there,
-/// the way `@{…}` does in markup. The common case wraps it in a call,
-/// `pp.state(@{x})`, which arrives as one `Group{ Parenthesis }` token holding
-/// the `@` and the brace inside; the top-level scan never sees the `@`. So this
-/// walk descends into every `Group` it meets: if a lift sits somewhere inside,
-/// the group is split into its delimiter pair plus the lifts found within, and
-/// otherwise it is emitted verbatim, the way `source_run` would have done.
-///
-/// Groups the author never asked for the macro to look inside (a JS object
-/// literal, a function body, an array, a parenthesised expression) come back as
-/// one `Op::Static` whenever no lift sits inside them, so the body keeps its
-/// source where it can.
-fn scan_script_tokens(tokens: &[TokenTree], ops: &mut Vec<Op>) {
-    let mut i = 0;
-    let mut run = String::new();
-    while i < tokens.len() {
-        // `@{expr}` — top-level or anywhere inside a descended Group.
-        if is_at_brace(tokens, i) {
-            attach_gap_before(tokens, i, &mut run);
-            flush_text(&mut run, ops);
-            let TokenTree::Group(g) = &tokens[i + 1] else {
-                unreachable!("checked by `is_at_brace`");
-            };
-            ops.push(Op::ScriptText(g.stream()));
-            i += 2;
-            continue;
-        }
-        // A `Group` (parent, bracket, brace) — descend to find nested lifts.
-        if let TokenTree::Group(g) = &tokens[i] {
-            let inner: Vec<TokenTree> = g.stream().into_iter().collect();
-            let mut inner_ops: Vec<Op> = Vec::new();
-            scan_script_tokens(&inner, &mut inner_ops);
-            if inner_ops.iter().any(|op| matches!(op, Op::ScriptText(_))) {
-                attach_gap_before(tokens, i, &mut run);
-                flush_text(&mut run, ops);
-                let (open, close) = delim_text(g.delimiter());
-                ops.push(Op::Static(open.to_string()));
-                ops.extend(inner_ops);
-                ops.push(Op::Static(close.to_string()));
-            } else {
-                // No lift inside — the group is just the JS the author wrote,
-                // so the source goes through as one `Op::Static`. Going through
-                // `token_text` here keeps the original spacing inside the
-                // braces intact, which descending and re-splitting would lose.
-                attach_gap_before(tokens, i, &mut run);
-                run.push_str(&token_text(&tokens[i]));
-            }
-            i += 1;
-            continue;
-        }
-        attach_gap_before(tokens, i, &mut run);
-        run.push_str(&token_text(&tokens[i]));
-        i += 1;
-    }
-    flush_text(&mut run, ops);
-}
-
-/// `tokens[i] == '@'` and `tokens[i + 1]` is a `{…}` group.
-fn is_at_brace(tokens: &[TokenTree], i: usize) -> bool {
-    matches!(
-        tokens.get(i),
-        Some(TokenTree::Punct(p)) if p.as_char() == '@',
-    ) && matches!(
-        tokens.get(i + 1),
-        Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace,
-    )
-}
-
-/// The gap that sat between `tokens[i - 1]` and `tokens[i]`, written into the
-/// literal text run. No gap before the first token of a body — there is nothing
-/// in front of it.
-fn attach_gap_before(tokens: &[TokenTree], i: usize, run: &mut String) {
-    if i == 0 {
-        return;
-    }
-    match gap_between(tokens, i - 1, i) {
-        Gap::None => {}
-        Gap::Newline => run.push('\n'),
-        Gap::Space | Gap::Unknown => run.push(' '),
-    }
-}
-
 /// Move accumulated literal text into one `Op::Static`. Adjacent `Op::Static`s
-/// are folded together downstream, so this is just the way `scan_script_tokens`
-/// keeps its writes small between lifts.
+/// are folded together downstream, so this keeps a script's writes small
+/// between lifts.
 fn flush_text(run: &mut String, ops: &mut Vec<Op>) {
     if run.is_empty() {
         return;
@@ -1891,48 +1698,9 @@ fn flush_text(run: &mut String, ops: &mut Vec<Op>) {
     ops.push(Op::Static(std::mem::take(run)));
 }
 
-/// The literal source for a delimiter pair: `_(` `_` for parens, and so on.
-fn delim_text(d: Delimiter) -> (&'static str, &'static str) {
-    match d {
-        Delimiter::Parenthesis => ("(", ")"),
-        Delimiter::Bracket => ("[", "]"),
-        Delimiter::Brace => ("{", "}"),
-        // An invisible delimiter — used by proc-macro tooling, never by the
-        // Rust lexer on what the author wrote. Coming out as the empty pair is
-        // the same as the source having no delimiters at all.
-        Delimiter::None => ("", ""),
-    }
-}
-
-/// The gap between two tokens in a slice, by the same rules `Parser::gap`
-/// uses. The recursive walk asks this on the sub-stream of a `Group`, so the
-/// free function lets it borrow the slice it already holds.
-fn gap_between(toks: &[TokenTree], before: usize, after: usize) -> Gap {
-    let (Some(b), Some(a)) = (toks.get(before), toks.get(after)) else {
-        return Gap::Newline;
-    };
-    let end = b.span().end();
-    let start = a.span().start();
-    if end.line == 0 || start.line == 0 {
-        Gap::Unknown
-    } else if end.line != start.line {
-        Gap::Newline
-    } else if start.column > end.column {
-        Gap::Space
-    } else {
-        Gap::None
-    }
-}
-
-/// Tokens `first..last` put back together as the source they came from. Used
-/// by `<style>` and any `<script>` the macro decides not to descend into.
-fn source_run_of(tokens: &[TokenTree]) -> String {
-    let mut out = String::new();
-    for i in 0..tokens.len() {
-        attach_gap_before(tokens, i, &mut out);
-        out.push_str(&token_text(&tokens[i]));
-    }
-    out
+/// [`unquote`], for the template lexer's client-binding marker.
+pub fn unquote_literal(repr: &str) -> Option<String> {
+    unquote(repr)
 }
 
 /// Recover the contents of a Rust string literal, plain or raw.
@@ -2023,21 +1791,10 @@ fn suggest_identifier(name: &str) -> String {
 /// A client `{…}` binding, braces included, as the author wrote it.
 ///
 /// The macro has no opinion on what is inside — that is the client runtime's
-/// expression, in its language, and it gets copied through. `to_string` is
-/// only the fallback, for an expander that does not carry source text; it
-/// normalises the spacing but leaves the expression itself intact.
+/// expression, in its language, and it gets copied through. The template
+/// lexer carries it in a marked group (see `template::client_marker`).
 fn binding_source(g: &proc_macro2::Group) -> String {
-    g.span()
-        .source_text()
-        .unwrap_or_else(|| format!("{{{}}}", g.stream()))
-}
-
-/// The source a token was written as.
-///
-/// `to_string` is only the fallback because it normalises: it would respell a
-/// raw string as an escaped one, and lose what the author actually typed.
-fn token_text(tt: &TokenTree) -> String {
-    tt.span().source_text().unwrap_or_else(|| tt.to_string())
+    crate::template::client_source(g).unwrap_or_else(|| format!("{{{}}}", g.stream()))
 }
 
 /// Escape text the author wrote in the markup.

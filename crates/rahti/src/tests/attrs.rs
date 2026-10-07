@@ -398,8 +398,8 @@ fn an_empty_set_is_empty() {
 fn a_spread_cannot_bring_a_handler_onto_a_root_that_owns_its_events() {
     let _ = list(|list| {
         list.own_events();
-        list.set("onsubmit", "{save(event)}");
-        list.spread(&Attrs::new().set("onclick", "{pick()}"));
+        list.set_source("onsubmit", "{save(event)}");
+        list.spread(&Bindings::__from_html(&[("onclick", "pick()")]));
     });
 }
 
@@ -408,7 +408,7 @@ fn a_spread_cannot_bring_a_handler_onto_a_root_that_owns_its_events() {
 fn a_spread_handler_is_dropped_on_an_owning_root_in_release() {
     let out = list(|list| {
         list.own_events();
-        list.spread(&Attrs::new().set("onclick", "{pick()}"));
+        list.spread(&Bindings::__from_html(&[("onclick", "pick()")]));
     });
     assert_eq!(out, "");
 }
@@ -419,8 +419,9 @@ fn a_spread_handler_is_dropped_on_an_owning_root_in_release() {
 fn an_owning_root_still_takes_the_rest_of_a_spread() {
     let out = list(|list| {
         list.own_events();
-        list.set("onsubmit", "{save(event)}");
-        list.spread(&Attrs::new().set("class", "wide").set("on-select", "{pick}"));
+        list.set_source("onsubmit", "{save(event)}");
+        list.spread(&Attrs::new().set("class", "wide"));
+        list.spread(&Bindings::__from_html(&[("on-select", "{pick}")]));
     });
     assert_eq!(
         out,
@@ -433,7 +434,52 @@ fn an_owning_root_still_takes_the_rest_of_a_spread() {
 #[test]
 fn a_spread_handler_is_kept_on_a_root_that_does_not_own_its_events() {
     assert_eq!(
-        list(|list| list.spread(&Attrs::new().set("onclick", "{pick()}"))),
-        " onclick=\"{pick()}\""
+        list(|list| list.spread(&Bindings::__from_html(&[("onclick", "pick()")]))),
+        " onclick=\"pick()\""
     );
+}
+
+// ------------------------------------------------------------ braces
+
+/// A spread's values are data, like every `@{…}` value: their braces are
+/// written as references, so a stored `{…}` cannot open a client expression.
+#[test]
+fn a_spread_value_cannot_open_a_client_expression() {
+    let out = list(|list| {
+        list.spread(&Attrs::new().set("title", "{steal()}"));
+        list.spread(&[("data-note", "{x}")]);
+    });
+    assert_eq!(
+        out,
+        " title=\"&#123;steal()&#125;\" data-note=\"&#123;x&#125;\""
+    );
+}
+
+/// `Bindings` is the source a component tag wrote, which only `html!` builds,
+/// so its braces stay live while its quotes are still escaped.
+#[test]
+fn bindings_keep_their_source() {
+    let bindings = Bindings::__from_html(&[("onclick", "pick({ id: 1 })"), ("title", "\"x\"")]);
+    assert_eq!(
+        list(|list| list.spread(&bindings)),
+        " onclick=\"pick({ id: 1 })\" title=\"&quot;x&quot;\""
+    );
+    assert_eq!(bindings.iter().count(), 2);
+    assert!(Bindings::default().is_empty());
+}
+
+/// A data spread cannot write a native handler: the runtime would run the
+/// string as JavaScript. A caller's handler travels as `Bindings`.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "run it as JavaScript")]
+fn a_data_spread_cannot_write_a_handler() {
+    let _ = list(|list| list.spread(&Attrs::new().set("onclick", "steal()")));
+}
+
+#[test]
+#[cfg(not(debug_assertions))]
+fn a_data_spread_handler_is_dropped_in_release() {
+    let out = list(|list| list.spread(&[("onclick", "steal()"), ("id", "a")]));
+    assert_eq!(out, " id=\"a\"");
 }

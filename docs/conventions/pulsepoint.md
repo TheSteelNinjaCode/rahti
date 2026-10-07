@@ -20,20 +20,186 @@ when the framework ships a new build.
 
 That bundle is the whole runtime. Never hand-edit the minified file.
 
+Companion guides:
+
+- `pulsepoint-hooks.md` — every `pp.*` hook with an example, context, refs,
+  portals, error boundaries, stable callbacks (`pp.event`).
+- `pulsepoint-performance.md` — render ownership, slow inputs and lists, keyed
+  rows, identity, splitting a large page, diagnosing re-renders.
+- `pulsepoint-web-apis.md` — WebGPU, workers, WebAssembly, media and device
+  APIs, third-party libraries, DOM ownership for games and widgets.
+- `pulsepoint-navigation.md` — SPA navigation, scroll, loading regions,
+  `pp.redirect`.
+
+PulsePoint's **script API** mirrors React hooks. Its **markup is plain HTML**
+with `{…}` bindings, compiled by a template compiler that has no JSX support
+of any kind. Conflating the two is the most common way generated PulsePoint
+code fails.
+
+## Hard Invariants
+
+Apply these before writing any block, even without reading further:
+
+1. One authored root per block, with its `<script>` inside that root (see
+   `rendering-and-components.md` for roots and fragments).
+2. Bind first-party events with native `on*` attributes in the markup. Never
+   wire your own UI with ids, `querySelector`, `addEventListener` or
+   `innerHTML`.
+3. A form submit reads its fields with
+   `Object.fromEntries(new FormData(event.currentTarget))` and sends them with
+   `pp.rpc`; refs are for imperative access only.
+4. Values the markup shows live in `pp.state`; template-facing bindings are
+   declared at the top level of the script.
+5. Talk to the server through `pp.rpc` (`#[rpc]`), `pp.socket` (`#[socket]`)
+   and rpc streaming — never a hand-written `fetch`, `EventSource` or
+   `WebSocket` to your own application.
+6. `pp-for` goes only on a `<template>`, with a plain `key` on the repeated
+   element. Context is `pp.createContext`, a lowercase `<token.provider>` tag
+   and `pp.context(token)`.
+7. A `{…}` binding produces text, never elements. Conditionals are
+   `hidden="{…}"`; lists are `<template pp-for>`.
+8. The lists below are closed. If an API is not in them, it does not exist:
+   do not invent hooks, directives or globals.
+9. Verify behavior in a browser: a browser test with `rahti::browser`
+   (`testing.md`) and an empty `browser.errors()`, or a manual check of the
+   page and `.rahti/dev.log`. A passing `cargo test` proves the server.
+
+## PulsePoint Is Not JSX
+
+The React comparison covers exactly two things: the **hook API inside
+`<script>`**, and **splitting a page into components** with props. It does
+not extend to markup. PulsePoint markup is HTML that the browser parses
+first; a `{…}` binding is evaluated to a value and written as text.
+
+| JSX habit | What happens | Write instead |
+| --- | --- | --- |
+| `{open && <div>…</div>}` | the element is always in the page, beside stray text | `<div hidden="{!open}">…</div>` |
+| `{cond ? <A /> : <B />}` | both branches render | two elements with opposite `hidden="{…}"` |
+| `{items.map(i => <li>{i.name}</li>)}` | one `<li>`, plus stray text | `<template pp-for="item in items"><li key="{item.id}">{item.name}</li></template>` |
+| `className=`, `htmlFor=` | attributes nothing reads | `class=`, `for=` |
+| `onClick={…}` | not a DOM event attribute | `onclick="…"` |
+| `defaultValue=`, `defaultChecked=` | ignored | `defaultvalue=`, `defaultchecked=` |
+| `style={{color: 'red'}}` | an object is not CSS text | `pp-style="{"color: " + color}"` — a string |
+| `dangerouslySetInnerHTML` | does not exist | `@{Html::from_raw(…)}` on the server, for trusted markup only |
+
+`html!` refuses every row of this table at compile time, with the form to
+write instead, and so does every directive that does not exist (`pp-if`,
+`pp-show`, `pp-else`, `pp-model`, `pp-bind`, `pp-class`, `pp-text`,
+`pp-html`, `pp-on`, `pp-key`, `pp-context`) and `pp-for` on anything but a
+`<template>`. An attribute binding is the whole quoted value, as in HTML —
+`class="{expr}"`; an unquoted `class={expr}` is refused with the quoted form
+to write.
+
+The one-line test: *would this markup be valid HTML if every `{…}` were
+deleted?* If not, it is JSX, and it will not work.
+
+## Server Values and Client Code
+
+A server value never goes inside client code. HTML escaping is not
+JavaScript escaping: the browser decodes `&#39;` back to `'` before the
+runtime runs a handler or evaluates a `{…}` binding, so a value placed there
+can end the string it sits in and execute. Hand the value over as data and
+write its name in the client code:
+
+```rust
+html! {r##"
+    <section>
+        <button onclick="pick(id)">Pick</button>
+        <script>
+            const id = @{Json(&user.id)};
+            function pick(id) { /* … */ }
+        </script>
+    </section>
+"##}
+```
+
+`html!` refuses each other form at compile time, with the form above as the
+fix:
+
+| Written | Refused because |
+| --- | --- |
+| `onclick=@{handler}` | a server value would run as a handler |
+| `onclick="pick(@{id})"` | `@{…}` in a quoted value is text, never interpolated |
+| `{greet(@{name})}`, `title="{label + @{suffix}}"` | a `{…}` binding is browser source, copied through as written |
+
+A spread that writes a native handler (`onclick`) from a string value is
+refused at render (a debug assertion; dropped in release); a caller's handler
+travels as `bindings: Bindings`. A value's braces are escaped wherever it
+lands, so `title=@{comment}` and `<p>@{comment}</p>` are always text.
+
+## Complete Directive and API Surface
+
+**These lists are closed.** If something is not listed, it does not exist —
+do not infer it from React, Vue, Alpine or another runtime.
+
+### Template syntax
+
+| Syntax | Where | Purpose |
+| --- | --- | --- |
+| `{expression}` | text, and attribute values | reactive text or attribute value |
+| `on…={…}` (any native event: `onclick`, `oninput`, `onsubmit`, …) | any element | event handler |
+| `pp-for="item in items"` / `"(item, index) in items"` | **`<template>` only** | keyed list |
+| `key="{expression}"` | the repeated element inside `pp-for` | row identity |
+| `pp-ref="{ref}"` | elements | element handle (`pp.ref`) or callback ref |
+| `defaultvalue="{expression}"` | `<input>`, `<textarea>`, `<select>` | seed an **uncontrolled** field once |
+| `defaultchecked="{expression}"` | checkbox, radio | seed an **uncontrolled** control once |
+| `pp-style="{cssText}"` | any element | dynamic inline style, as a CSS **string** |
+| `pp-spread="{...object}"` | any element | spread an object into attributes |
+| `<token.provider value="{…}">` (lowercase) | markup | context provider |
+| `pp-spa="false"` | `<a>` | a normal browser navigation for that link |
+| `pp-reset-scroll="true"` | a scroll container or `<body>` | reset its scroll on navigation |
+| `pp-scroll-key="name"` | a scroll container | stable scroll-restoration identity |
+| `pp-loading-content="true"` | a layout's content pane | the region a loading region replaces |
+| `pp-loading-transition` | inside a `loading.rs` | fade timing, as JSON |
+
+`pp-style` is rewritten to the native `style` attribute and merged with a
+static `style` on the same element. `pp-spread` omits nullish values, writes
+HTML booleans bare when `true` and drops them when `false`, and keeps
+`aria-*`/`data-*` booleans as `"true"`/`"false"`.
+
+### Hooks
+
+`pp.state`, `pp.effect`, `pp.layoutEffect`, `pp.ref`, `pp.memo`,
+`pp.callback`, `pp.event`, `pp.reducer`, `pp.context`, `pp.portal`, `pp.id`,
+`pp.errorBoundary`, `pp.syncExternalStore`, `pp.imperativeHandle`,
+`pp.transition`, `pp.deferredValue`, `pp.optimistic`, and the `pp.props`
+bag. Each one, with an example, is in `pulsepoint-hooks.md`.
+
+### Utilities
+
+`pp.createContext`, `pp.mount`, `pp.redirect`, `pp.rpc`, `pp.socket`,
+`pp.enablePerf`, `pp.disablePerf`, `pp.getPerfStats`, `pp.resetPerfStats`.
+
+### Runtime-managed — never author
+
+`pp-component`, `pp-owner`, `pp-event-owner`, `pp-ref-owner`,
+`pp-ref-forward`, `<pp-context-provider>`, `<pp-fragment>`, every `data-pp-*`
+attribute, and `pp-keep*`. `html!` and the runtime write them — including the
+`<template pp-component="…">` around a root layout's `<slot />` and the
+`<!--pp:…-->`/`<!--/pp-->` pair around a `<>…</>` fragment.
+
+### React APIs with no equivalent
+
+`forwardRef`, component-wrapper `memo`, `lazy`, `Suspense`,
+`useInsertionEffect`, `useDebugValue`, `useActionState`, `useFormStatus`, and
+a free-standing `startTransition`. Nor does PulsePoint wrap browser APIs:
+there is no `pp.gpu`, `pp.worker`, `pp.audio` or `pp.storage` — call the
+browser directly (`pulsepoint-web-apis.md`).
+
 ## Authoring Model
 
 PulsePoint scripts are plain JavaScript inside the reactive root:
 
 ```rust
-html! {
+html! {r##"
     <section>
         <p>{count}</p>
-        <button onclick={setCount(value => value + 1)}>"Increment"</button>
+        <button onclick="setCount(value => value + 1)">Increment</button>
         <script>
             const [count, setCount] = pp.state(0);
         </script>
     </section>
-}
+"##}
 ```
 
 The root and script are one component scope. Hooks must run in a stable order
@@ -77,38 +243,47 @@ of one component on a page are separate scopes even though they share a
 name: the runtime derives a unique identity per instance, which is why two
 copies of the same counter count independently.
 
-## Binding Surface
+## First-Party UI Is PulsePoint From the Start
 
-PulsePoint supports:
+PulsePoint is the event, state and reactivity model for a block's own UI, not
+an enhancement added afterwards:
 
-| Syntax | Purpose |
-| --- | --- |
-| `{expression}` in text | Escaped reactive text/value |
-| `{expression}` in a quoted emitted attribute | Reactive attribute/property |
-| any native `on*` attribute | Event handler expression |
-| `pp-for="item in items"` | Loop on a `<template>` |
-| `pp-for="(item, index) in items"` | Loop with index |
-| `key="{expression}"` | Repeated row identity |
-| `pp-ref={ref}` | Bind a native element/ref |
-| `pp-style="{cssText}"` | Dynamic inline style |
-| `pp-spread="{object}"` | Spread dynamic attributes |
-| lowercase `<token.provider value="{value}">` | Context provider |
-| `pp-spa="false"` on `<a>` | Opt out of SPA interception |
-| `pp-reset-scroll="true"` | Reset a scroll container on navigation |
-| `pp-scroll-key="name"` | Stable scroll-restoration identity |
-| `pp-loading-content="true"` | The region a `loading.rs` replaces |
-| `pp-loading-transition` | Fade timing for that swap, as JSON |
+- put the button, form, input, menu, filter or list in the `html!` of the
+  block that owns it;
+- bind its events with `on…={…}`, keep its values in `pp.state`, render
+  conditions with `hidden="{…}"` and lists with `pp-for`;
+- reach for `pp.ref` + `pp-ref` only for real imperative access: focus,
+  measurement, media, canvas, third-party widgets, clearing a file input;
+- do lifecycle work in `pp.effect`, and call the server with `pp.rpc`.
 
-There is no `pp-if`, `pp-show`, `pp-else`, or `pp-key`. Use boolean attributes
-such as `hidden={condition}`, ternary expressions, and plain `key`.
+Never build a parallel JavaScript layer for it: no ids added so a script can
+find an element, no `data-*` attributes as private state or as click targets
+for a scanning script, no `addEventListener` for ordinary clicks and inputs,
+no `innerHTML` repaints of lists, no hand-rolled store or event bus for state
+one component owns. Direct DOM APIs are the narrow escape hatch for
+integrations, and even then they live behind `pp.ref` + `pp.effect` in the
+owning component.
 
-Do not handwrite runtime internals including `pp-component`, `pp-owner`,
-`pp-ref-owner`, `pp-ref-forward`, or `data-pp-*`. Rahti's macros and the
-runtime manage them — including the `<template pp-component="...">` a root
-layout's page is wrapped in, which `html!` injects around the layout's
-`<slot />`, and the `<!--pp:…-->`/`<!--/pp-->` comment pair a `<>…</>`
-fragment ships between. The same goes for the `<pp-fragment>` element the
-runtime raises a pair into at mount: never author one.
+```rust
+html! {r##"
+    <section>
+        <input value="{query}" oninput="setQuery(target.value)" />
+        <button onclick="setQuery('')" disabled="{query.length === 0}">Clear</button>
+        <ul>
+            <template pp-for="item in shown">
+                <li key="{item.id}">{item.label}</li>
+            </template>
+        </ul>
+        <script>
+            const [query, setQuery] = pp.state('');
+            const items = @{Json(&items)};
+            const shown = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
+        </script>
+    </section>
+"##}
+```
+
+## Bindings
 
 ### Value Rendering
 
@@ -136,14 +311,14 @@ The boolean row is the one that costs time. A value seeded from Rust as
 correctly and then renders as an empty span:
 
 ```rust
-<p>"Admin: "<span>{admin}</span></p>   // admin === false → renders nothing
+<p>Admin: <span>{admin}</span></p>   // admin === false → renders nothing
 ```
 
 Spell the display out in the expression instead of binding the raw value:
 
 ```rust
-<p>"Admin: "<span>{admin ? "yes" : "no"}</span></p>
-<p>"Role: "<span>{role ? role : "none"}</span></p>
+<p>Admin: <span>{admin ? "yes" : "no"}</span></p>
+<p>Role: <span>{role ? role : "none"}</span></p>
 ```
 
 The same rule is why the React `&&` idiom leaks a zero. `{items.length && "…"}`
@@ -172,10 +347,10 @@ Two of those rows differ from React and are worth reading twice.
 
 A boolean on a non-boolean attribute is serialized rather than dropped, because
 `aria-pressed` and `data-` flags are string-valued in the DOM and an author
-writing `aria-expanded={open}` means `"true"`/`"false"`, not presence.
+writing `aria-expanded="{open}"` means `"true"`/`"false"`, not presence.
 
 A nullish value on a non-boolean attribute leaves the attribute present and
-empty — `title={null}` emits `title=""`, where React would omit the attribute.
+empty — `title="{null}"` emits `title=""`, where React would omit the attribute.
 It is harmless on `class` or `title` and is not harmless on a URL attribute:
 `src=""` re-requests the current document and `href=""` links to it. Guard the
 expression when the attribute is a URL:
@@ -197,8 +372,8 @@ that is an object rather than an array is therefore a blank list, not an error.
 Rahti authoring commonly uses:
 
 ```rust
-onclick={save()}
-oninput={setName(target.value)}
+onclick="save()"
+oninput="setName(target.value)"
 ```
 
 Within an event expression PulsePoint exposes:
@@ -215,12 +390,12 @@ A handler on a block's root element runs in that block's scope, as in React:
 ```rust
 #[component]
 pub fn SubmitForm() -> Html {
-    html! {
-        <form onsubmit={handleSubmit(event)}>
+    html! {r##"
+        <form onsubmit="handleSubmit(event)">
             …
             <script>function handleSubmit(e) { e.preventDefault(); }</script>
         </form>
-    }
+    "##}
 }
 ```
 
@@ -242,8 +417,8 @@ component writes there can never read the component's own state or
 `pp.props`. `html!` refuses it at compile time in a `#[component]`:
 
 ```rust
-<section hidden={!open}>              // compile error in a component
-<section><div hidden={!open}>…</div>  // bind an element inside the root
+<section hidden="{!open}">              // compile error in a component
+<section><div hidden="{!open}">…</div>  // bind an element inside the root
 ```
 
 A value the caller passes as a `{…}` prop and the component writes on its
@@ -251,30 +426,117 @@ root through `bindings` is the caller's expression, evaluated where it was
 written. Server `@{…}` values, `pp-*` attributes, and JSON data on the root
 compile as usual. Page and layout roots are not checked.
 
+A handler in children written between component tags runs in the scope of
+the block that **wrote** it, not the component it renders inside, so the
+function it calls must be declared in that block's script. `ReferenceError: fn
+is not defined` from a handler that clearly fired means the function lives in
+the wrong script — moving the element into a wrapper component does not
+change its owner, and neither does `pp.portal`.
+
 ### Forms
 
-`value={state}` and `checked={state}` are controlled bindings. Default values
-are uncontrolled. Do not switch a control between controlled and uncontrolled
-after mount. PulsePoint preserves selection/focus and handles input, textarea,
-select, checkbox/radio, and form-reset behavior.
-
-On a large page PulsePoint may defer the render an `input` event causes to the
-next frame. A discrete event — `submit`, `click`, `keydown`, and so on — commits
-any such pending render before its handler runs, so a handler always reads the
-state every earlier edit produced, as in React: typing then pressing Enter, or
-an autofill followed by a submit in the same frame, never submits stale state.
-Events that carry their control's own new value (`input`, `change`, `blur`,
-`focusout`, and a checkbox or radio `click`) are not preceded by that commit,
-because re-rendering first would write the old controlled value back before
-the handler reads it.
-
-Use `pp.ref` plus `pp-ref` for file inputs and imperative DOM access:
+A form submit reads its own fields: `FormData` from the submitted form, sent
+with `pp.rpc`. The input `name`s are the payload, the rpc's parameter names
+receive them, and validation happens in Rust:
 
 ```rust
-<input type="file" pp-ref={file} />
-<script>
-    const file = pp.ref(null);
-</script>
+html! {r##"
+    <form onsubmit="save(event)" novalidate>
+        <input name="name" value=@{user.name} autocomplete="name" />
+        <p hidden="{!errors.name}">{errors.name}</p>
+        <input name="email" type="email" value=@{user.email} autocomplete="email" />
+        <p hidden="{!errors.email}">{errors.email}</p>
+        <button disabled="{saving}">{saving ? "Saving…" : "Save"}</button>
+        <script>
+            const [saving, setSaving] = pp.state(false);
+            const [errors, setErrors] = pp.state({});
+
+            async function save(event) {
+                event.preventDefault();
+                if (saving) return;
+                const data = Object.fromEntries(new FormData(event.currentTarget));
+                setSaving(true);
+                try {
+                    await pp.rpc('save_profile', data);
+                    setErrors({});
+                } catch (failure) {
+                    setErrors(failure.errors ?? {}); // 422 field messages from Validator
+                } finally {
+                    setSaving(false);
+                }
+            }
+        </script>
+    </form>
+"##}
+```
+
+```rust
+#[rpc(auth)]
+pub async fn save_profile(name: String, email: String) -> Result<()> {
+    let mut validator = Validator::new();
+    validator.required("name", &name).required("email", &email).email("email", &email);
+    validator.finish()?;
+    // the signed-in member comes from the session, never from the payload
+    Ok(())
+}
+```
+
+- `FormData` values are strings: declare `String` parameters and parse or
+  validate in Rust. A field the rpc does not declare is not read.
+- `event.currentTarget` is the form that owns the handler, wherever the
+  submit came from.
+- A rejected `pp.rpc` is an `RpcError`; `failure.errors` is the field map a
+  `Validator` produced (HTTP 422). Expected 4xx refusals are not logged as
+  console errors — handle them and show them.
+- Do not read a form through a ref per input, or attach a submit listener in
+  an effect.
+
+**A control is controlled or uncontrolled for its whole life.**
+`value="{state}"` / `checked="{state}"` with an `oninput` handler is controlled;
+`defaultvalue="{…}"` / `defaultchecked="{…}"` is uncontrolled, applied once and
+then left to the user. Switching between them — usually by binding `value` to
+state that starts `undefined` — logs
+`[PP-WARN] <input#email> changed from uncontrolled to controlled.` Give the
+state a defined initial value; never write both forms.
+
+On a large block PulsePoint may defer the render an `input` event causes to
+the next frame. A discrete event — `submit`, `click`, `keydown` — commits any
+pending render before its handler runs, so a handler always reads the state
+every earlier edit produced: typing then pressing Enter, or an autofill
+followed by a submit in the same frame, never submits stale state. Events that
+carry their control's own new value (`input`, `change`, `blur`, `focusout`,
+and a checkbox or radio `click`) are not preceded by that commit.
+
+### Conditional Rendering
+
+There is no conditional directive. In order of preference:
+
+1. **`hidden="{…}"`** — the default. The element stays in the DOM with its
+   state; only visibility changes. Guard expressions inside it
+   (`{target?.name}`), because a hidden subtree still renders.
+   `hidden` is `display: none` from the browser's own stylesheet, and any
+   `display` rule on the element overrides it; Tailwind's preflight makes it
+   `display: none !important`, so it wins over `flex` or `grid` there.
+2. **A ternary in a binding** — for text, classes and attributes:
+   `{saving ? "Saving…" : "Save"}`, `class="{"badge " + (admin ? "badge-admin" : "badge-user")}"`.
+3. **`pp-for` over a zero-or-one list** — when the node must truly leave the
+   DOM (an expensive child, a duplicate field name, media that must stop):
+
+```rust
+<template pp-for="item in selected ? [selected] : []">
+    <section key="{item.id}">…</section>
+</template>
+```
+
+An empty state is a `hidden` placeholder beside the list, not a branch:
+
+```rust
+<tbody>
+    <tr hidden="{rows.length !== 0}"><td colspan="5">No rows.</td></tr>
+    <template pp-for="row in rows">
+        <tr key="{row.id}">…</tr>
+    </template>
+</tbody>
 ```
 
 ### Lists
@@ -301,14 +563,14 @@ nesting:
 ```rust
 #[component]
 pub fn Code() -> Html {
-    html! {
+    html! {r##"
         <p>
             <template pp-for="(letter, index) in letters">
                 <span key="{index}">{letter}</span>
             </template>
             <script>const letters = ["K", "7", "Q"];</script>
         </p>
-    }
+    "##}
 }
 
 // In a page:
@@ -320,118 +582,20 @@ pub fn Code() -> Html {
 `letters` resolves in `Code` for every row the page's loop renders, even
 though the page never defines it.
 
+- Collections may be arrays or any synchronous iterable: `Set`, `Map`, typed
+  arrays, strings, generators. A non-iterable value warns and renders no rows.
+- Handlers inside a loop capture their own row, so later collection changes
+  do not retarget an existing row's handler.
+- Keys must be unique among siblings; duplicates warn and weaken diffing.
+  Keyed rows that render identically are reused without being re-parsed —
+  see "Keyed Rows Are Reconciled Per Row" in `pulsepoint-performance.md`.
+
 ## Hooks
 
-### `pp.state(initial)`
-
-Returns `[value, setter]`. The initial value may be a value or lazy function.
-The setter accepts a replacement or `(previous) => next`. Equal values use
-`Object.is` and do not rerender.
-
-### `pp.effect(callback, deps?)`
-
-Runs after commit. It may return a synchronous cleanup function. Start async
-work inside the callback; do not return a Promise. Omitted dependencies rerun,
-`[]` runs once per mount, and a dependency array uses `Object.is`.
-
-### `pp.layoutEffect(callback, deps?)`
-
-Runs synchronously after DOM mutation and before normal effects. Reserve it for
-measurement or synchronous DOM coordination.
-
-### `pp.ref(initial?)`
-
-Returns a stable `{ current }` object. Pair it with `pp-ref`, portals, or
-imperative handles.
-
-### `pp.memo(factory, deps?)`
-
-Memoizes a computed value.
-
-### `pp.callback(function, deps?)`
-
-Memoizes a function identity. Use for stable subscriptions and callbacks.
-
-### `pp.event(function)`
-
-Returns a function whose identity never changes and which always runs the
-version the latest render passed in — React's `useEffectEvent`, callable
-anywhere. It is the answer to stale closures: a plain function captures the
-state of the render that created it, so a handler handed once to something
-outside the render cycle — a library callback, a socket's `onMessage`, a
-listener added in a `[]` effect — keeps reading old state forever.
-
-```javascript
-const [workers, setWorkers] = pp.state([]);
-
-// Reads the current `workers` every time the 3D world calls it.
-const useDesk = pp.event((deskId) => {
-    const sitting = workers.find((w) => w.desk === deskId);
-    sitting ? openTerminal(sitting.id) : openHireWindow(deskId);
-});
-
-pp.effect(() => {
-    world.current = createWorld(canvas.current, { onUse: useDesk });
-    return () => world.current.dispose();
-}, []);
-```
-
-Use `pp.event` for a function given away once; use `pp.callback` when a
-dependency list is genuinely what decides the identity. Do not keep a
-hand-written "latest values" ref for this.
-
-### `pp.reducer(reducer, initial, init?)`
-
-Returns `[state, dispatch]`; supports an optional initializer.
-
-### `pp.createContext(defaultValue)` and `pp.context(token)`
-
-Creates and reads logical ancestor context. Providers are rendered with the
-lowercase token-derived `.provider` tag. Reads belong in the component script
-render phase, not inside a later event callback.
-
-### `pp.portal(ref, target?)`
-
-Moves the referenced content to another DOM target while preserving logical
-component ancestry, context, and lifecycle.
-
-### `pp.id()`
-
-Returns a stable component-local identifier for `id`, `for`, and ARIA pairs.
-
-### `pp.errorBoundary()`
-
-Returns `[error, reset]`. It catches descendant render/effect failures. Call
-`reset()` to clear the latched error and re-arm it. It also catches the
-declaring component's own render and effect failures; without a boundary,
-errors walk to the nearest ancestor boundary. After five failures without a
-reset, a boundary stops catching to avoid a render loop and logs the error.
-Event-handler exceptions are logged by the event system, so handle expected
-async failures in the event handler itself. This is a client boundary,
-distinct from Rahti's server-side `error.rs`.
-
-### `pp.syncExternalStore(subscribe, getSnapshot)`
-
-Subscribes to browser/external state. Memoize `subscribe` when its identity
-would otherwise change each render.
-
-### `pp.imperativeHandle(ref, createHandle, deps?)`
-
-Publishes a controlled imperative API through an object or callback ref.
-
-### `pp.transition()`
-
-Returns `[isPending, startTransition]`. The transition remains pending until a
-synchronous scope or returned Promise settles.
-
-### `pp.deferredValue(value, initial?)`
-
-Returns a value that updates after the current commit.
-
-### `pp.optimistic(passthrough, reducer?)`
-
-Returns `[optimisticValue, addOptimistic]`. Pending optimistic actions replay
-over the confirmed value and reset when the passthrough value changes.
+The whole list is in "Complete Directive and API Surface" above, and every
+hook with an example is in `pulsepoint-hooks.md`. Hooks run at the top level
+of the script, in the same order on every render, as in React; never call one
+conditionally or after the component is disposed.
 
 ### `pp.props`
 
@@ -453,14 +617,14 @@ like `props.x` in JSX:
 ```rust
 #[component]
 pub fn Greeting(user_name: &str) -> Html {
-    html! {
+    html! {r##"
         <div user-name=@{user_name}>
             <b>{pp.props.userName}</b>
             <p>{name}</p>
-            <button type="button" onclick={setName(pp.props.userName)}>"Reset"</button>
+            <button type="button" onclick="setName(pp.props.userName)">Reset</button>
             <script>const [name, setName] = pp.state(pp.props.userName ?? "");</script>
         </div>
-    }
+    "##}
 }
 ```
 
@@ -483,236 +647,6 @@ independent state, as `useState(props.x)` does.
 - `pp.enablePerf()` / `pp.disablePerf()` toggle runtime performance sampling.
 - `pp.getPerfStats()` returns per-component render-phase aggregates.
 - `pp.resetPerfStats()` clears the aggregates.
-
-## Native Web APIs
-
-A component's `<script>` is plain browser JavaScript, evaluated as a function
-body in the page's own global scope. It is not a sandbox and no build step
-rewrites it: `window`, `document`, and `navigator` are the objects every other
-script on the page sees, and DevTools debug the script as written. Every web
-API the browser ships is therefore available to a component directly:
-
-- **WebGPU** (`navigator.gpu`) — GPU rendering and compute: large charts,
-  simulations, image and video processing, in-browser ML inference;
-- **Canvas 2D / WebGL** — drawing, charts, image processing;
-- **Web Workers / OffscreenCanvas** — parsing, number crunching, or rendering
-  off the main thread;
-- **WebAssembly** — native-speed modules compiled from Rust, C, or Go;
-- **Web Audio**, **media capture**, and **WebRTC** — synthesis, camera,
-  microphone, screen share, calls;
-- **IndexedDB / Cache Storage** and the **Intersection / Resize / Mutation
-  observers**;
-- **Web Serial / WebUSB / WebHID / Web Bluetooth**, plus Clipboard,
-  Notifications, File System Access, and Geolocation.
-
-PulsePoint wraps none of them, and none needs a wrapper: do not invent
-`pp.gpu`, `pp.worker`, or similar. When a task needs heavy or hardware-backed
-work, write the browser API inside the component that owns it. Do not declare
-the task out of reach, add a second frontend framework, or push per-frame work
-through `pp.state`.
-
-The parts divide the work:
-
-| Job | Use |
-| --- | --- |
-| Data from the server | `#[rpc]` + `pp.rpc`, `RpcStream`, `#[socket]` + `pp.socket`, or `@{Json(&value)}` for the first render |
-| Values the markup shows | `pp.state` — a change re-renders only the nodes that differ |
-| Handles to browser objects | `pp.ref` — devices, buffers, contexts, workers, audio graphs, streams; a ref change never re-renders |
-| Acquire, feed, release | `pp.effect` — create on mount, push new state in when it changes, dispose in the cleanup |
-| The heavy work | the browser API itself — shaders, threads, codecs, and hardware run at native speed, outside PulsePoint |
-
-A WebGPU chart fed by an rpc. The server renders the first series into the
-page, and each click asks for a new one:
-
-```rust
-use crate::rahti::{Html, Json, html, rpc};
-
-fn series(points: u32, phase: f32) -> Vec<f32> {
-    (0..points.clamp(8, 512))
-        .map(|i| 0.5 + 0.4 * (phase + i as f32 / 6.0).sin())
-        .collect()
-}
-
-#[rpc]
-pub async fn gpu_series(points: u32, phase: f32) -> Vec<f32> {
-    series(points, phase)
-}
-
-pub async fn page() -> Html {
-    let initial = series(48, 0.0);
-    html! {
-        <section>
-            <canvas pp-ref={canvas} width="640" height="240"></canvas>
-            <button onclick={load()}>"Refresh"</button>
-            <p hidden={gpuSupported}>"WebGPU is unavailable; drawing with Canvas 2D."</p>
-            <script>
-                const canvas = pp.ref(null);
-                const gpu = pp.ref(null);                // device, pipeline, buffers: never state
-                const [series, setSeries] = pp.state(@{Json(&initial)});
-                const [ready, setReady] = pp.state(false);
-                const gpuSupported = !!navigator.gpu;
-
-                // Acquire the GPU once; release it on unmount.
-                pp.effect(() => {
-                    if (!navigator.gpu) { setReady(true); return; }
-                    let cancelled = false;
-                    initGpu(canvas.current).then((g) => {
-                        if (cancelled) return g?.device.destroy();
-                        gpu.current = g;
-                        setReady(true);
-                    });
-                    return () => {
-                        cancelled = true;
-                        gpu.current?.device.destroy();
-                        gpu.current = null;
-                    };
-                }, []);
-
-                // Every new series: write it to a GPU buffer and draw.
-                pp.effect(() => {
-                    if (!ready) return;
-                    gpu.current ? drawGpu(gpu.current, series) : draw2d(canvas.current, series);
-                }, [series, ready]);
-
-                async function load() {
-                    const values = await pp.rpc("gpu_series", { points: 64, phase: Math.random() * 6.28 });
-                    setSeries(values);
-                }
-
-                // initGpu, drawGpu, and draw2d are plain WebGPU and Canvas code:
-                // navigator.gpu.requestAdapter(), adapter.requestDevice(),
-                // canvas.getContext("webgpu"), a render pipeline,
-                // device.queue.writeBuffer(...), a render pass.
-            </script>
-        </section>
-    }
-}
-```
-
-A continuous animation belongs to the browser's frame loop, not to the render
-cycle; state only starts and stops it:
-
-```javascript
-const frame = pp.ref(0);
-const [running, setRunning] = pp.state(true);
-
-pp.effect(() => {
-    if (!running) return;
-    let id = requestAnimationFrame(function tick(t) {
-        frame.current += 1;             // a ref: no render per frame
-        renderFrame(gpu.current, t);    // the GPU does the per-frame work
-        id = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(id);
-}, [running]);
-```
-
-A worker takes data from the server and hands its answer back to state:
-
-```javascript
-const worker = pp.ref(null);
-const [result, setResult] = pp.state(null);
-
-pp.effect(() => {
-    const w = new Worker("/js/parse-worker.js", { type: "module" });
-    w.onmessage = (event) => setResult(event.data);
-    worker.current = w;
-    return () => w.terminate();
-}, []);
-
-async function analyze() {
-    worker.current.postMessage(await pp.rpc("export_rows"));
-}
-```
-
-Rules:
-
-- Browser objects — GPU devices and buffers, contexts, workers, audio
-  contexts, media streams, peer connections, observers, database handles —
-  live in `pp.ref`, never in `pp.state`.
-- What a library writes into the DOM is the library's. A re-render removes
-  only the attributes the template itself rendered, so a WebGL canvas keeps
-  the `width` and `height` its renderer set. An element bound with `pp-ref`
-  that the template renders **empty** is a host: a terminal, a map, an editor
-  or a chart mounts its children into it, and a re-render leaves them alone.
-  Give such a library an empty `<div pp-ref={host}></div>` of its own — put
-  no bindings or text inside it, or the template owns its children again.
-- A function handed to a library once (`onUse`, `onMessage`, `onTick`) is
-  wrapped in `pp.event(…)`, so it reads current state when the library calls
-  it later.
-- Acquire in an effect with `[]` dependencies and release in its cleanup:
-  `device.destroy()`, `worker.terminate()`, `audioContext.close()`,
-  `track.stop()`, `peerConnection.close()`, `observer.disconnect()`,
-  `db.close()`. SPA navigation unmounts the component, so a missing cleanup
-  leaks a GPU device or a running worker into the next page.
-- Cleanups are synchronous. Start async setup (`requestAdapter()`,
-  `getUserMedia()`, `WebAssembly.instantiateStreaming()`) inside the effect
-  and guard it with a `cancelled` flag, as above.
-- Feed the API from a second effect whose dependencies are the state it reads.
-  That effect is the bridge from server data to the GPU, worker, or audio
-  graph.
-- Per-frame values live in refs and per-frame work runs on
-  `requestAnimationFrame`. Never call a state setter every frame; set state
-  only when something on screen changes.
-- Feature-detect (`if (!navigator.gpu)`) and keep a fallback. WebGPU and most
-  device APIs need a secure context: HTTPS, or `localhost` in development.
-- APIs that need a user gesture — the hardware `request*()` pickers,
-  clipboard writes, fullscreen, the first `AudioContext.resume()` — run inside
-  the `on…` handler that received it, not in an effect.
-- A component script has no static `import`/`export` and no top-level
-  `await`. Load a library with `import()` inside an effect, or with its own
-  `<script type="module">` in a root layout.
-- Worker scripts, `.wasm` modules, shaders, and model files go in `public/`,
-  which serves them at the URL root.
-- Rahti's default CSP admits this: `worker-src 'self' blob:`, `script-src`
-  with `'unsafe-eval'` (which WebAssembly compilation needs) and `https:`, and
-  `connect-src` with `https:` and `blob:`. A worker script must be same-origin
-  or a `blob:` URL. An application that narrows its policy must keep these
-  sources for the APIs it uses; see `security-middleware.md`.
-- Results that must stay authoritative or secret — prices, permissions,
-  anything persisted — are computed in Rust behind `#[rpc]`. The browser API
-  is for rendering, interaction, and client-side acceleration.
-
-## Splitting a Large Page
-
-A state change re-renders the component that owns the state. A page that
-keeps everything in one script — a game HUD, a dashboard — re-renders all of
-its markup whenever any of it changes. Split it the way the state splits:
-
-- **Presentational pieces** that show the page's state go between component
-  tags; a `{…}` binding there reads the page's scope (see "Children and
-  Slots" in `rendering-and-components.md`).
-- **State several components share** lives in a small store module, loaded
-  before the runtime mounts, and each component reads the slice it shows
-  with `pp.syncExternalStore`. A change re-renders the components whose slice
-  changed, and no others:
-
-```javascript
-// public/js/office/store.js — loaded by the root layout before /js/main.js:
-// <script type="module" src="/js/office/store.js"></script>
-let state = { workers: [], hint: "" };
-const listeners = new Set();
-globalThis.officeStore = {
-    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    get: () => state,
-    set(patch) { state = { ...state, ...patch }; listeners.forEach((l) => l()); },
-};
-```
-
-```javascript
-// In the roster component's script:
-const store = globalThis.officeStore;
-const workers = pp.syncExternalStore(store.subscribe, () => store.get().workers);
-```
-
-  The snapshot function must return the same value for the same state —
-  select a slice the store keeps, never build a new array or object in it,
-  or every store change re-renders the component.
-- **A value a whole subtree reads** (a theme, the signed-in member) goes in a
-  context: `pp.createContext` and `pp.context`.
-
-Keep server data flowing in through rpcs and sockets as before; the store is
-the page's working state, not a cache of authority.
 
 ## Typed Modules
 
@@ -740,56 +674,6 @@ for JSDoc. Hooks (`pp.state`, `pp.effect`, …) belong to a component's own
 imports a library without type information (a vendored three.js build) needs
 that library's own declarations before it can be checked.
 
-## SPA Navigation
-
-PulsePoint intercepts eligible same-origin links after mount, fetches the next
-document, morphs owned DOM, preserves component identity where possible, and
-manages focus, scroll, history, redirects, and loading regions. Use
-`pp-spa="false"` for a hard navigation.
-
-Do not add a second client router. Rahti remains the URL and response authority.
-
-### Crossing Root Layouts
-
-A body swap only makes sense while the document stays the same. When an
-application has more than one root layout, the two shells have different
-`<head>` contents — different stylesheets, different scripts, possibly a
-different runtime setup — and swapping one body into the other would leave
-the page running the wrong shell.
-
-PulsePoint therefore compares the `X-PP-Root-Layout` header of the navigation
-response with the `<meta name="pp-root-layout">` of the current document. When
-both are present and they differ, it abandons the SPA path and sets
-`window.location.href` to the target, which is an ordinary full load. Equal
-values navigate in place as usual.
-
-Rahti sends both halves for every page a root layout wraps, including the root
-404, so nothing has to be written by hand. See "Root Layouts" in `routing.md`
-for how the identity is derived and how a second root layout is declared.
-
-A navigation between two pages under the same root layout is unaffected: the
-identities match, and the body is swapped as usual.
-
-### Loading Regions
-
-While a navigation is in flight the runtime replaces the first element in the
-document marked `pp-loading-content="true"` — or the whole `<body>` when
-nothing is marked — with the markup of the nearest loading region, then
-restores it from the response. Marking a section layout's content pane rather
-than a root layout's slot keeps the chrome around it on screen for the wait. The regions come from the application's
-`loading.rs` files; Rahti renders them once and writes them into every
-document inside a hidden container, so nothing about this is authored by hand
-beyond the two attributes above.
-
-The region is chosen from the path in the address bar when the navigation
-starts, which is the page being left. Ownership, the literal-path walk, the
-build-time refusal of a region under a dynamic segment, and the transition
-JSON are all in "Loading Regions" in `routing.md`.
-
-Defining any `loading.rs` opts the application out of the View Transitions
-path: the runtime uses the loading region instead. An application with no
-`loading.rs` writes no container and keeps view transitions.
-
 ## Development Diagnostics
 
 In development mode Rahti injects its classic diagnostic script before
@@ -809,11 +693,5 @@ constant two-line header above it).
 
 ## APIs Not Present
 
-Do not invent React compatibility. PulsePoint v2 has no direct equivalent for
-`forwardRef`, component-wrapper `memo`, `lazy`, `Suspense`,
-`useInsertionEffect`, `useActionState`, `useFormStatus`, or a free-standing
-`startTransition`.
-
-Nor does it wrap browser APIs. There is no `pp.gpu`, `pp.worker`, `pp.audio`,
-or `pp.storage`; call `navigator.gpu`, `new Worker(...)`, and the rest directly,
-as "Native Web APIs" describes.
+See "React APIs with no equivalent" above. Do not invent React compatibility,
+and do not invent wrappers around browser APIs.

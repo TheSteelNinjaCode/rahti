@@ -50,9 +50,9 @@ use super::error::Error;
 /// How large an upload may be, all its parts together, when nothing says
 /// otherwise.
 ///
-/// Larger than the 16 MiB this used to be, because the cost of an upload is
-/// no longer its size in memory. It is still a limit rather than none: the
-/// body is written to disk, and disk is also finite.
+/// Generous, because an upload's cost is not its size in memory: the body is
+/// written to disk as it arrives. It is still a limit rather than none, since
+/// disk is also finite.
 pub const DEFAULT_MAX_UPLOAD: usize = 128 * 1024 * 1024;
 
 /// How large any one file in an upload may be, when nothing says otherwise.

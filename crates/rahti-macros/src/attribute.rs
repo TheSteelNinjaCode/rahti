@@ -12,12 +12,12 @@
 //! ```ignore
 //! #[component]
 //! pub fn UserCard(name: &str, children: Html) -> Html {
-//!     html! {
+//!     html! {r##"
 //!         <article class="user-card">
 //!             <h2>{name}</h2>
 //!             <slot />
 //!         </article>
-//!     }
+//!     "##}
 //! }
 //! ```
 //!
@@ -290,7 +290,7 @@ fn parameters(
 /// assembles, not the component itself, and stamping it too would put the
 /// same name on two elements for the client runtime to trip over.
 ///
-/// Branches all count: `if cond { html! { … } } else { html! { … } }` returns
+/// Branches all count: `if cond { html! {r##"…"##} } else { html! {r##"…"##} }` returns
 /// one element either way, so both are the component's root.
 fn stamp_body(body: TokenStream, id: &str, name: &str, span: Span) -> Result<TokenStream, Error> {
     let toks: Vec<TokenTree> = body.into_iter().collect();
@@ -314,7 +314,7 @@ fn stamp_body(body: TokenStream, id: &str, name: &str, span: Span) -> Result<Tok
         return Ok(out);
     }
 
-    // No markup in the tail: the function ends in `return html! { … };`, or
+    // No markup in the tail: the function ends in `return html! {r##"…"##};`, or
     // it does not build markup at all.
     let all: TokenStream = toks.iter().cloned().collect();
     let stamped = stamp(all, id, Rule::AfterReturn, &mut found);
@@ -342,7 +342,7 @@ enum Rule {
     AfterReturn,
 }
 
-/// Rewrite `html! { … }` into `html! { @component "id" … }`.
+/// Rewrite `html! {r##"…"##}` into `html! {@component "id" r##"…"##}`.
 fn stamp(stream: TokenStream, id: &str, rule: Rule, found: &mut usize) -> TokenStream {
     let toks: Vec<TokenTree> = stream.into_iter().collect();
     let mut out = TokenStream::new();

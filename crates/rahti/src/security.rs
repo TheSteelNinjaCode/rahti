@@ -58,7 +58,7 @@ fn baseline(production: bool) -> SecurityHeaders {
     SecurityHeaders {
         content_security_policy: Some(format!(
             "default-src 'self'; \
-             script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; \
+             script-src 'self' 'unsafe-eval'; \
              worker-src 'self' blob:; \
              style-src 'self' 'unsafe-inline' https:; \
              img-src {media}; media-src {media}; \

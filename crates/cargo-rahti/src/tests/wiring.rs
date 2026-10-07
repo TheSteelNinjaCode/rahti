@@ -317,3 +317,52 @@ fn an_existing_connection_string_is_left_alone() {
     let env = "DATABASE_URL=\"postgres://elsewhere/db\"\n";
     assert_eq!(with_database_url(env, Backend::Sqlite), None);
 }
+
+/// A test-only feature declares the crate a second time, in
+/// `[dev-dependencies]`. Both pins move together: two versions of one crate
+/// do not resolve.
+#[test]
+fn a_dev_dependency_pin_moves_with_the_main_one() {
+    let manifest = "[dependencies]\nrahti = { version = \"0.0.44\", features = [\"ws\"] }\n\n\
+                    [dev-dependencies]\nrahti = { version = \"0.0.44\", features = [\"browser-test\"] }\n";
+    let (out, was) = with_version(manifest, "rahti", "0.0.45").unwrap().expect("a bump");
+    assert_eq!(was, "0.0.44");
+    assert!(out.contains("rahti = { version = \"0.0.45\", features = [\"ws\"] }"), "{out}");
+    assert!(
+        out.contains("rahti = { version = \"0.0.45\", features = [\"browser-test\"] }"),
+        "{out}"
+    );
+    assert!(!out.contains("0.0.44"), "{out}");
+}
+
+/// Platform tables are dependency tables too.
+#[test]
+fn a_target_dependency_pin_moves() {
+    let manifest = "[target.'cfg(windows)'.dependencies]\nrahti = \"0.0.7\"\n";
+    let (out, _) = with_version(manifest, "rahti", "0.0.9").unwrap().expect("a bump");
+    assert!(out.contains("rahti = \"0.0.9\""), "{out}");
+}
+
+/// A `[patch]` points at a checkout, and `[workspace.dependencies]` or any
+/// other table is not this project's pin: neither moves, even beside one
+/// that does.
+#[test]
+fn only_dependency_tables_move() {
+    let manifest = "[dependencies]\nrahti = \"0.0.7\"\n\n\
+                    [patch.crates-io]\nrahti = { path = \"../rahti/crates/rahti\" }\n\n\
+                    [workspace.dependencies]\nrahti = \"0.0.7\"\n\n\
+                    [features]\nrahti = []\n";
+    let (out, _) = with_version(manifest, "rahti", "0.0.9").unwrap().expect("a bump");
+    assert!(out.starts_with("[dependencies]\nrahti = \"0.0.9\""), "{out}");
+    assert!(out.contains("rahti = { path = \"../rahti/crates/rahti\" }"), "{out}");
+    assert!(out.contains("[workspace.dependencies]\nrahti = \"0.0.7\""), "{out}");
+    assert!(out.contains("[features]\nrahti = []"), "{out}");
+}
+
+/// The table form is refused by name, in whichever dependency table it is.
+#[test]
+fn a_dev_dependency_table_form_is_named() {
+    let manifest = "[dependencies]\nrahti = \"0.0.7\"\n\n[dev-dependencies.rahti]\nversion = \"0.0.7\"\n";
+    let err = with_version(manifest, "rahti", "0.0.9").unwrap_err();
+    assert!(err.contains("[dev-dependencies.rahti]"), "{err}");
+}

@@ -1033,9 +1033,9 @@ pub fn manifest_json(
     out.push_str("  \"components\": [\n");
     for (i, file) in components.iter().enumerate() {
         let comma = if i + 1 == components.len() { "" } else { "," };
-        // Name and module both: the generated router no longer names a
+        // Name and module both: the generated router does not name a
         // component's rpc — it is found in the link-time registry — so the
-        // manifest is the only place left that says where one is written.
+        // manifest is the one place that says where one is written.
         let rpcs = component_rpcs
             .iter()
             .filter(|r| &r.file == file)

@@ -128,8 +128,12 @@ The server runtime exports:
 
 ### `rahti-macros`
 
-- `html!` parses typed inline HTML, separates Rust and client expressions,
-  escapes interpolated data, and stamps component boundaries. An
+- `html!` reads a template — one raw string of HTML, `html! {r##"…"##}` —
+  through `template.rs`, which lexes it as text (so JavaScript, CSS and prose
+  never meet the Rust lexer), refuses authoring mistakes at their
+  `file:line:column`, and hands `parse.rs` the tokens it reads. It separates
+  Rust and client expressions, escapes interpolated data, and stamps component
+  boundaries. An
   uppercase-named tag is a component call: props map to the function's
   parameters by name, and the tag's children become its `children` argument.
   A `<>…</>` fragment roots several siblings between comment markers that
@@ -229,6 +233,7 @@ transport nor its routes.
 
 ### `rahti-native`
 
+In the separate `rahti-native` repository, with `cargo-rahti-native` beside it.
 Optional, and Tauri-free so that it compiles and tests in an ordinary
 workspace run:
 
@@ -296,11 +301,17 @@ The current implementation covers:
   strings — with extractor rejections landing outside the error boundary;
 - server HTML interpolation, browser expression passthrough, safe script
   seeding, trusted `Html`, optional fragments, concatenated fragments, slots;
+- server values that can never become client code: braces escaped in every
+  value and spread, raised one encoding layer inside the root layout's
+  deferred template, compile-time refusal of a server value in a handler or
+  a `{…}` binding, a render-time refusal of a handler from a data spread, and
+  `Bindings` as the one carrier of a component tag's `{…}` source;
 - local and dependency-provided components, nested components, and children;
 - nested component module directories with Rust-valid module names;
 - isolated component instances and component-owned RPCs;
 - PulsePoint state and the complete v2 hook/runtime surface documented in
-  `pulsepoint.md`;
+  `pulsepoint.md` and its companion guides (hooks, performance, web APIs,
+  navigation);
 - JSON RPCs, fallible RPCs, component dispatch, CSRF, server streaming,
   uploads with progress, buffered/spilled files, and direct streaming uploads;
 - optional WebSockets behind rahti's `ws` feature: `#[socket]` functions in
