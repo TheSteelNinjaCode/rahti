@@ -311,7 +311,8 @@ The current implementation covers:
 - isolated component instances and component-owned RPCs;
 - PulsePoint state and the complete v2 hook/runtime surface documented in
   `pulsepoint.md` and its companion guides (hooks, performance, web APIs,
-  navigation);
+  navigation), with native event bindings evaluated only when events fire,
+  including long names such as `onlostpointercapture`;
 - JSON RPCs, fallible RPCs, component dispatch, CSRF, server streaming,
   uploads with progress, buffered/spilled files, and direct streaming uploads;
 - optional WebSockets behind rahti's `ws` feature: `#[socket]` functions in

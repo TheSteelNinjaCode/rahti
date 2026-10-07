@@ -385,6 +385,8 @@ Within an event expression PulsePoint exposes:
 - `el`.
 
 Use native lowercase HTML event names, not JSX names such as `onClick`.
+Long native names such as `onlostpointercapture` work the same way: their
+binding runs when the event fires, never while rendering the element.
 
 A handler on a block's root element runs in that block's scope, as in React:
 
