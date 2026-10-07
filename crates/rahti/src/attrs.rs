@@ -206,10 +206,10 @@ impl Attributes for Attrs {
 }
 
 /// The `{…}` props a component tag wrote, as source. `<Button
-/// onclick={save()}>` hands the `Button` function `("onclick", "save()")`,
+/// onclick="{save()}">` hands the `Button` function `("onclick", "save()")`,
 /// and spreading them — `@{..bindings}` — puts the handler on
 /// the element the component renders, where the runtime runs it in the
-/// caller's scope.
+/// caller's scope; a value binding, `class="{active}"`, lands in braces.
 ///
 /// A component takes them as a `bindings: Bindings` parameter. Only `html!`
 /// builds one, from the literal source at the tag, which is why its braces
@@ -235,10 +235,18 @@ impl Bindings {
     }
 }
 
+/// A binding goes back on an element in the form an element writes it: a
+/// native handler is JavaScript, `onclick="save()"`, and everything else is
+/// an expression in braces, `class="{active}"`. Without the braces a value
+/// binding would land as the static text of its own source.
 impl Attributes for Bindings {
     fn write_attributes(&self, list: &mut AttrList) {
         for (name, source) in self.0 {
-            list.set_source(name, source);
+            if is_native_event_name(name) {
+                list.set_source(name, source);
+            } else {
+                list.set_source(name, &format!("{{{source}}}"));
+            }
         }
     }
 }

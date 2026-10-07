@@ -175,12 +175,14 @@ pub fn Button(bindings: Bindings, children: Html) -> Html {
     html! {r##"<button class="btn" @{..bindings}><slot /></button>"##}
 }
 
-// <Button onclick="{save()}">Save</Button>
-// renders <button class="btn" onclick="save()">Save</button>
+// <Button onclick="{save()}" title="{'Save ' + name}">Save</Button>
+// renders <button class="btn" onclick="save()" title="{'Save ' + name}">Save</button>
 ```
 
-Only `html!` builds a `Bindings`, from the source written at the tag, so its
-expressions stay live. Every other spread value is data. A tag that writes a
+Each binding lands in the form an element writes it: a native handler
+(`onclick`) as JavaScript, and everything else — a value, `on-select`, a
+`pp-ref` — as an expression in braces. Only `html!` builds a `Bindings`,
+from the source written at the tag, so its expressions stay live. Every other spread value is data. A tag that writes a
 `{…}` prop on a component without a `bindings` parameter is a compile error
 naming the field.
 

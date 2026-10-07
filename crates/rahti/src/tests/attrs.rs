@@ -421,7 +421,7 @@ fn an_owning_root_still_takes_the_rest_of_a_spread() {
         list.own_events();
         list.set_source("onsubmit", "{save(event)}");
         list.spread(&Attrs::new().set("class", "wide"));
-        list.spread(&Bindings::__from_html(&[("on-select", "{pick}")]));
+        list.spread(&Bindings::__from_html(&[("on-select", "pick")]));
     });
     assert_eq!(
         out,
@@ -462,10 +462,26 @@ fn bindings_keep_their_source() {
     let bindings = Bindings::__from_html(&[("onclick", "pick({ id: 1 })"), ("title", "\"x\"")]);
     assert_eq!(
         list(|list| list.spread(&bindings)),
-        " onclick=\"pick({ id: 1 })\" title=\"&quot;x&quot;\""
+        " onclick=\"pick({ id: 1 })\" title=\"{&quot;x&quot;}\""
     );
     assert_eq!(bindings.iter().count(), 2);
     assert!(Bindings::default().is_empty());
+}
+
+/// A handler goes back as JavaScript and every other binding as an
+/// expression in braces — the forms an element writes. A value binding
+/// without them would be the static text of its own source.
+#[test]
+fn a_value_binding_is_written_back_in_braces() {
+    let bindings = Bindings::__from_html(&[
+        ("class", "active ? classes.on : classes.off"),
+        ("on-select", "pick"),
+        ("onclick", "save()"),
+    ]);
+    assert_eq!(
+        list(|list| list.spread(&bindings)),
+        " class=\"{active ? classes.on : classes.off}\" on-select=\"{pick}\" onclick=\"save()\""
+    );
 }
 
 /// A data spread cannot write a native handler: the runtime would run the
