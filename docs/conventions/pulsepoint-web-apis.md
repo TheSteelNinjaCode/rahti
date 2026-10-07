@@ -59,7 +59,7 @@ pub async fn page() -> Html {
             <canvas pp-ref={canvas} width="640" height="240"></canvas>
             <button onclick={load()}>"Refresh"</button>
             <p hidden={gpuSupported}>"WebGPU is unavailable; drawing with Canvas 2D."</p>
-            <script>r#"
+            <script>r##"
                 const canvas = pp.ref(null);
                 const gpu = pp.ref(null);                // device, pipeline, buffers: never state
                 const [series, setSeries] = pp.state(@{Json(&initial)});
@@ -97,7 +97,7 @@ pub async fn page() -> Html {
                 // navigator.gpu.requestAdapter(), adapter.requestDevice(),
                 // canvas.getContext("webgpu"), a render pipeline,
                 // device.queue.writeBuffer(...), a render pass.
-            "#</script>
+            "##</script>
         </section>
     }
 }
@@ -199,7 +199,7 @@ html! {
         <canvas pp-ref={canvas} class="block h-full w-full"></canvas>
         <button onclick={setPaused(!paused)}>{paused ? "Resume" : "Pause"}</button>
         <p hidden={!error}>{error}</p>
-        <script>r#"
+        <script>r##"
             const canvas = pp.ref(null);
             const engine = pp.ref(null);
             const [paused, setPaused] = pp.state(false);
@@ -255,7 +255,7 @@ html! {
                     engine.current = null;
                 };
             }, [draw]);
-        "#</script>
+        "##</script>
     </section>
 }
 ```

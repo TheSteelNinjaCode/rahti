@@ -1245,13 +1245,13 @@ pub async fn page() -> Html {{
             <button class="{button}" onclick={{greet()}}>"Say hello"</button>
             <p class="{lede}">{{message}}</p>
 
-            <script>r#"
+            <script>r##"
                 const [message, setMessage] = pp.state("");
 
                 async function greet() {{
                     setMessage(await pp.rpc("hello", {{}}));
                 }}
-            "#</script>
+            "##</script>
         </section>
     }}
 }}
@@ -1838,8 +1838,9 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
     );
     rules.push(
         "A template is markup written as Rust tokens, `html! { … }`, and only\n\
-         a `<script>` or `<style>` body is a string: one raw literal,\n\
-         `<script>r#\"…\"#</script>`, JavaScript and CSS exactly as written.\n\
+         a `<script>` or `<style>` body is a string, always written\n\
+         `<script>r##\"…\"##</script>` — JavaScript and CSS exactly as\n\
+         written, `\"#fff\"` included; `html!` refuses fewer `#`s.\n\
          Text is a quoted string, `<p>\"Hello\"</p>`; a literal attribute is\n\
          quoted, `class=\"card\"`; a binding is braced, `hidden={!open}`; a\n\
          handler is a binding, `onclick={save()}`; a server value is\n\

@@ -54,7 +54,7 @@ html! {
         <template pp-for="row in rows">
             <article key={row.id}>{row.label}</article>
         </template>
-        <script>r#"
+        <script>r##"
             const [rows, setRows] = pp.state([]);
             const query = pp.ref('');
             const timer = pp.ref(null);
@@ -74,7 +74,7 @@ html! {
             }
 
             pp.effect(() => () => clearTimeout(timer.current), []);
-        "#</script>
+        "##</script>
     </section>
 }
 ```

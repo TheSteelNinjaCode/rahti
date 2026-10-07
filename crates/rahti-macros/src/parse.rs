@@ -651,9 +651,9 @@ impl Parser {
             return Err(Error {
                 span: lit.span(),
                 msg: "rahti: a template is markup written as tokens, not a string: \
-                      `html! { <section class=\"page\">Hello</section> }`.\n  Only a \
+                      `html! { <section class=\"page\">\"Hello\"</section> }`.\n  Only a \
                       `<script>` or `<style>` body is a raw string: \
-                      `<script>r#\"…\"#</script>`. See \"Templates\" in \
+                      `<script>r##\"…\"##</script>`. See \"Templates\" in \
                       docs/conventions/rendering-and-components.md."
                     .into(),
             });
@@ -970,17 +970,23 @@ impl Parser {
         let body = &self.toks[first..self.pos];
         let contents = match body {
             [] => return Ok(()),
-            [TokenTree::Literal(lit)] => raw_string_contents(&lit.to_string()).map(|c| (c, lit.span())),
+            // `r##"…"##` is the one spelling: two `#`s, so neither a `"` nor
+            // a `"#` — `"#fff"`, `querySelector("#id")` — can end the body.
+            // More are accepted for the rare body that contains `"##`.
+            [TokenTree::Literal(lit)] if raw_hashes(&lit.to_string()) >= 2 => {
+                raw_string_contents(&lit.to_string()).map(|c| (c, lit.span()))
+            }
             _ => None,
         };
         let Some((contents, span)) = contents else {
             return Err(Error {
                 span: body[0].span(),
                 msg: format!(
-                    "rahti: a `<{name}>` body is one raw string: `<{name}>r#\"…\"#</{name}>`.\n  \
-                     It reaches the browser exactly as written — quotes, template literals and \
-                     comments included — and `@{{expr}}` inside a `<script>` is still \
-                     interpolated. Add `#`s when the body contains `\"#`."
+                    "rahti: a `<{name}>` body is one raw string with two `#`s: \
+                     `<{name}>r##\"…\"##</{name}>`.\n  It reaches the browser exactly as \
+                     written — quotes, `\"#fff\"`, template literals and comments included — \
+                     and `@{{expr}}` inside a `<script>` is still interpolated. Only a body \
+                     that contains `\"##` needs a third `#`."
                 ),
             });
         };
@@ -1755,6 +1761,13 @@ fn spread_expr(g: &proc_macro2::Group, span: Span) -> Result<TokenStream, Error>
 
 // ------------------------------------------------------------------ script
 // A script body written as a raw string: JavaScript verbatim, `@{…}` lifted.
+
+/// How many `#`s a raw string literal is written with: `r##"…"##` is two;
+/// anything that is not a raw string is zero.
+fn raw_hashes(repr: &str) -> usize {
+    repr.strip_prefix('r')
+        .map_or(0, |rest| rest.chars().take_while(|c| *c == '#').count())
+}
 
 /// The contents of a raw string literal (`r"…"`, `r#"…"#`, …), or `None` for
 /// any other literal. Raw strings only: the body of a plain `"…"` would need

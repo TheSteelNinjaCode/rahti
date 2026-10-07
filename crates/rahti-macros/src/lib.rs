@@ -40,7 +40,7 @@ use quote::quote;
 /// ```
 ///
 /// Markup is tokens, so Rust tooling reads all of it; only a `<script>` or
-/// `<style>` body is a string — one raw literal, `<script>r#"…"#</script>` —
+/// `<style>` body is a string — one raw literal, `<script>r##"…"##</script>` —
 /// so JavaScript and CSS arrive as written. A template written as one string
 /// is refused with the form to write.
 ///
@@ -68,7 +68,7 @@ use quote::quote;
 ///   layout. Allowed as a block's root and as the root of a component tag's
 ///   children; inside an element, siblings need no wrapper.
 /// - `<script>` and `<style>` hold text, not markup: each body is one raw
-///   string, `r#"…"#`, emitted as written — no escaping, and no `{…}`, which in
+///   string, always `r##"…"##`, emitted as written — no escaping, and no `{…}`, which in
 ///   JavaScript is a block and in CSS is a rule. `@{expr}` inside `<script>`
 ///   is the one exception:
 ///   the Rust expression is rendered as JavaScript source through

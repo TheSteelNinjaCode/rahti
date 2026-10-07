@@ -80,8 +80,9 @@ preserve them, and documentation or scaffold changes must teach them.
    `not-found.rs`; an unwrapped API endpoint is `route.rs`. A route segment
    cannot contain both `page.rs` and `route.rs`.
 4. A template is markup written as Rust tokens, `html! { … }`, and only a
-   `<script>` or `<style>` body is a string: one raw literal,
-   `<script>r#"…"#</script>`, JavaScript and CSS exactly as written. Text is
+   `<script>` or `<style>` body is a string, always written
+   `<script>r##"…"##</script>` — JavaScript and CSS exactly as written,
+   `"#fff"` included; `html!` refuses fewer `#`s. Text is
    a quoted string, `<p>"Hello"</p>`; a literal attribute is quoted,
    `class="card"`; a binding is braced, `hidden={!open}`; a handler is a
    binding, `onclick={save()}`; a server value is `href=@{url}`. A binding is
@@ -287,10 +288,12 @@ preserve them, and documentation or scaffold changes must teach them.
     `pp.state`, the device or worker handle goes in `pp.ref`, and a
     `pp.effect` acquires it, feeds it, and releases it in its cleanup. See
     `docs/conventions/pulsepoint-web-apis.md`.
-42. A `<script>` body is one raw string, `<script>r#"…"#</script>`:
-    JavaScript exactly as written — comments, single quotes and template
-    literals included — with `@{expr}` interpolated (`@@{` is a literal
-    `@{`). A body written as tokens is a compile error. A function handed to
+42. A `<script>` body is always `<script>r##"…"##</script>`: JavaScript
+    exactly as written — comments, single quotes, template literals and
+    `"#fff"` included — with `@{expr}` interpolated (`@@{` is a literal
+    `@{`). A body written as tokens, or with fewer than two `#`s, is a compile
+    error naming that form; only a body containing `"##` takes a third. A
+    function handed to
     a library or a long-lived listener is wrapped in `pp.event(…)` so it
     reads current state. A library mounts into an empty element of its own,
     `<div pp-ref={host}></div>`; re-renders leave its children and the

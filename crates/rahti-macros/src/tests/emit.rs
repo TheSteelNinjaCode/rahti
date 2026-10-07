@@ -503,7 +503,7 @@ fn a_component_prop_binding_child_is_owned() {
 #[test]
 fn scripted_children_stay_their_own_block() {
     let out = markup(
-        r##"<main><Card><div><p>{n}</p><script>r#"const [n, setN] = pp.state(0);"#</script></div></Card></main>"##,
+        r###"<main><Card><div><p>{n}</p><script>r##"const [n, setN] = pp.state(0);"##</script></div></Card></main>"###,
         "src/app/page.rs",
     );
     let expected = component::identifier("src/app/page.rs").expect("a convention file");
@@ -618,7 +618,7 @@ fn events_are_recognized_by_naming_not_a_list() {
 #[test]
 fn a_self_contained_child_block_owns_its_root_handler() {
     let out = markup(
-        r##"<main><Card><div onclick={hit()}><script>r#"function hit() {}"#</script></div></Card></main>"##,
+        r###"<main><Card><div onclick={hit()}><script>r##"function hit() {}"##</script></div></Card></main>"###,
         "src/app/page.rs",
     );
     let owners = out.matches("pp-event-owner=").count();
@@ -674,7 +674,7 @@ fn a_component_without_bindings_of_its_own_is_left_alone() {
         // No client binding at all.
         r#"@component a_12345678 <p>"static"</p>"#,
         // A script of its own already.
-        r##"@component b_12345678 <p>{n}<script>r#"const n = 1;"#</script></p>"##,
+        r###"@component b_12345678 <p>{n}<script>r##"const n = 1;"##</script></p>"###,
         // Children between a component tag are a block of their own.
         "@component c_12345678<div><Card><b>{count}</b></Card></div>",
         // A spread below the root may carry the caller's `bindings`.
@@ -701,7 +701,7 @@ fn a_page_is_not_claimed() {
 fn a_component_binding_on_its_own_root_is_refused() {
     let Err(msg) = component_block(
         "dialog_12345678",
-        r##"<section hidden={!open}><script>r#"const { open } = pp.props;"#</script></section>"##,
+        r###"<section hidden={!open}><script>r##"const { open } = pp.props;"##</script></section>"###,
     ) else {
         panic!("a root binding in a component must not compile");
     };
@@ -718,7 +718,7 @@ fn allowed_root_attributes_still_compile() {
         r#"<div data-config="{\"a\": 1}">"x"</div>"#,
         r#"<div pp-ref={root}>"x"</div>"#,
         r#"<div class=@{cls}>"x"</div>"#,
-        r##"<section><div hidden={!open}>"x"</div><script>r#"const { open } = pp.props;"#</script></section>"##,
+        r###"<section><div hidden={!open}>"x"</div><script>r##"const { open } = pp.props;"##</script></section>"###,
     ];
     for src in cases {
         assert!(component_block("a_12345678", src).is_ok(), "{src}");

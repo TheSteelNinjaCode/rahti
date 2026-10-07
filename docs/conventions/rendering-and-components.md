@@ -11,11 +11,11 @@ html! {
         <h1>@{server_title}</h1>
         <p>"Don't worry — text is a quoted string."</p>
         <button onclick={setCount(count + 1)} hidden={done}>"Clicked "{count}" times"</button>
-        <script>r#"
+        <script>r##"
             // Plain JavaScript: 'single quotes', `templates` and "#fff" all work.
             const [count, setCount] = pp.state(@{initial_count});
             const done = false;
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -44,11 +44,13 @@ dialects stand out from the HTML:
   through exactly as written. Use double-quoted strings inside one, `"a"`; a
   multi-character `'…'` string or a template literal does not lex, so logic
   that needs them belongs in the script as a named function.
-- **`<script>` and `<style>`** bodies are one raw string, `r#"…"#`, and reach
-  the browser exactly as written, comments included. `@{expr}` inside a script
+- **`<script>` and `<style>`** bodies are always written `r##"…"##` and reach
+  the browser exactly as written — quotes, `"#fff"`, `querySelector("#id")`,
+  template literals and comments included. Two `#`s is the one spelling:
+  `html!` refuses `r"…"` and `r#"…"#` with that form. Only a body that itself
+  contains `"##` takes a third, `r###"…"###`. `@{expr}` inside a script
   renders a Rust value as JavaScript (see "Escaping and Trusted Markup"); write
-  `@@{` for a literal `@{`. Add a `#` when the body contains `"#`:
-  `r##"…"##`. A body written as tokens is a compile error.
+  `@@{` for a literal `@{`. A body written as tokens is a compile error.
 - **Comments** are Rust comments, `// …`, and are not sent to the browser.
 - **A template nested in `@{…}`** is another `html!`:
   `@{Html::concat(items.iter().map(|i| html! { <li>@{i}</li> }))}`. Prefer a
@@ -476,7 +478,7 @@ pub fn Section(title: &str, children: Html) -> Html {
                 <h3>{heading}</h3>
                 @{children}
             </Panel>
-            <script>r#"const heading = "Totals";"#</script>
+            <script>r##"const heading = "Totals";"##</script>
         </section>
     }
 }

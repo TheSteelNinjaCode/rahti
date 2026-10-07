@@ -2,7 +2,7 @@
 
 The `pp.*` API inside a component `<script>`. It mirrors React hooks; the
 markup around it never does — see `pulsepoint.md` for the template contract.
-Examples are `html! { … }` templates, whose `<script>r#"…"#</script>` body
+Examples are `html! { … }` templates, whose `<script>r##"…"##</script>` body
 is plain JavaScript (see "Templates" in `rendering-and-components.md`).
 
 ## The Whole List
@@ -64,7 +64,7 @@ effect reads the state of the render that created it, and so does
 html! {
     <section>
         <button onclick={setPaused(!paused)}>{paused ? "Resume" : "Pause"}</button>
-        <script>r#"
+        <script>r##"
             const [paused, setPaused] = pp.state(false);
             const engine = pp.ref(null);
             const tick = pp.event((time) => {
@@ -77,7 +77,7 @@ html! {
                 });
                 return () => cancelAnimationFrame(id);
             }, [tick]);
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -100,7 +100,7 @@ html! {
     <section>
         <p>"Elapsed: "{seconds}"s"</p>
         <button onclick={setRunning(!running)}>{running ? "Pause" : "Resume"}</button>
-        <script>r#"
+        <script>r##"
             const [seconds, setSeconds] = pp.state(0);
             const [running, setRunning] = pp.state(true);
             pp.effect(() => {
@@ -108,7 +108,7 @@ html! {
                 const id = setInterval(() => setSeconds((s) => s + 1), 1000);
                 return () => clearInterval(id);
             }, [running]);
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -149,11 +149,11 @@ html! {
         <div pp-ref={dialog} hidden={!open} class="modal">
             <button onclick={setOpen(false)}>"Close"</button>
         </div>
-        <script>r#"
+        <script>r##"
             const [open, setOpen] = pp.state(false);
             const dialog = pp.ref(null);
             pp.portal(dialog);
-        "#</script>
+        "##</script>
     </div>
 }
 ```
@@ -170,10 +170,10 @@ html! {
         <label for={emailId}>"Email"</label>
         <input id={emailId} type="email" aria-describedby={hintId} />
         <p id={hintId}>"We never share this."</p>
-        <script>r#"
+        <script>r##"
             const emailId = pp.id();
             const hintId = pp.id();
-        "#</script>
+        "##</script>
     </div>
 }
 ```
@@ -242,7 +242,7 @@ server value never double-counts:
 html! {
     <section>
         <button onclick={like()}>"Like ("{likes}")"</button>
-        <script>r#"
+        <script>r##"
             const [confirmedLikes, setConfirmedLikes] = pp.state(@{likes});
             const [likes, addLike] = pp.optimistic(confirmedLikes, (state, delta) => state + delta);
             async function like() {
@@ -250,7 +250,7 @@ html! {
                 const result = await pp.rpc('like_post', { post: @{post_id} });
                 setConfirmedLikes(result.likes);
             }
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -270,9 +270,9 @@ html! {
         <div hidden={!!error}>
             <ReportChart />
         </div>
-        <script>r#"
+        <script>r##"
             const [error, reset] = pp.errorBoundary();
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -301,10 +301,10 @@ html! {
         <themecontext.provider value={theme}>
             <ThemeBadge />
         </themecontext.provider>
-        <script>r#"
+        <script>r##"
             const ThemeContext = pp.createContext("light");
             const [theme, setTheme] = pp.state("dark");
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -339,9 +339,9 @@ html! {
     <div>
         <input pp-ref={nameInput} />
         <button onclick={nameInput.current?.focus()}>"Focus"</button>
-        <script>r#"
+        <script>r##"
             const nameInput = pp.ref(null);
-        "#</script>
+        "##</script>
     </div>
 }
 ```

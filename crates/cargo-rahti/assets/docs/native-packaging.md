@@ -357,7 +357,7 @@ compromised, because it has to be safe in that case too.
 html! {
     <section>
         <button onclick={openDocs()}>"Documentation"</button>
-        <script>r#"
+        <script>r##"
             const native = window.rahtiNative;
 
             function openDocs() {
@@ -368,7 +368,7 @@ html! {
                 window.open(url, "_blank", "noopener");
               }
             }
-        "#</script>
+        "##</script>
     </section>
 }
 ```

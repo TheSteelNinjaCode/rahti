@@ -17,13 +17,13 @@ pub async fn page() -> Html {
             <button class="button" onclick={greet()}>"Say hello"</button>
             <p class="lede">{message}</p>
 
-            <script>r#"
+            <script>r##"
                 const [message, setMessage] = pp.state("");
 
                 async function greet() {
                     setMessage(await pp.rpc("hello", {}));
                 }
-            "#</script>
+            "##</script>
         </section>
     }
 }

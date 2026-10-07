@@ -250,11 +250,11 @@ render_via_display!(
 /// html! {
 ///     <section>
 ///         <p>"Logged in as "@{user.name}</p>
-///         <script>r#"
+///         <script>r##"
 ///             const [count, setCount] = pp.state(@{42});
 ///             const [name, setName] = pp.state(@{"Ada"});
 ///             const user = @{Json(&user)};
-///         "#</script>
+///         "##</script>
 ///     </section>
 /// }
 /// ```
@@ -338,10 +338,10 @@ render_js_via_display!(
 /// let user = User { name: "Ada", admin: true };
 /// let rows: Vec<Row> = query().await?;
 /// html! {
-///     <script>r#"
+///     <script>r##"
 ///         const user = @{Json(&user)};
 ///         const rows = @{Json(&rows)};
-///     "#</script>
+///     "##</script>
 /// }
 /// ```
 ///

@@ -105,10 +105,10 @@ write its name in the client code:
 html! {
     <section>
         <button onclick={pick(id)}>"Pick"</button>
-        <script>r#"
+        <script>r##"
             const id = @{Json(&user.id)};
             function pick(id) { /* … */ }
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -196,9 +196,9 @@ html! {
     <section>
         <p>{count}</p>
         <button onclick={setCount(value => value + 1)}>"Increment"</button>
-        <script>r#"
+        <script>r##"
             const [count, setCount] = pp.state(0);
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -275,11 +275,11 @@ html! {
                 <li key={item.id}>{item.label}</li>
             </template>
         </ul>
-        <script>r#"
+        <script>r##"
             const [query, setQuery] = pp.state('');
             const items = @{Json(&items)};
             const shown = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
-        "#</script>
+        "##</script>
     </section>
 }
 ```
@@ -394,7 +394,7 @@ pub fn SubmitForm() -> Html {
     html! {
         <form onsubmit={handleSubmit(event)}>
             "…"
-            <script>r#"function handleSubmit(e) { e.preventDefault(); }"#</script>
+            <script>r##"function handleSubmit(e) { e.preventDefault(); }"##</script>
         </form>
     }
 }
@@ -448,7 +448,7 @@ html! {
         <input name="email" type="email" value=@{user.email} autocomplete="email" />
         <p hidden={!errors.email}>{errors.email}</p>
         <button disabled={saving}>{saving ? "Saving…" : "Save"}</button>
-        <script>r#"
+        <script>r##"
             const [saving, setSaving] = pp.state(false);
             const [errors, setErrors] = pp.state({});
 
@@ -466,7 +466,7 @@ html! {
                     setSaving(false);
                 }
             }
-        "#</script>
+        "##</script>
     </form>
 }
 ```
@@ -569,7 +569,7 @@ pub fn Code() -> Html {
             <template pp-for="(letter, index) in letters">
                 <span key={index}>{letter}</span>
             </template>
-            <script>r#"const letters = ["K", "7", "Q"];"#</script>
+            <script>r##"const letters = ["K", "7", "Q"];"##</script>
         </p>
     }
 }
@@ -623,7 +623,7 @@ pub fn Greeting(user_name: &str) -> Html {
             <b>{pp.props.userName}</b>
             <p>{name}</p>
             <button type="button" onclick={setName(pp.props.userName)}>"Reset"</button>
-            <script>r#"const [name, setName] = pp.state(pp.props.userName ?? "");"#</script>
+            <script>r##"const [name, setName] = pp.state(pp.props.userName ?? "");"##</script>
         </div>
     }
 }

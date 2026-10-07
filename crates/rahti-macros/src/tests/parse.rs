@@ -599,7 +599,7 @@ fn a_bare_ampersand_is_escaped() {
 /// or a rule, and `&lt;` would reach the browser as those five characters.
 #[test]
 fn script_body_is_not_parsed() {
-    let out = render(r##"<script>r#"const [a, set] = pp.state(0);"#</script>"##);
+    let out = render(r###"<script>r##"const [a, set] = pp.state(0);"##</script>"###);
     assert!(out.starts_with("<script>"), "{out}");
     assert!(out.ends_with("</script>"), "{out}");
     assert!(out.contains("pp.state(0)"), "{out}");
@@ -608,7 +608,7 @@ fn script_body_is_not_parsed() {
 
 #[test]
 fn script_body_keeps_braces_and_comparisons() {
-    let out = render(r##"<script>r#"if (a < b) { go(); }"#</script>"##);
+    let out = render(r###"<script>r##"if (a < b) { go(); }"##</script>"###);
     assert!(out.contains("a < b"), "{out}");
     assert!(out.contains("{ go(); }"), "{out}");
     assert!(!out.contains("&lt;"), "{out}");
@@ -616,7 +616,7 @@ fn script_body_keeps_braces_and_comparisons() {
 
 #[test]
 fn style_body_is_not_parsed() {
-    let out = render(r##"<style>r#".a { color: red; }"#</style>"##);
+    let out = render(r###"<style>r##".a { color: red; }"##</style>"###);
     assert!(out.contains(".a { color: red; }"), "{out}");
 }
 
@@ -627,7 +627,7 @@ fn style_body_is_not_parsed() {
 /// escaping, and a string that renders bare in markup quotes itself here.
 #[test]
 fn script_at_brace_is_lifted_to_a_script_text_op() {
-    let parsed = parse_ok(r##"<script>r#"const c = @{42};"#</script>"##);
+    let parsed = parse_ok(r###"<script>r##"const c = @{42};"##</script>"###);
     assert!(
         parsed.ops.iter().any(|op| matches!(op, Op::ScriptText(_))),
         "expected an Op::ScriptText in {:?}",
@@ -640,7 +640,7 @@ fn script_at_brace_is_lifted_to_a_script_text_op() {
 #[test]
 fn script_at_brace_keeps_the_around_text_verbatim() {
     assert_eq!(
-        render(r##"<script>r#"const [c, set] = pp.state(@{42});"#</script>"##),
+        render(r###"<script>r##"const [c, set] = pp.state(@{42});"##</script>"###),
         "<script>const [c, set] = pp.state(@{42});</script>",
     );
 }
@@ -651,7 +651,7 @@ fn script_at_brace_keeps_the_around_text_verbatim() {
 /// concerned; what is inside it does not change whether the run is split.
 #[test]
 fn script_at_brace_with_an_ident_lifts_too() {
-    let parsed = parse_ok(r##"<script>r#"const c = pp.state(@{initial_count});"#</script>"##);
+    let parsed = parse_ok(r###"<script>r##"const c = pp.state(@{initial_count});"##</script>"###);
     let lifted = parsed
         .ops
         .iter()
@@ -669,7 +669,7 @@ fn script_at_brace_with_an_ident_lifts_too() {
 /// distinct from a `Op::Static` that only joined the source back together.
 #[test]
 fn script_at_brace_inside_a_call_lifts_even_with_a_literal() {
-    let parsed = parse_ok(r##"<script>r#"const c = pp.state(@{42});"#</script>"##);
+    let parsed = parse_ok(r###"<script>r##"const c = pp.state(@{42});"##</script>"###);
     assert!(
         parsed.ops.iter().any(|op| matches!(op, Op::ScriptText(_))),
         "expected an Op::ScriptText, got {:?}",
@@ -681,7 +681,7 @@ fn script_at_brace_inside_a_call_lifts_even_with_a_literal() {
 /// render in order with the source left untouched on each side.
 #[test]
 fn several_script_interpolations_are_each_their_own_op() {
-    let parsed = parse_ok(r##"<script>r#"const a = @{1}; const b = @{2};"#</script>"##);
+    let parsed = parse_ok(r###"<script>r##"const a = @{1}; const b = @{2};"##</script>"###);
     let count = parsed
         .ops
         .iter()
@@ -699,7 +699,7 @@ fn several_script_interpolations_are_each_their_own_op() {
 /// from any of the JS constructs that write an at-sign.
 #[test]
 fn a_bare_at_in_a_script_stays_raw() {
-    let out = render(r##"<script>r#"const p = a @ b;"#</script>"##);
+    let out = render(r###"<script>r##"const p = a @ b;"##</script>"###);
     assert_eq!(out, "<script>const p = a @ b;</script>");
 }
 
@@ -710,7 +710,7 @@ fn a_bare_at_in_a_script_stays_raw() {
 #[test]
 fn style_keeps_at_braces_raw() {
     let parsed =
-        parse_ok(r##"<style>r#"@media (min-width: 1px) { .a { color: red; } }"#</style>"##);
+        parse_ok(r###"<style>r##"@media (min-width: 1px) { .a { color: red; } }"##</style>"###);
     assert!(
         parsed.ops.iter().all(|op| matches!(op, Op::Static(_))),
         "expected nothing lifted in a style body, got {:?}",
@@ -725,11 +725,11 @@ fn style_keeps_at_braces_raw() {
 #[test]
 fn a_script_is_javascript_verbatim() {
     let out = render(
-        r##"<script>r#"
+        r###"<script>r##"
         // a comment that stays
         const greeting = 'hi';
         const line = `${greeting}, it's ${new Date().getFullYear()}`;
-    "#</script>"##,
+    "##</script>"###,
     );
     assert!(out.contains("// a comment that stays"), "{out}");
     assert!(out.contains("const greeting = 'hi';"), "{out}");
@@ -744,7 +744,7 @@ fn a_script_is_javascript_verbatim() {
 #[test]
 fn a_script_lifts_at_braces() {
     let parsed = parse_ok(
-        r##"<script>r#"const [n, setN] = pp.state(@{initial}); const s = 'ok';"#</script>"##,
+        r###"<script>r##"const [n, setN] = pp.state(@{initial}); const s = 'ok';"##</script>"###,
     );
     let lifted = parsed
         .ops
@@ -761,8 +761,9 @@ fn a_script_lifts_at_braces() {
 /// The end of an `@{…}` is found by counting braces, past Rust strings.
 #[test]
 fn a_script_finds_the_end_of_a_nested_expression() {
-    let parsed =
-        parse_ok(r##"<script>r#"const a = @{format!("{}}", Json(&x))}; const b = 1;"#</script>"##);
+    let parsed = parse_ok(
+        r###"<script>r##"const a = @{format!("{}}", Json(&x))}; const b = 1;"##</script>"###,
+    );
     assert_eq!(
         parsed
             .ops
@@ -783,20 +784,20 @@ fn a_script_finds_the_end_of_a_nested_expression() {
 /// `@@{` is a literal `@{`, for the rare script that needs one.
 #[test]
 fn a_script_escapes_a_literal_at_brace() {
-    let out = render(r##"<script>r#"const css = '@@{ not rust }';"#</script>"##);
+    let out = render(r###"<script>r##"const css = '@@{ not rust }';"##</script>"###);
     assert!(out.contains("const css = '@{ not rust }';"), "{out}");
 }
 
 #[test]
 fn an_unclosed_at_brace_in_a_script_is_an_error() {
-    let msg = error(r##"<script>r#"const a = @{x;"#</script>"##);
+    let msg = error(r###"<script>r##"const a = @{x;"##</script>"###);
     assert!(msg.contains("never closed"), "{msg}");
 }
 
 /// A body that is one JavaScript string is still just JavaScript.
 #[test]
 fn a_script_that_is_one_string_is_javascript() {
-    let out = render(r##"<script>r#""use strict";"#</script>"##);
+    let out = render(r###"<script>r##""use strict";"##</script>"###);
     assert_eq!(out, r#"<script>"use strict";</script>"#);
 }
 
@@ -1089,7 +1090,7 @@ fn an_empty_fragment_is_allowed() {
 /// Interpolation, bindings and scripts are ordinary fragment children.
 #[test]
 fn a_fragment_holds_any_node() {
-    let parsed = parse_ok(r##"<><p>@{title}</p><script>r#"const a = 1;"#</script></>"##);
+    let parsed = parse_ok(r###"<><p>@{title}</p><script>r##"const a = 1;"##</script></>"###);
     assert!(parsed.ops.iter().any(|op| matches!(op, Op::Text(_))));
     assert_eq!(
         show(&parsed.ops),
@@ -1217,7 +1218,7 @@ fn attribute_without_a_usable_value() {
 
 #[test]
 fn unclosed_script() {
-    assert!(error(r##"<script>r#"const a = 1;"#"##).contains("never closed"));
+    assert!(error(r###"<script>r##"const a = 1;"##"###).contains("never closed"));
 }
 
 #[test]
@@ -1567,7 +1568,7 @@ fn a_style_object_is_refused_for_css_text() {
 fn a_string_template_is_refused() {
     let msg = error(r###"r##"<section class="page">Hello</section>"##"###);
     assert!(msg.contains("written as tokens, not a string"), "{msg}");
-    assert!(msg.contains("<script>r#"), "{msg}");
+    assert!(msg.contains("<script>r##"), "{msg}");
 }
 
 /// A `<script>` or `<style>` body is one raw string; JavaScript written as
@@ -1588,11 +1589,11 @@ fn a_token_written_body_is_refused() {
 #[test]
 fn a_raw_body_is_written_as_it_is() {
     let out = render(
-        r##"<section><script>r#"
+        r###"<section><script>r##"
             // a comment
             const label = 'it\'s';
             const greeting = `hi ${label}`;
-        "#</script></section>"##,
+        "##</script></section>"###,
     );
     assert!(out.contains("// a comment"), "{out}");
     assert!(out.contains(r"const label = 'it\'s';"), "{out}");
@@ -1631,4 +1632,24 @@ fn a_binding_keeps_its_source_spelling() {
 fn text_is_quoted_or_bare() {
     assert_eq!(render(r#"<p>"It's here."</p>"#), "<p>It's here.</p>");
     assert_eq!(render("<p>Hello world</p>"), "<p>Hello world</p>");
+}
+
+/// `r##"…"##` is the one spelling for a body: fewer `#`s is refused with that
+/// form, so a `"` or a `"#` — `"#fff"`, `querySelector("#id")` — can never
+/// end the body early. A body that contains `"##` takes a third `#`.
+#[test]
+fn a_body_is_written_with_two_hashes() {
+    for src in [
+        r##"<section><script>r"const n = 1;"</script></section>"##,
+        r###"<section><script>r#"const n = 1;"#</script></section>"###,
+        r###"<section><style>r#".a { color: red; }"#</style></section>"###,
+    ] {
+        let msg = error(src);
+        assert!(msg.contains("with two `#`s"), "{src}: {msg}");
+        assert!(msg.contains("r##\"…\"##"), "{src}: {msg}");
+    }
+    let out = render(r###"<section><script>r##"const c = "#fff";"##</script></section>"###);
+    assert!(out.contains(r##"const c = "#fff";"##), "{out}");
+    let out = render(r####"<section><script>r###"const s = "a"##b";"###</script></section>"####);
+    assert!(out.contains(r###"const s = "a"##b";"###), "{out}");
 }
