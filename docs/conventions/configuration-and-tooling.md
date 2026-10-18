@@ -351,7 +351,10 @@ function manually; formatting never changes scope, hooks, or directives.
 Rust comments are retained. An element with comments inside its opening tag
 is preserved as authored. A block containing bare unquoted text is left
 untouched because its whitespace can affect rendered output. Use quoted
-text when authoring markup that should be automatically formatted.
+text when authoring markup that should be automatically formatted. A block
+inside a `macro_rules!` template that writes a metavariable in its markup —
+`<$el>`, `title=$label`, `$text` — is also left as authored: its markup is
+only complete once the macro expands.
 
 `--check` reports files that would change and exits unsuccessfully without
 writing. Invalid Rust tokenization or malformed supported markup is reported

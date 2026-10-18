@@ -135,6 +135,16 @@ fn find_blocks(
                 && matches!(&tokens[i-2], TokenTree::Ident(id) if id == "html")
                 && punct(tokens.get(i - 1), '!')
             {
+                // A `macro_rules!` template writes `$name` where a tag, an
+                // attribute or text lands after expansion. The markup is only
+                // complete once expanded, so the block is left as authored.
+                if group
+                    .stream()
+                    .into_iter()
+                    .any(|token| matches!(&token, TokenTree::Punct(p) if p.as_char() == '$'))
+                {
+                    continue;
+                }
                 let range = group.span().byte_range();
                 let line = source[..range.start].rsplit('\n').next().unwrap_or("");
                 let indent: String = line

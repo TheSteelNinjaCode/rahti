@@ -104,6 +104,19 @@ fn bare_text_and_opening_tag_comments_are_left_intact() {
 }
 
 #[test]
+fn macro_rules_templates_are_left_intact() {
+    let source = "macro_rules! plain { ($el:ident, $label:literal) => { fn f() -> Html { html! { <$el class=\"x\" title=$label><slot /></$el> } } }; }";
+    assert_eq!(formatted(source), source);
+    let text = "macro_rules! t { ($text:literal) => { html! { <p>$text</p> } }; }";
+    assert_eq!(formatted(text), text);
+    // Ordinary blocks in the same file are still formatted.
+    let mixed = "macro_rules! t { ($el:ident) => { html! { <$el></$el> } }; } fn f() { html! { <main><p>\"Hi\"</p></main> }; }";
+    let out = formatted(mixed);
+    assert!(out.contains("html! { <$el></$el> }"));
+    assert!(out.contains("    <p>\"Hi\"</p>"));
+}
+
+#[test]
 fn authored_workspace_sources_keep_tokens_and_are_idempotent() {
     fn fingerprint(stream: TokenStream, output: &mut Vec<String>) {
         for token in stream {
