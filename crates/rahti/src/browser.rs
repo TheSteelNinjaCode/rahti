@@ -258,7 +258,11 @@ impl Browser {
         };
 
         let target = browser
-            .command("Target.createTarget", json!({ "url": "about:blank" }), false)
+            .command(
+                "Target.createTarget",
+                json!({ "url": "about:blank" }),
+                false,
+            )
             .await?;
         let target_id = target["targetId"].as_str().unwrap_or_default().to_string();
         let attached = browser
@@ -268,7 +272,10 @@ impl Browser {
                 false,
             )
             .await?;
-        browser.session = attached["sessionId"].as_str().unwrap_or_default().to_string();
+        browser.session = attached["sessionId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         browser.command("Page.enable", json!({}), true).await?;
         browser.command("Runtime.enable", json!({}), true).await?;
         // The browser reports a Content Security Policy violation on this
@@ -284,7 +291,11 @@ impl Browser {
         // A page in a headless browser is "visible", so animation frames
         // run; say so explicitly for pages that pause when hidden.
         let _ = browser
-            .command("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }), true)
+            .command(
+                "Emulation.setFocusEmulationEnabled",
+                json!({ "enabled": true }),
+                true,
+            )
             .await;
         Ok(browser)
     }
@@ -324,7 +335,10 @@ impl Browser {
         }
         let value = reply["result"].get("value").cloned().unwrap_or(Value::Null);
         serde_json::from_value(value).map_err(|e| {
-            BrowserError(format!("`{}` returned an unexpected value: {e}", short(expression)))
+            BrowserError(format!(
+                "`{}` returned an unexpected value: {e}",
+                short(expression)
+            ))
         })
     }
 
@@ -334,9 +348,14 @@ impl Browser {
     }
 
     /// Wait until a JavaScript condition is truthy, up to `timeout`.
-    pub async fn wait_for_within(&mut self, condition: &str, timeout: Duration) -> BrowserResult<()> {
+    pub async fn wait_for_within(
+        &mut self,
+        condition: &str,
+        timeout: Duration,
+    ) -> BrowserResult<()> {
         let started = Instant::now();
-        let probe = format!("(() => {{ try {{ return !!({condition}); }} catch {{ return false; }} }})()");
+        let probe =
+            format!("(() => {{ try {{ return !!({condition}); }} catch {{ return false; }} }})()");
         loop {
             if self.eval::<bool>(&probe).await? {
                 return Ok(());
@@ -415,7 +434,9 @@ impl Browser {
         if let Some(text) = &k.text {
             params["text"] = json!(text);
         }
-        self.command("Input.dispatchKeyEvent", params, true).await.map(|_| ())
+        self.command("Input.dispatchKeyEvent", params, true)
+            .await
+            .map(|_| ())
     }
 
     pub async fn key_up(&mut self, key: &str) -> BrowserResult<()> {
@@ -476,14 +497,22 @@ impl Browser {
         if errors.is_empty() {
             String::new()
         } else {
-            let list: Vec<String> = errors.iter().map(|e| format!("  [{}] {}", e.level, e.text)).collect();
+            let list: Vec<String> = errors
+                .iter()
+                .map(|e| format!("  [{}] {}", e.level, e.text))
+                .collect();
             format!("; the page reported:\n{}", list.join("\n"))
         }
     }
 
     /// Send one command and wait for its reply, keeping the events that
     /// arrive meanwhile.
-    async fn command(&mut self, method: &str, params: Value, in_page: bool) -> BrowserResult<Value> {
+    async fn command(
+        &mut self,
+        method: &str,
+        params: Value,
+        in_page: bool,
+    ) -> BrowserResult<Value> {
         self.next_id += 1;
         let id = self.next_id;
         let mut message = json!({ "id": id, "method": method, "params": params });
@@ -499,7 +528,9 @@ impl Browser {
         loop {
             let next = tokio::time::timeout_at(deadline, self.socket.next())
                 .await
-                .map_err(|_| BrowserError(format!("`{method}` got no answer within {TIMEOUT:?}")))?;
+                .map_err(|_| {
+                    BrowserError(format!("`{method}` got no answer within {TIMEOUT:?}"))
+                })?;
             let frame = match next {
                 Some(Ok(frame)) => frame,
                 Some(Err(e)) => return fail(format!("the browser went away: {e}")),

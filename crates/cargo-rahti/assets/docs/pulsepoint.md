@@ -38,6 +38,11 @@ code fails.
 
 ## Hard Invariants
 
+`cargo rahti fmt` formats markup around bindings without rewriting client
+expressions or script bodies. Keep short bindings in markup and write longer
+logic as named functions in the script. Formatting does not rewrite directives,
+introduce JSX, or change the ownership of a binding.
+
 Apply these before writing any block, even without reading further:
 
 1. One authored root per block, with its `<script>` inside that root (see
@@ -501,6 +506,12 @@ then left to the user. Switching between them — usually by binding `value` to
 state that starts `undefined` — logs
 `[PP-WARN] <input#email> changed from uncontrolled to controlled.` Give the
 state a defined initial value; never write both forms.
+
+A controlled `type="number"` input compares its text with the bound value by
+number, as React does: while the state is `1`, the user's own `1.0` or `01`
+stays as typed instead of being rewritten mid-keystroke. Parse the text
+in the handler (`setAmount(target.valueAsNumber)` or `Number(target.value)`)
+and keep the state numeric.
 
 On a large block PulsePoint may defer the render an `input` event causes to
 the next frame. A discrete event — `submit`, `click`, `keydown` — commits any

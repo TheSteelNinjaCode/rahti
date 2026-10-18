@@ -2,6 +2,13 @@
 
 ## Templates
 
+Format authored markup with `cargo rahti fmt` after `cargo fmt`, and verify
+with `cargo rahti fmt --check`. Use four-space nesting, separate lines for
+nested elements, and wrapped long attribute lists. Keep client `{…}` and
+server `@{…}` contents intact; a long expression may exceed the line width.
+Keep visible spaces inside quoted text. See "Formatting authored markup" in
+`configuration-and-tooling.md` for the scope and preservation rules.
+
 A template is markup written as Rust tokens: `html! { … }`. Only a `<script>`
 or `<style>` body is a string — one raw string literal.
 

@@ -300,13 +300,19 @@ async fn first_error_frame(name: &str) -> String {
     ws.send(Frame::text("{}")).await.unwrap();
     let frame = ws.next().await.unwrap().unwrap();
     let value: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
-    value["error"].as_str().expect("the error frame").to_string()
+    value["error"]
+        .as_str()
+        .expect("the error frame")
+        .to_string()
 }
 
 /// An expected refusal reaches the browser with its public message.
 #[tokio::test]
 async fn a_handler_refusal_sends_its_public_message() {
-    assert_eq!(first_error_frame("test_ws_refuses").await, "This worker is not running.");
+    assert_eq!(
+        first_error_frame("test_ws_refuses").await,
+        "This worker is not running."
+    );
 }
 
 /// An unexpected failure is redacted outside development, as an rpc's is.

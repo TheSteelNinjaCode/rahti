@@ -190,11 +190,23 @@ fn a_zero_window_is_rejected_at_configuration() {
 
 #[test]
 fn exempt_adds_to_the_default_exemptions() {
-    let policy = RateLimit::default().exempt("/api/hooks").exempt("/api/hooks");
+    let policy = RateLimit::default()
+        .exempt("/api/hooks")
+        .exempt("/api/hooks");
     for kept in ["/health", "/ready", "/__rahti/dev"] {
-        assert!(policy.exempt_paths.iter().any(|p| p == kept), "{kept} dropped");
+        assert!(
+            policy.exempt_paths.iter().any(|p| p == kept),
+            "{kept} dropped"
+        );
     }
-    assert_eq!(policy.exempt_paths.iter().filter(|p| *p == "/api/hooks").count(), 1);
+    assert_eq!(
+        policy
+            .exempt_paths
+            .iter()
+            .filter(|p| *p == "/api/hooks")
+            .count(),
+        1
+    );
 }
 
 #[test]

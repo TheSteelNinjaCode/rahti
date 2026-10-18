@@ -4,11 +4,9 @@
 //! first argument is the subcommand's own name and is skipped. Running the
 //! binary directly works too, which is what the tests do.
 //!
-//! Arguments are read by hand rather than with a parser crate. The surface is
-//! a verb, a name and three flags — each of which adds something, so there
-//! are no negations to reconcile; a dependency that reads them would be
-//! larger than the code that acts on them.
+//! Each command reads its own arguments and reports unsupported options.
 
+mod fmt;
 mod native;
 mod new;
 mod prompt;
@@ -37,6 +35,7 @@ fn main() -> ExitCode {
         Some("new") => new::run(&args[1..]),
         Some("upgrade") => upgrade::run(&args[1..]),
         Some("build") => static_build::run(&args[1..]),
+        Some("fmt") => fmt::run(&args[1..]),
         // Handed to `cargo-rahti-native`, which is a separate install. Returns
         // rather than falling through to the `Result` below, because what the
         // helper exited with is what this should exit with.
@@ -82,6 +81,7 @@ USAGE:
     cargo rahti build --static [--out <directory>]
     cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
     cargo rahti native <command> [options]
+    cargo rahti fmt [--check] [path...]
 
 NEW:
     A flag adds a feature. Leaving it out is how you say no.
@@ -103,6 +103,13 @@ BUILD:
     --static           Render pages through the application router and copy
                        public assets. Dynamic pages need `static_paths()`.
     --out <directory>  Output directory. Defaults to dist/.
+
+FMT:
+    Formats authored html! markup under src/ and a configured external app
+    directory, or the explicit Rust files/directories supplied. Preserves
+    expressions, strings, comments and attribute order. Run cargo fmt for
+    ordinary Rust; script/style bodies keep their authored formatting.
+    --check           Report differences without writing; fail if any differ.
 
 UPGRADE:
     -n, --dry-run      Print what would change, and change nothing.

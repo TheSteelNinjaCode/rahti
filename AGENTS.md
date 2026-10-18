@@ -347,6 +347,13 @@ cargo fmt --all -- --check
 During implementation, run the narrow package or test first, then the
 workspace suite before handing off a framework-wide change.
 
+After changing authored `html!` markup, run `cargo fmt` then `cargo rahti fmt`
+on the changed files. Keep four-space nesting, expand nested tags, and wrap
+long attribute lists. Preserve expressions and script/style raw strings;
+put visible spaces inside quoted text. See the formatting rules in
+`docs/conventions/configuration-and-tooling.md`. Exercise this checkout's
+formatter with `cargo run -p cargo-rahti -- fmt [--check] <application-path>`.
+
 The scaffold CLI is exercised from this checkout with:
 
 ```text

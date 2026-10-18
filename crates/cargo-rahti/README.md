@@ -52,6 +52,24 @@ manifest and `.env` are amended with the dependency, feature and connection
 string the new files need. Additions only, and never twice — running it again
 changes nothing.
 
+## `cargo rahti fmt`
+
+```bash
+cargo fmt
+cargo rahti fmt
+cargo rahti fmt --check
+cargo rahti fmt src/app/page.rs src/components
+```
+
+Formats authored `html!` markup with four-space nesting and wrapped long
+attribute lists. Expressions, quoted values, script/style raw strings,
+comments, and attribute order are preserved. Ordinary Rust uses `cargo fmt`.
+The default scope is `src/` plus a configured `app.dir` outside it; explicit
+paths select Rust files or directories. Generated sources are excluded.
+Blocks with bare text are left untouched because their whitespace can affect
+rendered output. `--check` reports differences without writing and exits
+unsuccessfully if formatting differs.
+
 ## License
 
 Licensed under either of Apache License, Version 2.0 or MIT license at your

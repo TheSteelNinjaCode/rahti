@@ -175,6 +175,11 @@ On every relevant Cargo build it:
 
 ### `cargo-rahti`
 
+- `cargo rahti fmt [--check] [path...]` formats authored `html!` nesting and
+  attribute lists while preserving expressions, raw strings, comments, and
+  attribute order. It excludes generated sources and leaves blocks with
+  source-sensitive bare text untouched. Ordinary Rust uses `cargo fmt`.
+
 - `cargo rahti new <name>` scaffolds a project and records hashes of owned
   scaffold files. `--tailwind`, `--db [backend]`, `--ws`, and `--mcp` answer its
   questions from the command line; each flag only ever says yes.

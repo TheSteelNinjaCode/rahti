@@ -270,7 +270,10 @@ pub fn with_version(
 /// something else about a crate than "this project uses this version".
 fn is_dependency_table(table: &str) -> bool {
     let last = table.rsplit('.').next().unwrap_or(table);
-    let kind = matches!(last, "dependencies" | "dev-dependencies" | "build-dependencies");
+    let kind = matches!(
+        last,
+        "dependencies" | "dev-dependencies" | "build-dependencies"
+    );
     kind && (table == last || table.starts_with("target."))
 }
 

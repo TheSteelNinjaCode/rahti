@@ -15,6 +15,8 @@
 mod attrs;
 pub mod auth;
 pub mod authorization;
+#[cfg(feature = "browser-test")]
+pub mod browser;
 pub mod cache;
 mod dev;
 mod env;
@@ -41,8 +43,6 @@ mod upload;
 pub mod validation;
 #[cfg(feature = "ws")]
 pub mod ws;
-#[cfg(feature = "browser-test")]
-pub mod browser;
 #[cfg(feature = "mcp")]
 pub use rahti_mcp as mcp;
 

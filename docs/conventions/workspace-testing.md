@@ -119,6 +119,12 @@ that is not in this repository to fail with it.
 
 ### Scaffold or upgrade change
 
+Formatter changes also run `cargo test -p cargo-rahti`. Cover idempotence,
+unchanged expressions and raw strings, rendered output, comments, Unicode,
+CRLF, generated-file exclusions, and read-only `--check`. Exercise authored
+sources in a scaffolded project with
+`cargo run -p cargo-rahti -- fmt --check <application-path>/src`.
+
 Run:
 
 ```text

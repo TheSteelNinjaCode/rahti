@@ -372,7 +372,12 @@ fn files_from_manifest(json: &str) -> std::collections::HashMap<String, String> 
         return files;
     };
     for section in ["routes", "layouts", "errors", "loading"] {
-        for item in manifest.get(section).and_then(Value::as_array).into_iter().flatten() {
+        for item in manifest
+            .get(section)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             if let (Some(component), Some(file)) = (
                 item.get("component").and_then(Value::as_str),
                 item.get("file").and_then(Value::as_str),

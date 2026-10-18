@@ -182,7 +182,10 @@ fn a_named_component_resolves_to_its_file() {
     let files = files_from_manifest(MANIFEST);
     assert_eq!(files.len(), 3);
     let from_field = entry(&[("component", "page_33bf1147 (main)")]);
-    assert_eq!(source_file(&from_field, &files).as_deref(), Some("src/app/page.rs"));
+    assert_eq!(
+        source_file(&from_field, &files).as_deref(),
+        Some("src/app/page.rs")
+    );
 }
 
 /// So does one whose stack runs through a compiled component script.
@@ -193,7 +196,10 @@ fn a_component_stack_frame_resolves_to_its_file() {
         "stack",
         "TypeError: x is undefined\n    at walkIn (pp://component/loading_bb.js:12:7)",
     )]);
-    assert_eq!(source_file(&from_stack, &files).as_deref(), Some("src/app/loading.rs"));
+    assert_eq!(
+        source_file(&from_stack, &files).as_deref(),
+        Some("src/app/loading.rs")
+    );
 
     let unknown = entry(&[("stack", "at pp://component/nobody.js:1:1")]);
     assert_eq!(source_file(&unknown, &files), None);

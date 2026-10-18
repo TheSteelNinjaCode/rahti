@@ -65,8 +65,8 @@ pub fn raw_if_keyword(prop: proc_macro2::Ident) -> proc_macro2::Ident {
         "as", "async", "await", "break", "const", "continue", "dyn", "else", "enum", "extern",
         "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
         "pub", "ref", "return", "static", "struct", "trait", "true", "type", "unsafe", "use",
-        "where", "while", "abstract", "become", "box", "do", "final", "gen", "macro",
-        "override", "priv", "try", "typeof", "yield",
+        "where", "while", "abstract", "become", "box", "do", "final", "gen", "macro", "override",
+        "priv", "try", "typeof", "yield",
     ];
     let name = prop.to_string();
     if KEYWORDS.contains(&name.as_str()) {
@@ -1351,7 +1351,8 @@ impl Parser {
                     self.client_bindings += 1;
                     let source = binding_source(&g);
                     let html_name = prop.to_string().trim_start_matches("r#").to_string();
-                    if let Some(msg) = crate::authoring::binding_mistake(Some(&html_name), &source) {
+                    if let Some(msg) = crate::authoring::binding_mistake(Some(&html_name), &source)
+                    {
                         return Err(Error {
                             span: g.span(),
                             msg,

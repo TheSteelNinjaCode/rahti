@@ -113,6 +113,18 @@ html! {
 }
 ```
 
+- When a render or a navigation removes a subtree, every `pp.layoutEffect`
+  cleanup in that subtree runs before any `pp.effect` cleanup in it, as in
+  React. A cleanup that throws during that teardown is logged with
+  `[PP-ERROR]` and the remaining cleanups still run.
+- An effect that sets state on every run re-renders forever: effects and
+  state flushes are both microtasks, so the page would freeze. After 50
+  renders in a row driven only by state set inside `pp.effect`, PulsePoint
+  drops the next render and logs `[PP-WARN] Maximum update depth exceeded
+  for component "…"`, which reaches `.rahti/dev.log`. The cause is a missing
+  dependency array or a dependency rebuilt each render. Any other update — an
+  event, a parent re-render, an async callback — starts the count again.
+
 ## Derived Values and Reducers
 
 A plain top-level `const` recomputed each render is right for cheap
@@ -185,7 +197,11 @@ query, a store module, a library's state — during render, and closes the gap
 between render and subscription. `subscribe` must keep its identity: wrap an
 inline one in `pp.callback(…, [])`, or pass a function the store already
 holds. `getSnapshot` must return the same value for the same state; select a
-slice the store keeps, never a freshly built array or object.
+slice the store keeps, never a freshly built array or object. On mount
+PulsePoint calls it twice and logs `[PP-WARN] pp.syncExternalStore
+getSnapshot for component "…" returned a different value on two calls` when
+the results differ by `Object.is`, because such a snapshot re-renders on every
+store notification.
 
 ```javascript
 const subscribe = pp.callback((onChange) => {
@@ -234,26 +250,41 @@ function save() {
 `pp.deferredValue(value)` lags one commit, so a responsive input can feed an
 expensive consumer that catches up a frame later.
 
-`pp.optimistic(confirmed, reducer?)` shows a guess until `confirmed` changes —
-the moment the server answered — and then drops the pending guesses, so the
-server value never double-counts:
+`pp.optimistic(confirmed, reducer?)` shows a guess on top of `confirmed`. A
+guess is dropped when `confirmed` changes — the server answered, so its value
+never double-counts — and, when the guess was added inside a `pp.transition`
+scope, when that transition settles. Add guesses inside a transition: a
+refused `pp.rpc` then rolls the guess back instead of showing it forever.
 
 ```rust
 html! {
     <section>
-        <button onclick={like()}>"Like ("{likes}")"</button>
+        <button disabled={liking} onclick={like()}>"Like ("{likes}")"</button>
         <script>r##"
             const [confirmedLikes, setConfirmedLikes] = pp.state(@{likes});
             const [likes, addLike] = pp.optimistic(confirmedLikes, (state, delta) => state + delta);
-            async function like() {
-                addLike(1);
-                const result = await pp.rpc('like_post', { post: @{post_id} });
-                setConfirmedLikes(result.likes);
+            const [liking, startLiking] = pp.transition();
+            function like() {
+                startLiking(async () => {
+                    addLike(1);
+                    try {
+                        const result = await pp.rpc('like_post', { post: @{post_id} });
+                        setConfirmedLikes(result.likes);
+                    } catch (failure) {
+                        // Refused: the guess is dropped when the transition settles.
+                    }
+                });
             }
         "##</script>
     </section>
 }
 ```
+
+- A guess added before the scope's first `await` belongs to that transition.
+  A guess added after an `await` cannot be traced to one, so it lasts until
+  every transition in flight at that moment has settled.
+- A guess added with no transition in flight lasts until `confirmed`
+  changes; if the request fails and nothing changes `confirmed`, it stays.
 
 ## Error Boundaries
 
@@ -284,8 +315,11 @@ html! {
   fallback markup lives in the same component.
 - Effect bodies and effect cleanups take the same path as render failures.
 - The boundary holds the error until `reset()`. It absorbs at most five errors
-  without a `reset()`, then logs and stops catching, so a fallback that itself
-  throws cannot spin the render loop.
+  without a `reset()`, then logs and stops catching.
+- A throw from a boundary's own render while it shows its fallback (it holds
+  an error) is a broken fallback, not a new error to show: it goes to the next
+  boundary up, as in React. Keep fallback markup simple and guarded
+  (`{error?.message}`).
 - Event-handler errors are not routed to boundaries: use `try`/`catch` in the
   handler, as in React.
 

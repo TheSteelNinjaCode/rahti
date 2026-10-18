@@ -2162,9 +2162,17 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          cargo dev              # cargo run, restarted on every edit (needs cargo-watch)\n\
          cargo check            # verify without running\n\
          cargo test             # this application's tests\n\
+         cargo fmt              # format ordinary Rust\n\
+         cargo rahti fmt        # format authored html! markup\n\
+         cargo rahti fmt --check # verify markup formatting without writing\n\
          cargo rahti build --static # render the site into dist/\n\
          cargo rahti upgrade    # refresh unedited scaffold files, this guide included\n\
-         ```\n",
+         ```\n\n\
+         After editing markup, run `cargo fmt` then `cargo rahti fmt` on the changed\n\
+         files. Use four-space nesting and separate lines for nested elements;\n\
+         keep visible spaces inside quoted text. The formatter preserves client\n\
+         and server expressions, attribute order, and script/style raw strings.\n\
+         See the formatting rules in `docs/conventions/configuration-and-tooling.md`.\n",
     );
 
     out

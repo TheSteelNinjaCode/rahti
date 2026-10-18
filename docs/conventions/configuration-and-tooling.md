@@ -317,6 +317,49 @@ credential belongs in `rahti.config.json` or `public/llms.txt`.
 
 ## Scaffold CLI
 
+### Formatting authored markup
+
+```text
+cargo fmt
+cargo rahti fmt
+cargo rahti fmt --check
+cargo rahti fmt src/app/page.rs src/components
+```
+
+`cargo fmt` formats ordinary Rust. `cargo rahti fmt` formats the markup in
+`html!` invocations, including qualified invocations, without compiling or
+running the application. Its default scope is `src/` plus the configured
+`app.dir` when that directory is outside `src/`. Explicit paths select Rust
+files or directories recursively. Generated `routes.rs` and `mod.rs` files
+directly under `components`, `models`, or `migrations` are excluded, as are
+symlinks and `target`, `.git`, `.rahti`, `node_modules`, `dist`, and `native`
+directories. Use explicit paths for other workspace packages.
+
+The formatter uses four spaces per nesting level. Nested elements and
+sibling elements occupy separate lines; short elements containing only text
+or expressions stay inline. Opening tags longer than 100 bytes including
+indentation wrap their attributes onto separate lines. The width is a soft
+limit: quoted strings and expressions are never split to satisfy it.
+
+Client `{…}` bindings, server `@{…}` expressions and spreads, quoted text,
+attribute values, attribute order, and script/style raw-string contents are
+preserved. Existing multiline expressions remain multiline; the formatter
+does not introduce line breaks inside expressions. Keep visible spaces
+inside quoted text. Move complicated browser logic into a named script
+function manually; formatting never changes scope, hooks, or directives.
+
+Rust comments are retained. An element with comments inside its opening tag
+is preserved as authored. A block containing bare unquoted text is left
+untouched because its whitespace can affect rendered output. Use quoted
+text when authoring markup that should be automatically formatted.
+
+`--check` reports files that would change and exits unsuccessfully without
+writing. Invalid Rust tokenization or malformed supported markup is reported
+before any files are written. Ordinary Rust outside the macro is untouched;
+run both formatting commands before handing off an authored markup change.
+Formatting an already formatted file produces no changes. Embedded JavaScript
+and CSS use their authored formatting; no JavaScript tooling is required.
+
 ```text
 cargo rahti new <name> [--tailwind] [--db [backend]] [--ws] [--mcp] [--local <path>]
 cargo rahti build --static [--out <directory>]
