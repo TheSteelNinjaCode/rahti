@@ -369,6 +369,23 @@ The same binding on a component boundary *does* remove the attribute when the
 value is nullish, so a nullish `src` behaves differently on a plain `<img>`
 than on a component that forwards it. Do not rely on either; write the guard.
 
+A URL attribute the browser parses or fetches as soon as it is set — `src`,
+`srcset`, `sizes`, `imagesrcset`, `imagesizes`, `poster` — is written with a
+binding like any other, and the browser only ever sees its evaluated value.
+Until the owning block renders, the runtime keeps the unevaluated `{…}` text
+off the real attribute, so no request goes out for the expression and no
+`srcset` parse warning reaches the console. That holds wherever the element
+first appears: in a page, in children written between a component's tags, and
+in the rows a `pp-for` inserts, including rows that are scripted components.
+The holding attribute is runtime-managed and gone once the block renders; never
+write it or select on it.
+
+```rust
+<template pp-for="photo in photos">
+    <img key={photo.id} src={photo.url} alt={photo.alt} />
+</template>
+```
+
 **`pp-for` collections.** A non-iterable collection renders no rows and logs a
 `[PP-WARN]`; `null` and `undefined` render no rows silently. Binding a value
 that is an object rather than an array is therefore a blank list, not an error.
