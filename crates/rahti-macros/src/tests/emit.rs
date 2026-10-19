@@ -281,6 +281,29 @@ fn a_component_tag_calls_through_its_companion() {
     );
 }
 
+/// The props literal closes with `..Default::default()` because the call site
+/// does not know which props it omitted, so a tag naming every prop must not
+/// surface clippy's `needless_update` in the application: the statement
+/// carries the allowance.
+#[test]
+fn a_component_tag_allows_a_needless_update() {
+    let ops = ops_of(
+        r#"<main><Card title="Profile" /></main>"#,
+        "src/lib/widgets.rs",
+    );
+    let out = emit(ops).to_string();
+    assert!(
+        out.contains(".. :: core :: default :: Default :: default ()"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "# [allow (clippy :: needless_update)] :: rahti :: Render :: render_into (& (Card {"
+        ),
+        "{out}"
+    );
+}
+
 /// Children between the tags become the `children` field, built by this same
 /// emitter — a nested `Html` the shim passes on.
 #[test]

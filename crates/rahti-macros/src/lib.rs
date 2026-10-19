@@ -543,7 +543,12 @@ fn emit(ops: Vec<Op>) -> TokenStream {
                     let block = emit(child.ops);
                     fields.extend(quote! { children: #block, });
                 }
+                // A tag that names every prop leaves the update with nothing
+                // to fill, which clippy reports as `needless_update` at each
+                // such call site. The call site cannot tell — see above — so
+                // the statement carries the allowance.
                 body.extend(quote! {
+                    #[allow(clippy::needless_update)]
                     ::rahti::Render::render_into(
                         &(#name {
                             #fields
