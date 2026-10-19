@@ -22,7 +22,7 @@ members = [
 version = "0.0.55"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/jeffersonabraham/rahti"
+repository = "https://github.com/TheSteelNinjaCode/rahti"
 # Keep this release line on the Rust version required by the Rahti crates.
 # Naming the minimum explicitly makes Cargo reject an older compiler before
 # it starts compiling the framework or one of its dependencies.

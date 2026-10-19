@@ -11,8 +11,6 @@ removed, and the name is taken permanently.
 - [x] **READMEs.** The workspace `README.md` is the framework's face and the
       `rahti` crate's page (`readme = "../../README.md"`); every other
       publishable crate carries its own.
-- [ ] **Set the real repository URL** in `[workspace.package]` of the root
-      `Cargo.toml`. The current value is a placeholder.
 - [ ] `cargo test --workspace` clean.
 - [ ] Commit everything. `cargo publish` records the git revision.
 
