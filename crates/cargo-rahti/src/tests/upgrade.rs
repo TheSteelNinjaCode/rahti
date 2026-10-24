@@ -229,6 +229,82 @@ fn every_reported_write_is_a_write() {
     }
 }
 
+// ----------------------------------------------------------- the ledger lost
+
+/// A project directory holding `files`, for the plan tests.
+fn project_with(files: &[(&str, &str)]) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "cargo-rahti-plan-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&root);
+    for (path, contents) in files {
+        let full = root.join(path);
+        fs::create_dir_all(full.parent().unwrap()).expect("a temporary directory");
+        fs::write(full, contents).expect("a written file");
+    }
+    root
+}
+
+const DOC: &str = "docs/conventions/localization.md";
+
+fn template() -> Vec<(String, Vec<u8>)> {
+    vec![(DOC.to_string(), b"the template".to_vec())]
+}
+
+/// A file on disk under a template's name, with no ledger entry, is the
+/// author's to an ordinary upgrade — nothing says the scaffold wrote it.
+#[test]
+fn an_unrecorded_file_is_left_alone() {
+    let root = project_with(&[(DOC, "an older copy")]);
+    let (plan, ledger) = plan(
+        &root,
+        &template(),
+        &Ledger::new(),
+        &Options::parse(&[]).unwrap(),
+    );
+    assert_eq!(plan.yours, [DOC]);
+    assert!(!ledger.contains_key(DOC));
+}
+
+/// Naming it is how it is taken back. Before, the named force was never
+/// consulted for an unrecorded file, which left it reported as kept on every
+/// run with no spelling that could adopt it.
+#[test]
+fn naming_an_unrecorded_file_takes_it() {
+    let root = project_with(&[(DOC, "an older copy")]);
+    let options = Options::parse(&["--force", DOC]).unwrap();
+    let (plan, ledger) = plan(&root, &template(), &Ledger::new(), &options);
+    assert_eq!(plan.forced, [DOC]);
+    assert!(plan.writes(DOC));
+    assert_eq!(ledger[DOC], sha256::hex(b"the template"));
+}
+
+/// Already the template's text: nothing to write, only the record to make,
+/// so the next ordinary upgrade reads it as the scaffold's.
+#[test]
+fn naming_an_unrecorded_current_file_records_it() {
+    let root = project_with(&[(DOC, "the template")]);
+    let options = Options::parse(&["--force", DOC]).unwrap();
+    let (plan, ledger) = plan(&root, &template(), &Ledger::new(), &options);
+    assert_eq!(plan.current, [DOC]);
+    assert!(!plan.writes(DOC));
+    assert_eq!(ledger[DOC], sha256::hex(b"the template"));
+}
+
+/// A bare `--force` sweeps what the scaffold knows it wrote. An unrecorded
+/// file may be the author's own under a name a newer template took, so the
+/// sweep passes it by.
+#[test]
+fn a_bare_force_leaves_an_unrecorded_file() {
+    let root = project_with(&[(DOC, "an older copy")]);
+    let options = Options::parse(&["--force"]).unwrap();
+    let (plan, _) = plan(&root, &template(), &Ledger::new(), &options);
+    assert_eq!(plan.yours, [DOC]);
+}
+
 // ------------------------------------------------------------------- rewrite
 
 /// A scratch directory holding the config `new` writes, for the rewrite tests.

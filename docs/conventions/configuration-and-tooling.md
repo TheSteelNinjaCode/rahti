@@ -513,6 +513,11 @@ the render contract and output safety rules.
   applies it. A forced file whose text already matches the template is simply
   re-adopted into the ledger, so running it twice changes nothing the second
   time.
+- A file on disk under a template's name with no ledger entry is reported as
+  yours, because nothing records that the scaffold wrote it. A bare `--force`
+  passes it by — it may be your own file under a name a newer template took.
+  Name it to take it: `--force docs/conventions/localization.md` writes the
+  template and records it, or only records it when the text already matches.
 - In `rahti.config.json`, `upgrade` rewrites only what it owns: `createdWith`
   and the `scaffold` ledger. Everything else — the port, the app directory,
   any CSS setting — stays exactly as you wrote it.

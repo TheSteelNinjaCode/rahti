@@ -123,56 +123,7 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     // somebody typing `--force` cannot afford to misread.
     options.check_forced(&files)?;
 
-    let mut plan = Plan::default();
-    let mut ledger = config.ledger.clone();
-
-    for (path, wanted) in &files {
-        let full = root.join(path);
-        let recorded = config.ledger.get(path);
-        let actual = fs::read(&full).ok();
-
-        match (recorded, actual) {
-            // Known to the ledger and still on disk: whose is it?
-            (Some(hash), Some(bytes)) => {
-                let theirs = &sha256::hex(&bytes) != hash;
-                if theirs && !options.forces(path) {
-                    plan.yours.push(path.clone());
-                } else if bytes == *wanted {
-                    // Already the template's text. A forced file lands here
-                    // once it has been taken, so a second `--force` re-adopts
-                    // it into the ledger and says nothing.
-                    plan.current.push(path.clone());
-                    ledger.insert(path.clone(), sha256::hex(wanted));
-                } else if NEVER_REWRITTEN.contains(&path.as_str()) {
-                    plan.skipped.push(path.clone());
-                } else {
-                    // Same write either way; reported apart, because one of
-                    // them destroys work and the other does not.
-                    if theirs {
-                        plan.forced.push(path.clone());
-                    } else {
-                        plan.updated.push(path.clone());
-                    }
-                    ledger.insert(path.clone(), sha256::hex(wanted));
-                }
-            }
-            // Recorded, but gone. Deleting a file is a decision, and putting
-            // it back is not this command's to make.
-            (Some(_), None) => plan.deleted.push(path.clone()),
-            // Not recorded: a file a newer Rahti adds to the project. If
-            // something is already there under that name it is not ours.
-            (None, actual) => {
-                if actual.is_some() {
-                    plan.yours.push(path.clone());
-                } else if NEVER_REWRITTEN.contains(&path.as_str()) {
-                    plan.skipped.push(path.clone());
-                } else {
-                    plan.added.push(path.clone());
-                    ledger.insert(path.clone(), sha256::hex(wanted));
-                }
-            }
-        }
-    }
+    let (plan, mut ledger) = plan(&root, &files, &config.ledger, &options);
 
     if dry_run {
         let wiring = wire(&root, &config, true)?;
@@ -234,6 +185,81 @@ pub fn run(args: &[&str]) -> Result<(), String> {
         options.force.as_deref(),
     );
     Ok(())
+}
+
+/// Every scaffold file sorted into what this run does with it, and the ledger
+/// as it will stand afterwards.
+///
+/// Reads the project and writes nothing: the caller writes what the plan says
+/// and records the ledger, so a dry run and a real one cannot disagree.
+fn plan(
+    root: &Path,
+    files: &[(String, Vec<u8>)],
+    recorded: &Ledger,
+    options: &Options,
+) -> (Plan, Ledger) {
+    let mut plan = Plan::default();
+    let mut ledger = recorded.clone();
+
+    for (path, wanted) in files {
+        let actual = fs::read(root.join(path)).ok();
+
+        match (recorded.get(path), actual) {
+            // Known to the ledger and still on disk: whose is it?
+            (Some(hash), Some(bytes)) => {
+                let theirs = &sha256::hex(&bytes) != hash;
+                if theirs && !options.forces(path) {
+                    plan.yours.push(path.clone());
+                } else if bytes == *wanted {
+                    // Already the template's text. A forced file lands here
+                    // once it has been taken, so a second `--force` re-adopts
+                    // it into the ledger and says nothing.
+                    plan.current.push(path.clone());
+                    ledger.insert(path.clone(), sha256::hex(wanted));
+                } else if NEVER_REWRITTEN.contains(&path.as_str()) {
+                    plan.skipped.push(path.clone());
+                } else {
+                    // Same write either way; reported apart, because one of
+                    // them destroys work and the other does not.
+                    if theirs {
+                        plan.forced.push(path.clone());
+                    } else {
+                        plan.updated.push(path.clone());
+                    }
+                    ledger.insert(path.clone(), sha256::hex(wanted));
+                }
+            }
+            // Recorded, but gone. Deleting a file is a decision, and putting
+            // it back is not this command's to make.
+            (Some(_), None) => plan.deleted.push(path.clone()),
+            // Not recorded, but something is there under the template's name.
+            // Nothing says whose it is, so it is the author's — unless they
+            // named it: `--force docs/conventions/routing.md` is how a file
+            // the ledger lost is taken back, and the only way it can be.
+            (None, Some(bytes)) => {
+                if !options.names(path) {
+                    plan.yours.push(path.clone());
+                } else if bytes == *wanted {
+                    plan.current.push(path.clone());
+                    ledger.insert(path.clone(), sha256::hex(wanted));
+                } else {
+                    plan.forced.push(path.clone());
+                    ledger.insert(path.clone(), sha256::hex(wanted));
+                }
+            }
+            // Not recorded and not there: a file a newer Rahti adds.
+            (None, None) => {
+                if NEVER_REWRITTEN.contains(&path.as_str()) {
+                    plan.skipped.push(path.clone());
+                } else {
+                    plan.added.push(path.clone());
+                    ledger.insert(path.clone(), sha256::hex(wanted));
+                }
+            }
+        }
+    }
+
+    (plan, ledger)
 }
 
 // ------------------------------------------------------------------- wiring
@@ -483,6 +509,20 @@ impl Options {
             Some(paths) if paths.is_empty() => !authored(path),
             Some(paths) => paths.iter().any(|named| named == path),
         }
+    }
+
+    /// Whether `path` was named after `--force`.
+    ///
+    /// A file the ledger has no entry for answers only to this. A bare
+    /// `--force` sweeps the files the scaffold knows it wrote; one it never
+    /// recorded may be the author's own that happens to share a template's
+    /// name, so it has to be asked for by name.
+    fn names(&self, path: &str) -> bool {
+        !NEVER_REWRITTEN.contains(&path)
+            && self
+                .force
+                .as_ref()
+                .is_some_and(|paths| paths.iter().any(|named| named == path))
     }
 
     /// Refuse a named path the scaffold cannot restore.

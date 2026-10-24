@@ -242,7 +242,8 @@ On every relevant Cargo build it:
   still match, preserving user-edited files.
 - `cargo rahti upgrade --force` takes edited files back: bare, the framework's
   own, leaving everything under `src/` except `src/main.rs`; with paths, only
-  those. `Cargo.toml` is never forced, and an unknown path is refused.
+  those. `Cargo.toml` is never forced, and an unknown path is refused. A file
+  the ledger has no entry for is taken only when named.
 - `cargo rahti upgrade` moves the `rahti` and `rahti-build` version pins to
   the running tool's version — forward only, never onto a `--local` path
   dependency or a floating requirement — because the framework ships in
@@ -316,8 +317,9 @@ The current implementation covers:
 - client code compiled ahead of time: a per-application registry of every
   binding, handler and component script, so the default Content-Security-
   Policy carries no `'unsafe-eval'` and requires Trusted Types with
-  PulsePoint's single `pulsepoint` policy, and injected `{…}` markup stays
-  inert;
+  PulsePoint's single `pulsepoint` policy, and injected `{…}` markup cannot
+  run new code — it is looked up as a name or a compiled binding's source,
+  which is why values are escaped;
 
 - optional server-side localization with configured Unicode locale
   identifiers, build-validated and binary-embedded Fluent catalogs,

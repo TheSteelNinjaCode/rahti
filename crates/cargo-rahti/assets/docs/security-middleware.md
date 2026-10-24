@@ -63,10 +63,13 @@ mounts the page; the runtime runs only what that registry holds. Authored
 bound through event listeners. The browser parser never treats them as inline
 JavaScript, even while initial HTML or detached render trees are parsed.
 So an injected
-inline `<script>`, an `onerror=` attribute, a `<script src>` on another host,
-and an injected `{…}` binding all stay inert — the browser refuses the first
-three and reports a violation, which `rahti::browser` surfaces in `errors()`,
-and the runtime renders the last as text.
+inline `<script>`, an `onerror=` attribute, and a `<script src>` on another
+host all stay inert — the browser refuses them and reports a violation, which
+`rahti::browser` surfaces in `errors()`. An injected `{…}` cannot run new code
+either, because the runtime compiles nothing, but it is looked up: a bare name
+reads the block's state, and the exact source of a compiled binding runs that
+binding. Escaped `@{…}` values never carry live braces; `Html::from_raw`
+markup does, which is why request data never goes through it.
 
 `require-trusted-types-for 'script'` makes the browser refuse a plain string at
 every sink that parses markup or code (`innerHTML`, `DOMParser`, a script's

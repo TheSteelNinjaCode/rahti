@@ -24,8 +24,16 @@ PulsePoint never turns page text into code. Every `{…}` binding, inline
 handler, `pp-for` collection and component `<script>` an `html!` template
 writes is compiled when the application is built and served as the client
 registry, `/_rahti/client.js`, which `main.js` imports before it mounts the
-page. The runtime runs only what that registry holds: a `{…}` no template
-wrote — text a user saved, markup injected into the page — renders as text.
+page. The runtime runs only what that registry holds. A `{…}` it finds in
+markup no template compiled is not compiled either; it is looked up. A bare
+name resolves against the block's scope and renders that value, the exact
+source of a binding some template compiled runs that binding, and anything
+else stays text — a name the scope does not have logs `[PP-ERROR] Template
+Expression Failed`. So a `{…}` that reaches the page any other way cannot run
+new code, but it can read state and trigger compiled bindings. A value written
+with `@{…}` never arrives as one: its braces are escaped (see "Escaping and
+Trusted Markup" in `rendering-and-components.md`), and only `Html::from_raw`
+markup keeps them live.
 Handlers authored as `onclick={save()}` are emitted in inert compiler-owned
 `pp-on*` attributes. PulsePoint reads their registered code, installs event
 listeners, and removes the metadata. Native inline handler attributes never

