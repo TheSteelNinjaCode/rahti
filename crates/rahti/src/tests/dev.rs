@@ -188,20 +188,24 @@ fn a_named_component_resolves_to_its_file() {
     );
 }
 
-/// So does one whose stack runs through a compiled component script.
+/// So does one whose stack runs through a component script in the client
+/// registry, whose function is named after the component's boundary.
 #[test]
 fn a_component_stack_frame_resolves_to_its_file() {
     let files = files_from_manifest(MANIFEST);
     let from_stack = entry(&[(
         "stack",
-        "TypeError: x is undefined\n    at walkIn (pp://component/loading_bb.js:12:7)",
+        "TypeError: x is undefined\n    at walkIn (http://localhost:3000/_rahti/client.js:12:7)\n    at loading_bb (http://localhost:3000/_rahti/client.js:9:3)",
     )]);
     assert_eq!(
         source_file(&from_stack, &files).as_deref(),
         Some("src/app/loading.rs")
     );
 
-    let unknown = entry(&[("stack", "at pp://component/nobody.js:1:1")]);
+    let unknown = entry(&[(
+        "stack",
+        "at nobody (http://localhost:3000/_rahti/client.js:1:1)",
+    )]);
     assert_eq!(source_file(&unknown, &files), None);
     assert!(files_from_manifest("not json").is_empty());
 }

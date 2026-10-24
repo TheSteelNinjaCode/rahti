@@ -15,6 +15,12 @@ The server never reads `.env` and does not reuse the application's browser
 session. It reports whether RPCs and WebSockets require a session, while route
 privacy remains a runtime application policy.
 
+`list_rpcs` reads the generated `rpcContracts` inventory. It includes parameter
+and success-response Rust types, required arguments, source locations, scoped
+URLs, transports, and checking limits. A Rust type spelling is not a JSON
+schema: unresolved representations require inspecting the declaration and
+Serde behavior. Run `cargo check` to regenerate a missing contract inventory.
+
 Projects created or upgraded with `--mcp` also enable Rahti's optional `mcp`
 feature. Their generated application router exposes Streamable HTTP at
 `/mcp/`, discovery at `/.well-known/mcp.json`, and public context at

@@ -11,6 +11,7 @@
 
 mod codegen;
 mod components;
+mod contracts;
 mod css;
 mod db;
 mod i18n;
@@ -259,17 +260,16 @@ pub fn run() {
         ROUTES_PATH,
         &codegen::routes_rs(&scan.entries, &components.rpcs, &sockets, &config),
     );
-    write_if_changed(
-        MANIFEST_PATH,
-        &codegen::manifest_json(
-            &scan.entries,
-            &components.files,
-            &components.rpcs,
-            &sockets,
-            database.as_ref(),
-            &config,
-        ),
+    let manifest = codegen::manifest_json(
+        &scan.entries,
+        &components.files,
+        &components.rpcs,
+        &sockets,
+        database.as_ref(),
+        &config,
+        &contracts::inventory(&scan.entries, &components.rpcs),
     );
+    write_if_changed(MANIFEST_PATH, &manifest);
 }
 
 fn check_reserved_routes(entries: &[scanner::Entry], mcp: bool) {

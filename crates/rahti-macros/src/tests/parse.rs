@@ -64,6 +64,10 @@ fn show(ops: &[Op]) -> String {
                 }
             }
             Op::ScriptText(expr) => out.push_str(&format!("@{{{expr}}}")),
+            Op::ScriptData(values) => {
+                let values: Vec<String> = values.iter().map(|v| format!("@{{{v}}}")).collect();
+                out.push_str(&format!(" pp-data=\"[{}]\"", values.join(",")));
+            }
             Op::Slot | Op::DeferredSlot => out.push_str("<slot/>"),
             Op::Component(call) => {
                 out.push('<');
@@ -91,6 +95,16 @@ fn show(ops: &[Op]) -> String {
 /// The markup a block renders.
 fn render(src: &str) -> String {
     show(&parse_ok(src).ops)
+}
+
+/// The code a block's component script registers.
+fn script_source(parsed: &Parsed) -> String {
+    parsed
+        .client_code
+        .iter()
+        .find(|code| code.kind == ClientKind::Script)
+        .map(|code| code.source.clone())
+        .expect("a component script")
 }
 
 /// The message a template fails with, or a failure if it parsed.
@@ -453,7 +467,7 @@ fn client_binding_is_copied_through_as_text() {
 fn client_binding_in_an_attribute_is_copied_through() {
     assert_eq!(
         render(r#"<button onclick={setCount(count + 1)}>"+"</button>"#),
-        "<button onclick=\"{setCount(count + 1)}\">+</button>"
+        "<button pp-onclick=\"{setCount(count + 1)}\">+</button>"
     );
 }
 
@@ -595,23 +609,33 @@ fn a_bare_ampersand_is_escaped() {
 
 // ---------------------------------------------------------------- raw text
 
-/// `<script>` and `<style>` hold text, not markup: a brace there is a block
-/// or a rule, and `&lt;` would reach the browser as those five characters.
+/// A bare `<script>` is a component script: compiled ahead of time and
+/// registered, so the page carries only an empty element naming it. A brace
+/// there is a block, and `<` a comparison — the body is never markup.
 #[test]
-fn script_body_is_not_parsed() {
-    let out = render(r###"<script>r##"const [a, set] = pp.state(0);"##</script>"###);
-    assert!(out.starts_with("<script>"), "{out}");
-    assert!(out.ends_with("</script>"), "{out}");
-    assert!(out.contains("pp.state(0)"), "{out}");
-    assert!(!out.contains("&amp;"), "{out}");
+fn a_component_script_is_registered_not_written() {
+    let parsed = parse_ok(r###"<script>r##"const [a, set] = pp.state(0);"##</script>"###);
+    let out = show(&parsed.ops);
+    assert!(out.starts_with("<script pp-script=\"s"), "{out}");
+    assert!(out.ends_with("\"></script>"), "{out}");
+    assert!(!out.contains("pp.state"), "{out}");
+    assert_eq!(script_source(&parsed), "const [a, set] = pp.state(0);");
 }
 
 #[test]
 fn script_body_keeps_braces_and_comparisons() {
-    let out = render(r###"<script>r##"if (a < b) { go(); }"##</script>"###);
-    assert!(out.contains("a < b"), "{out}");
-    assert!(out.contains("{ go(); }"), "{out}");
-    assert!(!out.contains("&lt;"), "{out}");
+    let parsed = parse_ok(r###"<script>r##"if (a < b) { go(); }"##</script>"###);
+    assert_eq!(script_source(&parsed), "if (a < b) { go(); }");
+}
+
+/// The key names the code, so the same script always lands on the same entry.
+#[test]
+fn a_script_key_is_the_hash_of_its_code() {
+    let one = render(r###"<script>r##"const a = 1;"##</script>"###);
+    let same = render(r###"<script>r##"const a = 1;"##</script>"###);
+    let other = render(r###"<script>r##"const a = 2;"##</script>"###);
+    assert_eq!(one, same);
+    assert_ne!(one, other);
 }
 
 #[test]
@@ -620,93 +644,71 @@ fn style_body_is_not_parsed() {
     assert!(out.contains(".a { color: red; }"), "{out}");
 }
 
-/// `@{expr}` inside `<script>` is lifted out of the raw-text run, the way it
-/// is in markup. It comes back as its own op — `Op::ScriptText` — so the
-/// emit side routes it through `RenderJs`, the script-side counterpart of
-/// `Render`. The two sides have separate rules: JS source has no HTML
-/// escaping, and a string that renders bare in markup quotes itself here.
+/// `@{expr}` in a component script is a server value: the compiled script
+/// reads it as `__pp_server[i]`, and the page carries the values as the
+/// script's `pp-data` JSON array, in order.
 #[test]
-fn script_at_brace_is_lifted_to_a_script_text_op() {
-    let parsed = parse_ok(r###"<script>r##"const c = @{42};"##</script>"###);
+fn script_server_values_become_pp_data() {
+    let parsed = parse_ok(
+        r###"<script>r##"const [n, setN] = pp.state(@{initial}); const s = @{label};"##</script>"###,
+    );
+    assert_eq!(
+        script_source(&parsed),
+        "const [n, setN] = pp.state(__pp_server[0]); const s = __pp_server[1];"
+    );
+    let out = show(&parsed.ops);
     assert!(
-        parsed.ops.iter().any(|op| matches!(op, Op::ScriptText(_))),
-        "expected an Op::ScriptText in {:?}",
-        parsed.ops
+        out.ends_with(" pp-data=\"[@{initial},@{label}]\"></script>"),
+        "{out}"
     );
 }
 
-/// `@{…}` may sit anywhere in the body, with JS verbatim on either side. That
-/// is the shape a page writes to seed `pp.state(…)` with render-time data.
+/// The end of an `@{…}` is found by counting braces, past Rust strings.
 #[test]
-fn script_at_brace_keeps_the_around_text_verbatim() {
+fn a_script_finds_the_end_of_a_nested_expression() {
+    let parsed = parse_ok(
+        r###"<script>r##"const a = @{format!("{}}", Json(&x))}; const b = 1;"##</script>"###,
+    );
     assert_eq!(
-        render(r###"<script>r##"const [c, set] = pp.state(@{42});"##</script>"###),
-        "<script>const [c, set] = pp.state(@{42});</script>",
+        script_source(&parsed),
+        "const a = __pp_server[0]; const b = 1;"
     );
 }
 
-/// An identifier inside the `@{…}` — the form a page actually writes to pass
-/// a backend variable in — lifts the same way a literal does. The contents
-/// of the brace are an opaque Rust token stream as far as `html!` is
-/// concerned; what is inside it does not change whether the run is split.
-#[test]
-fn script_at_brace_with_an_ident_lifts_too() {
-    let parsed = parse_ok(r###"<script>r##"const c = pp.state(@{initial_count});"##</script>"###);
-    let lifted = parsed
-        .ops
-        .iter()
-        .filter(|op| matches!(op, Op::ScriptText(_)))
-        .count();
-    assert_eq!(lifted, 1, "got ops: {:?}", parsed.ops);
-    assert_eq!(
-        show(&parsed.ops),
-        "<script>const c = pp.state(@{initial_count});</script>",
-    );
-}
-
-/// `@{42}` inside a `pp.state(…)` call — confirming the lift fires whether
-/// the brace holds an ident or a literal — and that the `Op::ScriptText` is
-/// distinct from a `Op::Static` that only joined the source back together.
-#[test]
-fn script_at_brace_inside_a_call_lifts_even_with_a_literal() {
-    let parsed = parse_ok(r###"<script>r##"const c = pp.state(@{42});"##</script>"###);
-    assert!(
-        parsed.ops.iter().any(|op| matches!(op, Op::ScriptText(_))),
-        "expected an Op::ScriptText, got {:?}",
-        parsed.ops
-    );
-}
-
-/// Multiple `@{…}` interpolations in one script body, with JS between them,
-/// render in order with the source left untouched on each side.
-#[test]
-fn several_script_interpolations_are_each_their_own_op() {
-    let parsed = parse_ok(r###"<script>r##"const a = @{1}; const b = @{2};"##</script>"###);
-    let count = parsed
-        .ops
-        .iter()
-        .filter(|op| matches!(op, Op::ScriptText(_)))
-        .count();
-    assert_eq!(count, 2, "got ops: {:?}", parsed.ops);
-    assert_eq!(
-        show(&parsed.ops),
-        "<script>const a = @{1}; const b = @{2};</script>",
-    );
-}
-
-/// A bare `@` in a script — `@media` would be one in a style — stays raw.
-/// Only `@` followed by a `{…}` group is lifted; that is what separates it
-/// from any of the JS constructs that write an at-sign.
+/// A bare `@` stays JavaScript; only `@` followed by a `{…}` group is lifted.
 #[test]
 fn a_bare_at_in_a_script_stays_raw() {
-    let out = render(r###"<script>r##"const p = a @ b;"##</script>"###);
-    assert_eq!(out, "<script>const p = a @ b;</script>");
+    let parsed = parse_ok(r###"<script>r##"const p = a @ b;"##</script>"###);
+    assert_eq!(script_source(&parsed), "const p = a @ b;");
+}
+
+/// `@@{` is a literal `@{`, for the rare script that needs one.
+#[test]
+fn a_script_escapes_a_literal_at_brace() {
+    let parsed = parse_ok(r###"<script>r##"const css = '@@{ not rust }';"##</script>"###);
+    assert_eq!(script_source(&parsed), "const css = '@{ not rust }';");
+}
+
+/// A script with attributes is not a component script: a `type`d data block
+/// is written as it stands, its `@{…}` rendered in place through `RenderJs`.
+#[test]
+fn a_typed_script_is_written_with_its_values_in_place() {
+    let parsed =
+        parse_ok(r###"<script type="application/json">r##"{"count": @{count}}"##</script>"###);
+    assert!(
+        parsed.ops.iter().any(|op| matches!(op, Op::ScriptText(_))),
+        "{:?}",
+        parsed.ops
+    );
+    assert_eq!(
+        show(&parsed.ops),
+        "<script type=\"application/json\">{\"count\": @{count}}</script>"
+    );
+    assert!(parsed.client_code.is_empty());
 }
 
 /// `<style>` keeps the raw-text rule even for `@media`/`@keyframes`: the `@`
-/// is part of a CSS at-rule, and the `{…}` is a rule body, not a Rust
-/// expression. Lifting `@{…}` in a style would need a different escape rule
-/// and a `RenderCss` trait, and is held back until there is a reason for it.
+/// is part of a CSS at-rule, and the `{…}` is a rule body.
 #[test]
 fn style_keeps_at_braces_raw() {
     let parsed =
@@ -724,68 +726,20 @@ fn style_keeps_at_braces_raw() {
 /// comments included.
 #[test]
 fn a_script_is_javascript_verbatim() {
-    let out = render(
+    let parsed = parse_ok(
         r###"<script>r##"
         // a comment that stays
         const greeting = 'hi';
         const line = `${greeting}, it's ${new Date().getFullYear()}`;
     "##</script>"###,
     );
-    assert!(out.contains("// a comment that stays"), "{out}");
-    assert!(out.contains("const greeting = 'hi';"), "{out}");
+    let source = script_source(&parsed);
+    assert!(source.contains("// a comment that stays"), "{source}");
+    assert!(source.contains("const greeting = 'hi';"), "{source}");
     assert!(
-        out.contains("`${greeting}, it's ${new Date().getFullYear()}`"),
-        "{out}"
+        source.contains("`${greeting}, it's ${new Date().getFullYear()}`"),
+        "{source}"
     );
-    assert!(!out.contains("r##"), "{out}");
-}
-
-/// `@{expr}` in a script is a Rust value, lifted out of the JavaScript.
-#[test]
-fn a_script_lifts_at_braces() {
-    let parsed = parse_ok(
-        r###"<script>r##"const [n, setN] = pp.state(@{initial}); const s = 'ok';"##</script>"###,
-    );
-    let lifted = parsed
-        .ops
-        .iter()
-        .filter(|op| matches!(op, Op::ScriptText(_)))
-        .count();
-    assert_eq!(lifted, 1, "got ops: {:?}", parsed.ops);
-    assert_eq!(
-        show(&parsed.ops),
-        "<script>const [n, setN] = pp.state(@{initial}); const s = 'ok';</script>",
-    );
-}
-
-/// The end of an `@{…}` is found by counting braces, past Rust strings.
-#[test]
-fn a_script_finds_the_end_of_a_nested_expression() {
-    let parsed = parse_ok(
-        r###"<script>r##"const a = @{format!("{}}", Json(&x))}; const b = 1;"##</script>"###,
-    );
-    assert_eq!(
-        parsed
-            .ops
-            .iter()
-            .filter(|op| matches!(op, Op::ScriptText(_)))
-            .count(),
-        1,
-        "got ops: {:?}",
-        parsed.ops
-    );
-    assert!(
-        show(&parsed.ops).ends_with("; const b = 1;</script>"),
-        "{}",
-        show(&parsed.ops)
-    );
-}
-
-/// `@@{` is a literal `@{`, for the rare script that needs one.
-#[test]
-fn a_script_escapes_a_literal_at_brace() {
-    let out = render(r###"<script>r##"const css = '@@{ not rust }';"##</script>"###);
-    assert!(out.contains("const css = '@{ not rust }';"), "{out}");
 }
 
 #[test]
@@ -797,8 +751,52 @@ fn an_unclosed_at_brace_in_a_script_is_an_error() {
 /// A body that is one JavaScript string is still just JavaScript.
 #[test]
 fn a_script_that_is_one_string_is_javascript() {
-    let out = render(r###"<script>r##""use strict";"##</script>"###);
-    assert_eq!(out, r#"<script>"use strict";</script>"#);
+    let parsed = parse_ok(r###"<script>r##""use strict";"##</script>"###);
+    assert_eq!(script_source(&parsed), r#""use strict";"#);
+}
+
+/// Every binding, handler and loop collection a block writes is recorded for
+/// registration, under the source the runtime reads back off the page.
+#[test]
+fn client_code_is_recorded_under_its_page_source() {
+    let parsed = parse_ok(
+        r#"<ul class="list" data-x={x + 1}>
+            <template pp-for="(item, i) in items.slice(1)">
+                <li key={item.id} onclick={pick(item)}>{item.name}</li>
+            </template>
+        </ul>"#,
+    );
+    let recorded: Vec<(ClientKind, &str)> = parsed
+        .client_code
+        .iter()
+        .map(|code| (code.kind, code.key.as_str()))
+        .collect();
+    assert_eq!(
+        recorded,
+        [
+            (ClientKind::Expression, "x + 1"),
+            (ClientKind::Expression, "items.slice(1)"),
+            (ClientKind::Expression, "item.id"),
+            (ClientKind::Handler, "pick(item)"),
+            (ClientKind::Expression, "item.name"),
+        ]
+    );
+}
+
+/// A `{…}` inside quoted text that holds an expression would be hidden client
+/// code; braces around anything else are text.
+#[test]
+fn an_expression_in_quoted_text_is_refused() {
+    for src in [
+        r#"<p>"Hi {name}"</p>"#,
+        r#"<p class="row {active}"></p>"#,
+        r#"<p hidden="{count < max}"></p>"#,
+    ] {
+        let msg = error(src);
+        assert!(msg.contains("inside quoted text"), "{src}: {msg}");
+    }
+    render(r#"<div data-config="{&quot;a&quot;: 1}"></div>"#);
+    render(r#"<p>"a {b: 1} c"</p>"#);
 }
 
 #[test]
@@ -1092,10 +1090,13 @@ fn an_empty_fragment_is_allowed() {
 fn a_fragment_holds_any_node() {
     let parsed = parse_ok(r###"<><p>@{title}</p><script>r##"const a = 1;"##</script></>"###);
     assert!(parsed.ops.iter().any(|op| matches!(op, Op::Text(_))));
-    assert_eq!(
-        show(&parsed.ops),
-        "<!--pp:--><p>@{title}</p><script>const a = 1;</script><!--/pp-->"
+    let out = show(&parsed.ops);
+    assert!(
+        out.starts_with("<!--pp:--><p>@{title}</p><script pp-script=\"s"),
+        "{out}"
     );
+    assert!(out.ends_with("\"></script><!--/pp-->"), "{out}");
+    assert_eq!(script_source(&parsed), "const a = 1;");
 }
 
 #[test]
@@ -1500,7 +1501,7 @@ fn ordinary_expressions_are_not_mistaken_for_jsx() {
         "<p>{(total / 2) > limit}</p>",
         "<p>{items.filter((i) => i.done).length}</p>",
         "<p>{\"</not a tag>\"}</p>",
-        r#"<p hidden="{count < max}"></p>"#,
+        "<p hidden={count < max}></p>",
     ] {
         parse_ok(src);
     }
@@ -1588,13 +1589,13 @@ fn a_token_written_body_is_refused() {
 /// template literals and comments are JavaScript, not Rust.
 #[test]
 fn a_raw_body_is_written_as_it_is() {
-    let out = render(
+    let out = script_source(&parse_ok(
         r###"<section><script>r##"
             // a comment
             const label = 'it\'s';
             const greeting = `hi ${label}`;
         "##</script></section>"###,
-    );
+    ));
     assert!(out.contains("// a comment"), "{out}");
     assert!(out.contains(r"const label = 'it\'s';"), "{out}");
     assert!(out.contains("`hi ${label}`"), "{out}");
@@ -1648,8 +1649,27 @@ fn a_body_is_written_with_two_hashes() {
         assert!(msg.contains("with two `#`s"), "{src}: {msg}");
         assert!(msg.contains("r##\"…\"##"), "{src}: {msg}");
     }
-    let out = render(r###"<section><script>r##"const c = "#fff";"##</script></section>"###);
-    assert!(out.contains(r##"const c = "#fff";"##), "{out}");
-    let out = render(r####"<section><script>r###"const s = "a"##b";"###</script></section>"####);
-    assert!(out.contains(r###"const s = "a"##b";"###), "{out}");
+    let out = script_source(&parse_ok(
+        r###"<section><script>r##"const c = "#fff";"##</script></section>"###,
+    ));
+    assert_eq!(out, r##"const c = "#fff";"##);
+    let out = script_source(&parse_ok(
+        r####"<section><script>r###"const s = "a"##b";"###</script></section>"####,
+    ));
+    assert_eq!(out, r###"const s = "a"##b";"###);
+}
+
+#[test]
+fn inert_event_metadata_is_generated_instead_of_authored() {
+    let message = error(r#"<button pp-onclick={save()}>"Save"</button>"#);
+    assert!(
+        message.contains("compiler-owned event metadata"),
+        "{message}"
+    );
+    assert!(message.contains("onclick={handler(event)}"), "{message}");
+    assert!(
+        error(r#"<button PP-onclick={save()}>"Save"</button>"#)
+            .contains("compiler-owned event metadata")
+    );
+    parse_ok(r#"<button onclick={save()}>"Save"</button>"#);
 }

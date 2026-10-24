@@ -26,10 +26,15 @@ fn the_baseline_covers_browser_security_boundaries() {
 fn the_csp_keeps_pulsepoint_working_and_locks_down_injection_targets() {
     let policy = baseline(true).content_security_policy.unwrap();
 
-    // `'unsafe-eval'` for the runtime's `new Function`, and nothing else: no
-    // inline script and no other host, so injected markup cannot run script.
-    assert!(policy.contains("script-src 'self' 'unsafe-eval';"));
-    assert!(!policy.contains("'unsafe-inline' 'unsafe-eval'"));
+    // Same-origin script and nothing else: no eval (PulsePoint runs only the
+    // compiled client registry), no inline script and no other host, so
+    // injected markup cannot run script — and only PulsePoint's Trusted Types
+    // policy may write markup. `src/tests/browser.rs` proves a page works
+    // under it.
+    assert!(policy.contains("script-src 'self';"));
+    assert!(!policy.contains("unsafe-eval"));
+    assert!(policy.contains("require-trusted-types-for 'script'"));
+    assert!(policy.contains("trusted-types pulsepoint"));
     assert!(policy.contains("object-src 'none'"));
     assert!(policy.contains("base-uri 'self'"));
     assert!(policy.contains("form-action 'self'"));
@@ -58,7 +63,9 @@ fn hsts_is_production_only() {
     apply(&mut production, &installed, true);
 
     assert!(!development.contains_key(STRICT_TRANSPORT_SECURITY));
-    assert!(production.contains_key(STRICT_TRANSPORT_SECURITY));
+    // This host only: a subdomain the application does not run is not its
+    // to put under HSTS.
+    assert_eq!(production[STRICT_TRANSPORT_SECURITY], "max-age=31536000");
 }
 
 #[test]

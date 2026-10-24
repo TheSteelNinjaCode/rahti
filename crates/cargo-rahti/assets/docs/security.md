@@ -199,11 +199,11 @@ application by an exported variable.
 
 The Content-Security-Policy a package serves comes from its own response
 headers, because that is the only policy a browser applies to a page on a
-loopback origin. The default permits no external source and does permit
-`'unsafe-eval'`: PulsePoint builds a render function with `new Function` when
-it compiles a reactive block, and without the directive every binding on an
-otherwise-correct page is dead. Narrowing `script-src` further is not a
-tightening, it is turning the browser runtime off.
+loopback origin. The default permits no external source, no `'unsafe-eval'`
+and no inline script: PulsePoint runs only the client registry compiled into
+the application, and only its `pulsepoint` Trusted Types policy may write
+markup. Keep it that way — adding `'unsafe-eval'` or `'unsafe-inline'`
+gives injected markup a way to run script that the application never needs.
 
 ## Supply Chain
 

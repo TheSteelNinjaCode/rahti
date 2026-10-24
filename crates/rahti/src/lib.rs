@@ -18,6 +18,7 @@ pub mod authorization;
 #[cfg(feature = "browser-test")]
 pub mod browser;
 pub mod cache;
+pub mod client;
 mod dev;
 mod env;
 mod error;
@@ -33,6 +34,9 @@ pub mod rate_limit;
 mod registry;
 pub mod request_pipeline;
 mod rpc;
+/// What `html!` checks a `pp.rpc` call against; written by `#[rpc]`.
+#[doc(hidden)]
+pub mod rpc_check;
 pub mod schedule;
 pub mod security;
 mod shutdown;

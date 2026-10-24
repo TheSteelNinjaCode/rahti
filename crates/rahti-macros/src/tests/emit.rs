@@ -54,6 +54,7 @@ fn markup(src: &str, file: &str) -> String {
             .map(|op| match op {
                 Op::Static(s) => s.clone(),
                 Op::Text(_) | Op::ScriptText(_) => "@{}".to_string(),
+                Op::ScriptData(_) => " pp-data=\"@{}\"".to_string(),
                 Op::Attr { name, .. } => format!("{name}=\"@{{}}\""),
                 Op::OpenTag(attrs) => attrs.iter().map(show_tag_attr).collect(),
                 Op::Slot | Op::DeferredSlot => "<slot/>".to_string(),
@@ -593,7 +594,7 @@ fn a_root_that_handles_its_own_event_names_its_owner() {
     assert_eq!(
         out,
         "<form pp-component=\"form_12345678\" pp-event-owner=\"form_12345678\" \
-         onsubmit=\"{save(event)}\"><button>go</button></form>"
+         pp-onsubmit=\"{save(event)}\"><button>go</button></form>"
     );
 }
 
@@ -622,6 +623,22 @@ fn inner_handlers_and_callback_props_leave_the_root_alone() {
 
     let prop = markup(r#"<main on-select={pick}>"x"</main>"#, "src/app/page.rs");
     assert!(!prop.contains("pp-event-owner"), "{prop}");
+}
+
+#[test]
+fn handlers_travel_in_inert_attributes_without_changing_callback_props() {
+    let out = markup(
+        r#"<div><button onclick={save()} onlostpointercapture={lost(event)} on-select={pick}>"Save"</button></div>"#,
+        "src/app/page.rs",
+    );
+    assert!(out.contains(" pp-onclick=\"{save()}\""), "{out}");
+    assert!(
+        out.contains(" pp-onlostpointercapture=\"{lost(event)}\""),
+        "{out}"
+    );
+    assert!(out.contains(" on-select=\"{pick}\""), "{out}");
+    assert!(!out.contains(" onclick="), "{out}");
+    assert!(!out.contains(" onlostpointercapture="), "{out}");
 }
 
 /// Any lowercase, unhyphenated `on…` counts — there is no list of events to

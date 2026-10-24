@@ -149,10 +149,9 @@ impl RpcCall {
     pub fn arg<T: DeserializeOwned>(&self, name: &str) -> Result<T, Response> {
         let value = self.args.get(name).cloned().unwrap_or(Value::Null);
 
-        let error = match serde_json::from_value::<T>(value.clone()) {
-            Ok(value) => return Ok(value),
-            Err(e) => e,
-        };
+        if let Ok(value) = serde_json::from_value::<T>(value.clone()) {
+            return Ok(value);
+        }
 
         // A form part has no types: `FormData` turns every value into a
         // string on the way out, so `{ count: 2 }` arrives as `"2"` and an
@@ -186,14 +185,38 @@ impl RpcCall {
             ));
         }
 
-        Err(json_error(
+        let missing = !self.args.contains_key(name);
+        let code = if missing {
+            "RAHTI_RPC_MISSING_ARGUMENT"
+        } else {
+            "RAHTI_RPC_ARGUMENT_TYPE"
+        };
+        let expected = std::any::type_name::<T>();
+        let received = if missing {
+            "missing"
+        } else {
+            match &value {
+                Value::Null => "null",
+                Value::Bool(_) => "boolean",
+                Value::Number(_) => "number",
+                Value::String(_) => "string",
+                Value::Array(_) => "array",
+                Value::Object(_) => "object",
+            }
+        };
+        let message = format!(
+            "rahti[{code}]: `{}` could not read its `{name}` argument. Expected {expected}; received {received}.\n  Send a value matching the Rust parameter in pp.rpc(\"{}\", {{ {name}: … }}).",
+            self.name, self.name
+        );
+        super::dev::record_server("warn", "rpc-contract", &message);
+        Err(json_error_with_details(
             StatusCode::BAD_REQUEST,
-            format!(
-                "rahti: `{}` could not read its `{name}` argument — {error}.\n  \
-                 The browser sends `pp.rpc(\"{}\", {{ {name}: … }})`, and the \
-                 value has to match the parameter's type.",
-                self.name, self.name
-            ),
+            message,
+            Some(&serde_json::json!({
+                "code": code, "rpc": self.name, "argument": name,
+                "expectedRustType": expected, "receivedType": received,
+                "hint": "Send a value matching the Rust parameter; inspect the RPC contract or source declaration.",
+            })),
         ))
     }
 

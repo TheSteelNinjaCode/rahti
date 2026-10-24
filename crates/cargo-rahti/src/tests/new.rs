@@ -834,6 +834,23 @@ fn the_suite_tests_against_the_database_only_when_there_is_one() {
 
 // ------------------------------------------------------------ documentation
 
+#[test]
+fn shipped_pulsepoint_assets_match_the_embedded_assets() {
+    let tree = Tree::new("pulsepoint-assets");
+    scaffold(&tree, false);
+    let application = tree.0.join("public/js");
+    assert_eq!(
+        fs::read(application.join("pp-reactive-v2.min.js")).unwrap(),
+        t::PP_RUNTIME,
+        "the generated application must ship the embedded PulsePoint bundle"
+    );
+    assert_eq!(
+        fs::read(application.join("pp.d.ts")).unwrap(),
+        t::PP_TYPES.as_bytes(),
+        "the generated application must ship the embedded PulsePoint declarations"
+    );
+}
+
 /// Rahti is not in anyone's training data, so a project that leaves the
 /// scaffold without its documentation gives the next coding agent nothing to
 /// read. The guide and the convention documents are scaffold files like any

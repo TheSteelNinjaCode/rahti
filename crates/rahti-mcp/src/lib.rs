@@ -70,7 +70,9 @@ impl RahtiMcp {
         Self::tool_result(self.project.components())
     }
 
-    #[tool(description = "List page and component RPCs, including whether each requires a session")]
+    #[tool(
+        description = "Read RPC contracts: parameters, Rust response types, source locations, auth requirements, transports, and explicit checking limits"
+    )]
     fn list_rpcs(&self) -> Result<Json<Value>, ErrorData> {
         Self::tool_result(self.project.rpcs())
     }
@@ -173,7 +175,7 @@ mod tests {
 
     #[test]
     fn advertises_read_only_tools_and_resources() {
-        let fixture = crate::project::test_project();
+        let fixture = project::test_project();
         let server = RahtiMcp::new(fixture.project.clone());
         let info = server.get_info();
         assert!(info.capabilities.tools.is_some());
@@ -183,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn serves_tools_and_resources_over_the_mcp_protocol() {
-        let fixture = crate::project::test_project();
+        let fixture = project::test_project();
         let server = RahtiMcp::new(fixture.project.clone());
         let (server_transport, client_transport) = tokio::io::duplex(64 * 1024);
         let server_task = tokio::spawn(async move {

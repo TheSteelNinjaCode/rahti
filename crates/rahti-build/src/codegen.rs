@@ -854,6 +854,10 @@ pub fn routes_rs(
     // groups, sessions, and the application request pipeline.
     out.push_str("        .merge(::rahti::observability::routes(observability.clone()))\n");
 
+    // The client registry: every binding, handler and component script the
+    // templates compiled. The browser runtime runs nothing else.
+    out.push_str("        .merge(::rahti::client::routes())\n");
+
     // Empty outside dev mode, so this costs a release build nothing.
     out.push_str("        .merge(::rahti::dev_routes(::rahti::public_dir(PUBLIC_DIR)))\n");
 
@@ -909,6 +913,7 @@ pub fn manifest_json(
     sockets: &[Rpc],
     database: Option<&crate::db::Scan>,
     config: &Config,
+    contracts: &serde_json::Value,
 ) -> String {
     let mut out = String::new();
     let has_components = !component_rpcs.is_empty();
@@ -1027,9 +1032,8 @@ pub fn manifest_json(
     }
     out.push_str("  ],\n");
 
-    // Files only. A component is named after its function, and the build
-    // script does not parse Rust — the name lives in the markup the macro
-    // stamps, which is where the client runtime reads it from anyway.
+    // Component boundary identities live in the markup stamped by the macro;
+    // this list records files and their RPC ownership for tooling.
     out.push_str("  \"components\": [\n");
     for (i, file) in components.iter().enumerate() {
         let comma = if i + 1 == components.len() { "" } else { "," };
@@ -1119,11 +1123,13 @@ pub fn manifest_json(
                 "    \"migrations\": [{}]\n",
                 list(&scan.migrations)
             ));
-            out.push_str("  }\n");
+            out.push_str("  },\n");
         }
-        _ => out.push_str("  \"db\": null\n"),
+        _ => out.push_str("  \"db\": null,\n"),
     }
 
+    out.push_str("  \"rpcContractVersion\": 1,\n");
+    out.push_str(&format!("  \"rpcContracts\": {}\n", contracts));
     out.push_str("}\n");
     out
 }

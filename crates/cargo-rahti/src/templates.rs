@@ -1519,7 +1519,12 @@ async fn the_todo_table_round_trips() {
 
 /// `main.js`, with the Tailwind helper only where there is Tailwind.
 pub fn main_js(tailwind: bool) -> String {
-    let mut out = String::from("import \"/js/pp-reactive-v2.min.js\";\n");
+    let mut out = String::from(
+        "import \"/js/pp-reactive-v2.min.js\";\n\
+         // The application's client code, compiled ahead of time. PulsePoint runs\n\
+         // nothing else, so it is registered before the first mount.\n\
+         import \"/_rahti/client.js\";\n",
+    );
 
     if tailwind {
         out.push_str("import { twMerge } from \"/js/tailwind-merge.mjs\";\n");
@@ -1683,6 +1688,17 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          This file is the scaffold's until you edit it: `cargo rahti upgrade`\n\
          refreshes an unedited copy as the framework evolves, and leaves an\n\
          edited one alone.\n\n",
+    );
+
+    out.push_str(
+        "## RPC work for agents\n\n\
+         Run `cargo check` after changing RPC declarations. Read `rpcContracts`\n\
+         in `.rahti/manifest.json`, or optional MCP `list_rpcs`, before writing\n\
+         the caller. Match scope, file and URLs; inspect parameters, response\n\
+         types and checking limits. `schemaStatus: \"unresolved\"` requires\n\
+         reading the Rust/Serde type. Use `pp.rpc` beside its `#[rpc]`; run\n\
+         compiler and router/browser checks. Dynamic values and response-field\n\
+         accesses are not proved by compilation. See `docs/conventions/rpc-and-uploads.md`.\n\n",
     );
 
     out.push_str("## Required Reading\n\n| Work area | Document |\n| --- | --- |\n");
@@ -1862,11 +1878,11 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
         "Runtime values are\n\
          escaped, braces included (`&#123;`), so no value can open a PulsePoint\n\
          expression; use `Html::from_raw` only for explicitly trusted markup,\n\
-         whose braces stay live. A component forwards its tag's `{…}` props\n\
-         through a `bindings: Bindings` parameter. Client code a component\n\
-         composes in Rust is written with `Attrs::bind`, never `Attrs::set`,\n\
-         whose values are data; `Attrs::merge` and `Attrs::only` compose sets\n\
-         and keep bindings live."
+         whose braces are not escaped. Client code is written in `html!` and\n\
+         nowhere else — it is compiled there into the client registry, and the\n\
+         runtime runs nothing else. A component forwards its tag's `{…}` props\n\
+         through a `bindings: Bindings` parameter; an `Attrs` value is always\n\
+         data, and `Attrs::merge` and `Attrs::only` compose sets."
             .to_string(),
     );
     rules.push(
@@ -1936,9 +1952,12 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          inside production observability.\n\
          Existing response headers win. Customize the baseline only through\n\
          `rahti::security::configure` during startup. `script-src` is\n\
-         `'self' 'unsafe-eval'`: keep `'unsafe-eval'`, name a vendor SDK's exact\n\
-         host, and never add `https:` or `'unsafe-inline'`. Never enable HSTS\n\
-         `includeSubDomains` unless every subdomain is HTTPS."
+         `'self'`, with `require-trusted-types-for 'script'; trusted-types\n\
+         pulsepoint`: PulsePoint runs only the client registry `html!`\n\
+         compiled. Name a vendor SDK's exact host, add `'wasm-unsafe-eval'`\n\
+         only for WebAssembly, and never add `https:`, `'unsafe-inline'` or\n\
+         `'unsafe-eval'`. Never enable HSTS `includeSubDomains` unless every\n\
+         subdomain is HTTPS."
             .to_string(),
     );
     rules.push(
@@ -2042,8 +2061,8 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
     );
     rules.push(
         "Do not write PulsePoint's runtime-managed DOM attributes by hand. In\n\
-         particular, do not invent `data-pp-*`, `pp-owner`, or\n\
-         `pp-ref-owner`, and write no root-layout marker — `html!` injects\n\
+         particular, do not invent `data-pp-*`, `pp-owner`, `pp-ref-owner`,\n\
+         `pp-script`, `pp-data`, `pp-on*` or `pp-loop-scope`, and write no root-layout marker — `html!` injects\n\
          them."
             .to_string(),
     );

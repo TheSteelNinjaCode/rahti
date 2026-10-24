@@ -13,6 +13,14 @@ const NOT_JSX: &str = "See \"PulsePoint Is Not JSX\" in docs/conventions/pulsepo
 /// An attribute name on a native element that comes from JSX, or a
 /// directive PulsePoint does not have.
 pub fn attribute_mistake(tag: &str, name: &str) -> Option<String> {
+    let normalized = name.to_ascii_lowercase();
+    if let Some(event) = normalized.strip_prefix("pp-")
+        && crate::parse::is_native_event_name(event)
+    {
+        return Some(format!(
+            "rahti: `{name}` is compiler-owned event metadata.\n  Write `{event}={{handler(event)}}`; html! emits the inert attribute and registers the handler."
+        ));
+    }
     let rename = |write: &str, why: &str| {
         Some(format!(
             "rahti: `{name}` is JSX; this is HTML — write `{write}`.\n  {why} {NOT_JSX}"
@@ -180,4 +188,29 @@ fn js_outside_strings(js: &str) -> String {
         }
     }
     out
+}
+
+/// A `{` or `}` inside quoted text or a quoted attribute value.
+pub const RAW_BRACE: &str = "rahti: `{…}` inside quoted text holds a JavaScript expression — the \
+     browser runtime would read it as client code, and only code written as a binding is \
+     compiled into the page.\n  Write a binding outside the quotes, `\"Hi \"{name}` or \
+     `class={\"row \" + state}`, or a literal brace as `&#123;` / `&#125;`.";
+
+/// `pp.rpc(name, …)` — an rpc named by anything but a string literal. The
+/// name is checked at compile time against the `#[rpc]` it calls, which only
+/// a literal can be. `argument` is what was written.
+pub fn rpc_name_not_literal(argument: &str) -> String {
+    format!(
+        "rahti[RAHTI_RPC_NAME_LITERAL]: `pp.rpc` names its `#[rpc]` with a string literal, and `{argument}` is not \
+         one.\n  Write the function's name: `pp.rpc(\"save\", {{ … }})`. A call that chooses \
+         between rpcs is one literal call per branch: \
+         `editing ? pp.rpc(\"update\", {{ … }}) : pp.rpc(\"create\", {{ … }})`."
+    )
+}
+
+/// `pp.rpc()` — a call that names no rpc at all.
+pub fn rpc_name_missing() -> String {
+    "rahti[RAHTI_RPC_NAME_MISSING]: `pp.rpc()` names no `#[rpc]`.\n  Write the function's name first, as a string \
+     literal: `pp.rpc(\"save\", { … })`."
+        .to_string()
 }

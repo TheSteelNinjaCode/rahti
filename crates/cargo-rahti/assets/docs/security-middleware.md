@@ -20,13 +20,23 @@ per-response value without the framework overwriting it.
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Keeps paths and queries out of cross-origin referrers |
 | `X-Content-Type-Options` | `nosniff` | Prevents browser MIME guessing |
 | `X-Frame-Options` | `SAMEORIGIN` | Clickjacking protection for browsers that do not read CSP `frame-ancestors` |
-| `Strict-Transport-Security` | one year, including subdomains | Enforces HTTPS outside development mode only |
+| `Strict-Transport-Security` | one year, this host only | Enforces HTTPS outside development mode only |
 
 HSTS is intentionally absent when Rahti development mode is active. In a
 deployment it is sent even when TLS terminates at a reverse proxy: the browser
-consumes the header from the final response. The default `includeSubDomains`
-is appropriate only when every subdomain is HTTPS. Replace or disable it when
-that is not true, or when the proxy owns HSTS.
+consumes the header from the final response. The default,
+`max-age=31536000`, covers this host only. Add `includeSubDomains` only when
+every subdomain of the site is served over HTTPS: a browser that has seen it
+refuses plain HTTP on all of them for the whole `max-age`, and no later
+response can take that back. Set the field to `None` when the proxy owns HSTS.
+An application whose every subdomain is HTTPS opts in during startup:
+
+```rust
+rahti::security::configure(SecurityHeaders {
+    strict_transport_security: Some("max-age=31536000; includeSubDomains".to_string()),
+    ..SecurityHeaders::default()
+});
+```
 
 ## Content Security Policy
 
@@ -35,31 +45,49 @@ allowlist. Its important locked directives are:
 
 ```text
 default-src 'self'
-script-src 'self' 'unsafe-eval'
+script-src 'self'
 object-src 'none'
 base-uri 'self'
 form-action 'self'
 frame-ancestors 'self'
+require-trusted-types-for 'script'
+trusted-types pulsepoint
 ```
 
-`script-src` is `'self' 'unsafe-eval'` and nothing else. PulsePoint compiles
-reactive expressions with `new Function`, which needs `'unsafe-eval'`; removing
-it stops every reactive block. Nothing else in a page needs more: component
-scripts are evaluated by the runtime, which also binds and removes every `on…`
-attribute, and the document loads only same-origin scripts. So an injected
-inline `<script>`, an `onerror=` attribute, or a `<script src>` on another host
-is blocked — the browser refuses it and reports a violation, which
-`rahti::browser` surfaces in `errors()`.
+`script-src` is `'self'` and nothing else: no `'unsafe-eval'` and no
+`'unsafe-inline'`. PulsePoint never turns page text into code. Every binding,
+handler and component script is compiled when the application is built and
+served from `/_rahti/client.js`, which `public/js/main.js` imports before it
+mounts the page; the runtime runs only what that registry holds. Authored
+`onclick={...}` handlers travel in inert compiler-owned attributes and are
+bound through event listeners. The browser parser never treats them as inline
+JavaScript, even while initial HTML or detached render trees are parsed.
+So an injected
+inline `<script>`, an `onerror=` attribute, a `<script src>` on another host,
+and an injected `{…}` binding all stay inert — the browser refuses the first
+three and reports a violation, which `rahti::browser` surfaces in `errors()`,
+and the runtime renders the last as text.
+
+`require-trusted-types-for 'script'` makes the browser refuse a plain string at
+every sink that parses markup or code (`innerHTML`, `DOMParser`, a script's
+text, an `on…` attribute). `trusted-types pulsepoint` lets exactly one policy
+exist — PulsePoint's — so the runtime is the only code on the page that can
+write markup. A library that assigns `innerHTML` with a string throws; give it
+an element to own through `pp.ref` and its own DOM API, or replace it.
 
 An application that loads a vendor SDK names that host in `script-src`
-(`script-src 'self' 'unsafe-eval' https://js.stripe.com`); never `https:` or
-`'unsafe-inline'`, either of which lets injected markup run script. The default
+(`script-src 'self' https://js.stripe.com`); never `https:`, `'unsafe-inline'`
+or `'unsafe-eval'`, any of which lets injected markup run script. An SDK that
+creates its own Trusted Types policy needs its policy name added to
+`trusted-types`. An application that compiles WebAssembly adds
+`'wasm-unsafe-eval'`, which allows WebAssembly and nothing else. The default
 permits HTTPS styles, fonts, images, media, frames, and connections, which
 cannot run script in the page. Images and media additionally permit `data:` and
 `blob:` where appropriate, and connections permit `ws:`/`wss:`. Applications
 that know their external dependencies can replace these scheme allowances with
-exact hosts. Keep `'unsafe-eval'` and the locked directives above. In development, loopback HTTP connection sources and
-cleartext media/frames are admitted for local tooling; production omits them.
+exact hosts. Keep the locked directives above. In development, loopback HTTP
+connection sources and cleartext media/frames are admitted for local tooling;
+production omits them.
 
 ## Application configuration
 
@@ -73,12 +101,13 @@ use rahti::security::SecurityHeaders;
 rahti::security::configure(SecurityHeaders {
     content_security_policy: Some(
         "default-src 'self'; \
-         script-src 'self' 'unsafe-eval' https://js.stripe.com; \
+         script-src 'self' https://js.stripe.com; \
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data:; \
          connect-src 'self' ws: wss:; \
          object-src 'none'; base-uri 'self'; \
-         form-action 'self'; frame-ancestors 'self'"
+         form-action 'self'; frame-ancestors 'self'; \
+         require-trusted-types-for 'script'; trusted-types pulsepoint"
             .to_string(),
     ),
     // This deployment's proxy owns HSTS.

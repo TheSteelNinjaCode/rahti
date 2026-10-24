@@ -14,3 +14,4 @@ proc-macro = true
 [dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
+rahti-js.workspace = true

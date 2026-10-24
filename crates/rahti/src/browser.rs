@@ -322,6 +322,9 @@ impl Browser {
                     "awaitPromise": true,
                     "returnByValue": true,
                     "userGesture": true,
+                    // DevTools may eval past the page's CSP by default; a
+                    // test sees the page as a visitor's browser does.
+                    "allowUnsafeEvalBlockedByCSP": false,
                 }),
                 true,
             )

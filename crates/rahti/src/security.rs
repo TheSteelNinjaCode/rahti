@@ -58,14 +58,15 @@ fn baseline(production: bool) -> SecurityHeaders {
     SecurityHeaders {
         content_security_policy: Some(format!(
             "default-src 'self'; \
-             script-src 'self' 'unsafe-eval'; \
+             script-src 'self'; \
              worker-src 'self' blob:; \
              style-src 'self' 'unsafe-inline' https:; \
              img-src {media}; media-src {media}; \
              font-src 'self' data: https:; \
              connect-src {connect}; frame-src {frames}; \
              object-src 'none'; base-uri 'self'; form-action 'self'; \
-             frame-ancestors 'self'"
+             frame-ancestors 'self'; \
+             require-trusted-types-for 'script'; trusted-types pulsepoint"
         )),
         permissions_policy: Some(
             "camera=(self), geolocation=(self), microphone=(self), payment=(self), usb=(self)"
@@ -74,7 +75,9 @@ fn baseline(production: bool) -> SecurityHeaders {
         referrer_policy: Some("strict-origin-when-cross-origin".to_string()),
         x_content_type_options: Some("nosniff".to_string()),
         x_frame_options: Some("SAMEORIGIN".to_string()),
-        strict_transport_security: Some("max-age=31536000; includeSubDomains".to_string()),
+        // This host only: `includeSubDomains` would bind every subdomain of
+        // the site, which the application cannot know are all HTTPS.
+        strict_transport_security: Some("max-age=31536000".to_string()),
     }
 }
 

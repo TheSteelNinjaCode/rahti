@@ -167,7 +167,15 @@ fn gen_manifest(
     database: Option<&crate::db::Scan>,
     config: &Config,
 ) -> String {
-    manifest_json(entries, components, component_rpcs, &[], database, config)
+    manifest_json(
+        entries,
+        components,
+        component_rpcs,
+        &[],
+        database,
+        config,
+        &serde_json::json!([]),
+    )
 }
 
 /// One `#[socket]` list, the shape `socket_list` produces.
@@ -1448,6 +1456,7 @@ fn the_manifest_lists_the_sockets() {
         ]),
         None,
         &config(),
+        &serde_json::json!([]),
     );
     assert!(
         out.contains("{ \"name\": \"chat\", \"file\": \"src/app/page.rs\", \"auth\": false },"),
@@ -1465,7 +1474,15 @@ fn the_manifest_lists_the_sockets() {
 fn the_manifest_marks_authenticated_sockets() {
     let mut guarded = sockets(&[("private_feed", "src/app/account/page.rs")]);
     guarded[0].auth = true;
-    let out = manifest_json(&app(), &[], &[], &guarded, None, &config());
+    let out = manifest_json(
+        &app(),
+        &[],
+        &[],
+        &guarded,
+        None,
+        &config(),
+        &serde_json::json!([]),
+    );
     assert!(
         out.contains(
             "{ \"name\": \"private_feed\", \"file\": \"src/app/account/page.rs\", \"auth\": true }"

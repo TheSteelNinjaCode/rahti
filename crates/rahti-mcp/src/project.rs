@@ -83,8 +83,8 @@ impl Project {
                 "layouts": array(&manifest, "layouts").len(),
                 "components": array(&manifest, "components").len(),
                 "sockets": array(&manifest, "sockets").len(),
-                "pageRpcs": page_rpcs(&manifest).len(),
-                "componentRpcs": component_rpcs(&manifest).len(),
+                "pageRpcs": rpc_contracts(&manifest)?.iter().filter(|rpc| rpc["scope"] == "page").count(),
+                "componentRpcs": rpc_contracts(&manifest)?.iter().filter(|rpc| rpc["scope"] == "component").count(),
             },
             "authentication": {
                 "routePolicy": "runtime",
@@ -108,9 +108,7 @@ impl Project {
 
     pub fn rpcs(&self) -> Result<Value, String> {
         let manifest = self.manifest()?;
-        let mut rpcs = page_rpcs(&manifest);
-        rpcs.extend(component_rpcs(&manifest));
-        Ok(Value::Array(rpcs))
+        Ok(Value::Array(rpc_contracts(&manifest)?.to_vec()))
     }
 
     pub fn sockets(&self) -> Result<Value, String> {
@@ -289,46 +287,12 @@ fn array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
         .unwrap_or(&[])
 }
 
-fn page_rpcs(manifest: &Value) -> Vec<Value> {
-    array(manifest, "routes")
-        .iter()
-        .flat_map(|route| {
-            let url = route.get("url").cloned().unwrap_or(Value::Null);
-            let file = route.get("file").cloned().unwrap_or(Value::Null);
-            let guarded = array(route, "authRpcs")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<BTreeSet<_>>();
-            array(route, "rpcs").iter().filter_map(move |name| {
-                let name = name.as_str()?;
-                Some(json!({
-                    "scope": "page",
-                    "name": name,
-                    "url": url,
-                    "file": file,
-                    "authRequired": guarded.contains(name),
-                }))
-            })
-        })
-        .collect()
-}
-
-fn component_rpcs(manifest: &Value) -> Vec<Value> {
-    array(manifest, "components")
-        .iter()
-        .flat_map(|component| {
-            let file = component.get("file").cloned().unwrap_or(Value::Null);
-            array(component, "rpcs").iter().map(move |rpc| {
-                json!({
-                    "scope": "component",
-                    "name": rpc.get("name"),
-                    "module": rpc.get("module"),
-                    "file": file,
-                    "authRequired": rpc.get("auth").and_then(Value::as_bool).unwrap_or(false),
-                })
-            })
-        })
-        .collect()
+fn rpc_contracts(manifest: &Value) -> Result<&Vec<Value>, String> {
+    if manifest.get("rpcContractVersion").and_then(Value::as_u64) != Some(1) {
+        return Err("rahti[RAHTI_RPC_CONTRACT_MANIFEST]: RPC contracts are missing or unsupported. Run cargo check to regenerate .rahti/manifest.json.".into());
+    }
+    manifest.get("rpcContracts").and_then(Value::as_array).ok_or_else(||
+        "rahti[RAHTI_RPC_CONTRACT_MANIFEST]: rpcContracts must be an array. Run cargo check to regenerate .rahti/manifest.json.".into())
 }
 
 fn redact_secrets(value: &mut Value) {
@@ -405,6 +369,14 @@ pub(crate) fn test_project() -> TestProject {
         root.join(MANIFEST_FILE),
         r#"{
   "generatedBy": "rahti-build",
+  "rpcContractVersion": 1,
+  "rpcContracts": [{
+    "name": "rename", "scope": "page", "authRequired": true,
+    "file": "src/app/account/page.rs", "line": 10,
+    "parameters": [{"name": "name", "rustType": "String"}],
+    "response": {"schemaStatus": "unresolved"},
+    "checks": {"dynamicValues": "server"}
+  }],
   "appDir": "src/app",
   "routes": [{
     "url": "/account",
@@ -441,6 +413,16 @@ mod tests {
             .find(|rpc| rpc.get("name").and_then(Value::as_str) == Some("rename"))
             .expect("account rename RPC");
         assert_eq!(rename["authRequired"], true);
+        assert!(rename["line"].as_u64().unwrap() > 0);
+        let name = rename["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|parameter| parameter["name"] == "name")
+            .unwrap();
+        assert_eq!(name["rustType"], "String");
+        assert_eq!(rename["response"]["schemaStatus"], "unresolved");
+        assert_eq!(rename["checks"]["dynamicValues"], "server");
         assert_eq!(
             project.summary().unwrap()["authentication"]["browserSessionUsed"],
             false
@@ -454,6 +436,26 @@ mod tests {
         assert_eq!(
             project.recent_diagnostics(Some(usize::MAX)).unwrap()["limit"],
             MAX_DIAGNOSTICS
+        );
+    }
+
+    #[test]
+    fn rpc_discovery_requires_the_generated_contract_inventory() {
+        for manifest in [
+            json!({}),
+            json!({"rpcContractVersion": 2, "rpcContracts": []}),
+            json!({"rpcContractVersion": 1}),
+        ] {
+            assert!(
+                rpc_contracts(&manifest)
+                    .unwrap_err()
+                    .contains("RAHTI_RPC_CONTRACT_MANIFEST")
+            );
+        }
+        assert!(
+            rpc_contracts(&json!({"rpcContractVersion": 1, "rpcContracts": []}))
+                .unwrap()
+                .is_empty()
         );
     }
 }

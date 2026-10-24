@@ -328,8 +328,9 @@ fn browser_entries(body: &[u8]) -> Result<Vec<Value>, &'static str> {
 /// boundary names.
 ///
 /// A component is named by the runtime's `component` field (`page_33bf1147
-/// (main)`) or by a `pp://component/<id>.js` frame, which is how PulsePoint
-/// names a component script in a stack trace.
+/// (main)`), or by a stack frame in the client registry —
+/// `at page_33bf1147 (…/_rahti/client.js:12:5)` — whose function `html!`
+/// names after the component's boundary.
 fn source_file(
     entry: &Map<String, Value>,
     files: &std::collections::HashMap<String, String>,
@@ -348,8 +349,10 @@ fn source_file(
     ["stack", "message", "source"]
         .iter()
         .filter_map(|field| entry.get(*field).and_then(Value::as_str))
-        .flat_map(|text| text.split("pp://component/").skip(1))
-        .filter_map(|rest| rest.split(".js").next())
+        .flat_map(str::lines)
+        .filter(|line| line.contains(crate::client::PATH))
+        .filter_map(|line| line.trim().strip_prefix("at "))
+        .filter_map(|frame| frame.split(" (").next())
         .find_map(|id| files.get(id).cloned())
 }
 

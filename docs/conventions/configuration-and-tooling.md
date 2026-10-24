@@ -176,8 +176,14 @@ the root 404 runs only when neither claims a path.
 The application entry `public/js/main.js`:
 
 1. imports `/js/pp-reactive-v2.min.js`;
-2. imports and publishes `twMerge`;
-3. calls `pp.mount()` after DOM readiness.
+2. imports `/_rahti/client.js`, the client registry — every binding, handler
+   and component script `html!` compiled — before anything mounts;
+3. imports and publishes `twMerge`;
+4. calls `pp.mount()` after DOM readiness.
+
+Keep the registry import first after the runtime: PulsePoint runs only
+registered code, so a page that mounts without it renders with every binding
+inert.
 
 `twMerge` is available to every mounted PulsePoint script as the global
 function `twMerge(classes)`. Use it when a reactive class string can contain
@@ -186,7 +192,7 @@ the input. It handles variants, `!important`, arbitrary values, and
 overlapping utility groups.
 
 ```rust
-<div class={twMerge('p-2 px-4')}></div>
+<div class={twMerge("p-2 px-4")}></div>
 ```
 
 The runtime is the shipped asset `public/js/pp-reactive-v2.min.js`, replaced
@@ -518,6 +524,10 @@ security model: `native-packaging.md`.
   RPC names in `rpcs` and authenticated ones in `authRpcs`; component RPC and
   socket entries carry an `auth` boolean. The `db` section names the backend,
   entities, and migrations.
+  `rpcContractVersion` and `rpcContracts` describe scoped RPC declarations for
+  agents, including parameter/response Rust spellings, source locations, auth,
+  transports, and checking limits. Rust spellings are not JSON schemas; see
+  `rpc-and-uploads.md` for the agent workflow.
 - `public/css/styles.css` - generated/copied but intentionally checked in.
 
 Run a Cargo build after changing route/component/configuration inputs and

@@ -140,6 +140,7 @@ pub async fn export_static(
     if public_dir.is_dir() {
         report.assets = copy_public(&public_dir, &output_dir)?;
     }
+    report.assets += write_client_registry(&output_dir)?;
 
     let mut written = HashSet::new();
     for route in routes {
@@ -356,6 +357,21 @@ fn prepare_output(output: &Path) -> Result<(), StaticExportError> {
         .map_err(|error| StaticExportError(format!("cannot mark {}: {error}", output.display())))
 }
 
+/// The client registry every page's `main.js` imports — each binding, handler
+/// and component script, compiled ahead of time — at the path the router
+/// serves it from.
+fn write_client_registry(output: &Path) -> Result<usize, StaticExportError> {
+    let path = output.join(crate::client::PATH.trim_start_matches('/'));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            StaticExportError(format!("cannot create {}: {error}", parent.display()))
+        })?;
+    }
+    fs::write(&path, &crate::client::module().source)
+        .map_err(|error| StaticExportError(format!("cannot write {}: {error}", path.display())))?;
+    Ok(1)
+}
+
 fn copy_public(source: &Path, target: &Path) -> Result<usize, StaticExportError> {
     let mut count = 0;
     for entry in fs::read_dir(source)
@@ -432,10 +448,22 @@ fn matches_route(pattern: &str, path: &str) -> bool {
     at == paths.len()
 }
 
+/// Whether a page calls the server from the browser: in its markup (a
+/// handler), or in a component script it names, whose code is in the client
+/// registry rather than the page.
 fn uses_runtime_backend(html: &str) -> bool {
-    ["pp.rpc(", "pp.socket(", "/__pulsepoint/ws"]
-        .iter()
-        .any(|needle| html.contains(needle))
+    let calls_server = |code: &str| {
+        ["pp.rpc(", "pp.socket(", "/__pulsepoint/ws"]
+            .iter()
+            .any(|needle| code.contains(needle))
+    };
+    calls_server(html)
+        || html
+            .split("pp-script=\"")
+            .skip(1)
+            .filter_map(|rest| rest.split('"').next())
+            .filter_map(crate::client::script)
+            .any(calls_server)
 }
 
 #[cfg(test)]

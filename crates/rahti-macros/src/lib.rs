@@ -17,6 +17,7 @@ mod authoring;
 mod component;
 mod parse;
 mod rpc;
+mod rpc_calls;
 mod socket;
 
 #[cfg(test)]
@@ -92,7 +93,21 @@ pub fn html(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input: TokenStream = input.into();
 
     match parse::parse(input) {
-        Ok(parsed) => emit(stamp(parsed, &file)).into(),
+        Ok(mut parsed) => {
+            let sources = std::mem::take(&mut parsed.client_code);
+            // A component script's function is named after its block, so a
+            // stack frame in the client registry says which component threw.
+            let block = parsed
+                .forced_component
+                .clone()
+                .or_else(|| component::identifier(&file));
+            let registrations = match register(&sources, block.as_deref()) {
+                Ok(registrations) => registrations,
+                Err(error) => return error.into(),
+            };
+            let block = emit(stamp(parsed, &file));
+            quote! {{ #registrations #block }}.into()
+        }
         Err(err) => err.to_compile_error().into(),
     }
 }
@@ -481,6 +496,13 @@ fn emit(ops: Vec<Op>) -> TokenStream {
             // rather than reusing `Render`: JS source has no HTML escaping,
             // and a string that renders bare in markup needs quoting in a
             // script. See `rahti::RenderJs`.
+            // A component script's server values, as its `pp-data` attribute.
+            Op::ScriptData(values) => body.extend(quote! {
+                ::rahti::client::write_script_data(
+                    &[#(&(#values) as &dyn ::rahti::RenderJs),*],
+                    &mut __rahti,
+                );
+            }),
             Op::ScriptText(expr) => body.extend(quote! {
                 ::rahti::RenderJs::render_js_into(&(#expr), &mut __rahti);
             }),
@@ -581,4 +603,72 @@ fn flush(pending: &mut String, body: &mut TokenStream) -> usize {
     let len = chunk.len();
     body.extend(quote! { __rahti.push_str(#chunk); });
     len
+}
+
+/// Compile every piece of client code a block carries and register it with
+/// the page's client registry, which `rahti` serves as `/_rahti/client.js`.
+/// The browser runtime runs nothing else, so a binding that is not JavaScript
+/// fails here, on the token that wrote it, instead of on the page — and so
+/// does a `pp.rpc` call that does not match its `#[rpc]` (see `rpc_calls`).
+fn register(
+    sources: &[parse::ClientSource],
+    block: Option<&str>,
+) -> Result<TokenStream, TokenStream> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = TokenStream::new();
+    let mut rpc_calls = 0;
+    for source in sources {
+        if !seen.insert((source.kind, source.key.clone())) {
+            continue;
+        }
+        let (kind, compiled) = match source.kind {
+            parse::ClientKind::Expression => {
+                (quote! { Expression }, rahti_js::expression(&source.source))
+            }
+            parse::ClientKind::Handler => (quote! { Handler }, rahti_js::handler(&source.source)),
+            parse::ClientKind::Script => {
+                (
+                    quote! { Script },
+                    rahti_js::component_script(&source.source).map(|script| match block {
+                        Some(name) if component::is_valid_js_identifier(name) => script
+                            .js
+                            .replacen("function (", &format!("function {name}("), 1),
+                        _ => script.js,
+                    }),
+                )
+            }
+        };
+        let js = compiled.map_err(|error| {
+            let what = match source.kind {
+                parse::ClientKind::Expression => "this binding",
+                parse::ClientKind::Handler => "this handler",
+                parse::ClientKind::Script => "this script",
+            };
+            parse::Error {
+                span: source.span,
+                msg: format!(
+                    "rahti: {what} is not JavaScript the browser can run: {error}.\n  Client \
+                     code is compiled into the page ahead of time; write a literal brace as \
+                     `&#123;`."
+                ),
+            }
+            .to_compile_error()
+        })?;
+        // Checked once the code is known to compile, so a syntax error is
+        // reported as one rather than as a missing call.
+        out.extend(
+            rpc_calls::checks(source, &mut rpc_calls).map_err(|error| error.to_compile_error())?,
+        );
+        let key = &source.key;
+        out.extend(quote! {
+            ::rahti::inventory::submit! {
+                ::rahti::client::ClientCode {
+                    kind: ::rahti::client::ClientKind::#kind,
+                    key: #key,
+                    js: #js,
+                }
+            }
+        });
+    }
+    Ok(out)
 }

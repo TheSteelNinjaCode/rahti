@@ -236,8 +236,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, Error
         }
     };
 
+    let signature = signature(&name, &params);
+
     Ok(quote! {
         #original
+
+        #signature
 
         #[doc = #doc]
         #[doc(hidden)]
@@ -253,6 +257,72 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, Error
 
         #registration
     })
+}
+
+/// The constant `html!` checks a `pp.rpc("name", { … })` call against,
+/// named after the function so that a call naming no `#[rpc]` in its module
+/// fails to resolve. See `rahti::rpc_check`; it exists only at compile time.
+fn signature(name: &Ident, params: &[Param]) -> TokenStream {
+    let marker = marker_ident(&name.to_string(), name.span());
+    let wire = name.to_string();
+    let entries = params.iter().map(|param| {
+        let key = param.name.to_string();
+        let ty = &param.ty;
+        let (wire, nullable) = wire_shape(ty.clone());
+        let wire = Ident::new(wire, name.span());
+        let required = match param.source {
+            Source::Payload => !nullable,
+            Source::File | Source::Upload => true,
+            Source::OptionalFile | Source::Files => false,
+        };
+        quote! { ::rahti::rpc_check::Param {
+            key: #key, required: #required, rust_type: stringify!(#ty),
+            wire: ::rahti::rpc_check::Wire::#wire, nullable: #nullable,
+        } }
+    });
+    let upload = params.iter().any(|param| param.source != Source::Payload);
+    quote! {
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals)]
+        pub const #marker: ::rahti::rpc_check::Signature = ::rahti::rpc_check::Signature {
+            name: #wire,
+            params: &[#(#entries),*],
+            upload: #upload,
+        };
+    }
+}
+
+/// Recognize standard spellings only; aliases and application types remain opaque.
+fn wire_shape(ty: TokenStream) -> (&'static str, bool) {
+    let compact: String = ty
+        .to_string()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    fn shape(ty: &str) -> (&'static str, bool) {
+        for prefix in ["Option<", "std::option::Option<", "core::option::Option<"] {
+            if let Some(inner) = ty.strip_prefix(prefix).and_then(|s| s.strip_suffix('>')) {
+                return (shape(inner).0, true);
+            }
+        }
+        let kind = match ty.trim_start_matches("::") {
+            "String" | "std::string::String" | "alloc::string::String" | "char" => "String",
+            "bool" => "Boolean",
+            "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
+            | "i128" | "isize" | "f32" | "f64" => "Number",
+            s if s.starts_with("Vec<") || s.starts_with("std::vec::Vec<") || s.starts_with('[') => {
+                "Array"
+            }
+            _ => "Opaque",
+        };
+        (kind, false)
+    }
+    shape(compact.trim_start_matches("::"))
+}
+
+/// The name of an rpc's [`signature`] constant.
+pub(crate) fn marker_ident(name: &str, span: Span) -> Ident {
+    Ident::new(&format!("__RAHTI_RPC_{name}"), span)
 }
 
 /// What the attribute itself says.

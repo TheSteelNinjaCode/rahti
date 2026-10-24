@@ -12,8 +12,10 @@ cargo rahti build --static --out site
 The default output directory is `dist/`. The command compiles CSS through the
 normal build, disables development-script injection, starts the application's
 normal initialization without binding a listener, renders pages through the
-generated Axum router, and copies the configured public directory into the
-output. This is build-time rendering by the real application, not a separate
+generated Axum router, copies the configured public directory into the
+output, and writes the client registry — every binding, handler and component
+script, compiled ahead of time — to `dist/_rahti/client.js`, where each page's
+`main.js` imports it. This is build-time rendering by the real application, not a separate
 template renderer.
 
 The generated router includes every non-dynamic `page.rs`. API `route.rs`
@@ -85,6 +87,11 @@ the report warns that those interactions require a running Rahti server. The
 generated HTML and browser reactivity can be hosted as static files; backend
 RPCs, WebSockets, sessions, runtime APIs, and request-time data cannot become
 static merely because the initial document was exported.
+
+A static host serves its own headers. Send the policy a Rahti server sends —
+`script-src 'self'` with `require-trusted-types-for 'script'; trusted-types
+pulsepoint` (see `security-middleware.md`) — so the exported pages keep the
+same protection.
 
 Metadata is resolved through the same layout and page chain as a live request,
 so static output includes the request-specific title, description, canonical,

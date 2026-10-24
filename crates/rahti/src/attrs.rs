@@ -85,7 +85,7 @@ pub fn attribute<T: Render + ?Sized>(name: &str, value: &T, boolean: bool, out: 
 /// build serves the page without that attribute rather than serving markup
 /// that no longer parses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Attrs(Vec<(String, Option<String>, bool)>);
+pub struct Attrs(Vec<(String, Option<String>)>);
 
 impl Attrs {
     pub fn new() -> Self {
@@ -97,72 +97,42 @@ impl Attrs {
     /// it.
     #[must_use = "Attrs::set returns a new value; it does not modify in place"]
     pub fn set(self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.put(name.into(), Some(value.into()), false)
-    }
-
-    /// Write `name="{expr}"`: a PulsePoint binding the component composes
-    /// itself, live in the browser.
-    ///
-    /// A [`set`](Attrs::set) value is data, and its braces are escaped so no
-    /// stored value can open a client expression. This is the one way to write
-    /// client code into a set from Rust — a handler, `pp.props.checkedProp`, a
-    /// caller's binding under a new name — so like
-    /// [`Html::from_raw`](crate::Html::from_raw) it is for code the author
-    /// wrote, never for a value that came from a request. A tag's own `{…}`
-    /// props arrive already live, as [`Bindings`].
-    #[must_use = "Attrs::bind returns a new value; it does not modify in place"]
-    pub fn bind(self, name: impl Into<String>, expr: impl AsRef<str>) -> Self {
-        let source = format!("{{{}}}", expr.as_ref());
-        self.put(name.into(), Some(source), true)
-    }
-
-    /// Whether this set writes `name` as a binding, through
-    /// [`bind`](Attrs::bind).
-    pub fn is_bound(&self, name: &str) -> bool {
-        self.0
-            .iter()
-            .any(|(existing, value, bound)| existing == name && value.is_some() && *bound)
+        self.put(name.into(), Some(value.into()))
     }
 
     /// Take an attribute off the element.
     #[must_use = "Attrs::unset returns a new value; it does not modify in place"]
     pub fn unset(self, name: impl Into<String>) -> Self {
-        self.put(name.into(), None, false)
+        self.put(name.into(), None)
     }
 
     /// Lay `over` on this set, last-wins: each of its values replaces one
-    /// here in place, each removal removes, and a binding stays a binding.
-    /// The way a component folds a caller's set into its own — rebuilding
-    /// one from [`iter`](Attrs::iter) and [`set`](Attrs::set) would turn every
-    /// binding into text.
+    /// here in place, and each removal removes. The way a component folds a
+    /// caller's set into its own.
     #[must_use = "Attrs::merge returns a new value; it does not modify in place"]
     pub fn merge(self, over: &Attrs) -> Self {
-        over.0.iter().fold(self, |attrs, (name, value, bound)| {
-            attrs.put(name.clone(), value.clone(), *bound)
+        over.0.iter().fold(self, |attrs, (name, value)| {
+            attrs.put(name.clone(), value.clone())
         })
     }
 
-    /// The entries whose name `keep` accepts, in order, bindings still
-    /// bindings — for a component that splits a caller's set between two
-    /// elements: `attrs.only(|name| name.starts_with("aria-"))`.
+    /// The entries whose name `keep` accepts, in order — for a component that
+    /// splits a caller's set between two elements: `attrs.only(|name| name.starts_with("aria-"))`.
     #[must_use = "Attrs::only returns a new value; it does not modify in place"]
     pub fn only(&self, keep: impl Fn(&str) -> bool) -> Self {
         Attrs(
             self.0
                 .iter()
-                .filter(|(name, _, _)| keep(name))
+                .filter(|(name, _)| keep(name))
                 .cloned()
                 .collect(),
         )
     }
 
-    fn put(mut self, name: String, value: Option<String>, bound: bool) -> Self {
-        match self.0.iter_mut().find(|(existing, _, _)| *existing == name) {
-            Some(entry) => {
-                entry.1 = value;
-                entry.2 = bound;
-            }
-            None => self.0.push((name, value, bound)),
+    fn put(mut self, name: String, value: Option<String>) -> Self {
+        match self.0.iter_mut().find(|(existing, _)| *existing == name) {
+            Some(entry) => entry.1 = value,
+            None => self.0.push((name, value)),
         }
         self
     }
@@ -185,13 +155,13 @@ impl Attrs {
     pub fn iter(&self) -> impl Iterator<Item = (&str, Option<&str>)> {
         self.0
             .iter()
-            .map(|(name, value, _)| (name.as_str(), value.as_deref()))
+            .map(|(name, value)| (name.as_str(), value.as_deref()))
     }
 
     /// The attributes this set touches, in order — whether it writes them or
     /// removes them.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().map(|(name, _, _)| name.as_str())
+        self.0.iter().map(|(name, _)| name.as_str())
     }
 
     /// What this set writes under `name`: `None` if it does not name it at
@@ -199,8 +169,8 @@ impl Attrs {
     pub fn get(&self, name: &str) -> Option<Option<&str>> {
         self.0
             .iter()
-            .find(|(existing, _, _)| existing == name)
-            .map(|(_, value, _)| value.as_deref())
+            .find(|(existing, _)| existing == name)
+            .map(|(_, value)| value.as_deref())
     }
 }
 
@@ -224,14 +194,14 @@ impl<N: Into<String>, V: Into<String>> FromIterator<(N, V)> for Attrs {
 impl<'a> IntoIterator for &'a Attrs {
     type Item = (&'a str, Option<&'a str>);
     type IntoIter = std::iter::Map<
-        std::slice::Iter<'a, (String, Option<String>, bool)>,
-        fn(&'a (String, Option<String>, bool)) -> (&'a str, Option<&'a str>),
+        std::slice::Iter<'a, (String, Option<String>)>,
+        fn(&'a (String, Option<String>)) -> (&'a str, Option<&'a str>),
     >;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0
             .iter()
-            .map(|(name, value, _)| (name.as_str(), value.as_deref()))
+            .map(|(name, value)| (name.as_str(), value.as_deref()))
     }
 }
 
@@ -246,9 +216,8 @@ pub trait Attributes {
 
 impl Attributes for Attrs {
     fn write_attributes(&self, list: &mut AttrList) {
-        for (name, value, bound) in &self.0 {
+        for (name, value) in &self.0 {
             match value {
-                Some(value) if *bound => list.set_source(name, value),
                 Some(value) => list.set(name, value),
                 None => list.unset(name),
             }
@@ -287,7 +256,7 @@ impl Bindings {
 }
 
 /// A binding goes back on an element in the form an element writes it: a
-/// native handler is JavaScript, `onclick="save()"`, and everything else is
+/// native handler travels in inert compiler-owned `pp-on*` metadata; everything else is
 /// an expression in braces, `class="{active}"`. Without the braces a value
 /// binding would land as the static text of its own source.
 impl Attributes for Bindings {
@@ -466,6 +435,9 @@ impl AttrList {
     pub fn write_into(&self, out: &mut String) {
         for (name, value) in &self.entries {
             out.push(' ');
+            if is_native_event_name(name) {
+                out.push_str("pp-");
+            }
             out.push_str(name);
             out.push_str("=\"");
             out.push_str(value);
@@ -474,6 +446,17 @@ impl AttrList {
     }
 
     fn put(&mut self, name: &str, value: String) {
+        if name
+            .to_ascii_lowercase()
+            .strip_prefix("pp-")
+            .is_some_and(is_native_event_name)
+        {
+            debug_assert!(
+                false,
+                "rahti: `{name}` is compiler-owned event metadata; forward handlers with Bindings."
+            );
+            return;
+        }
         if !is_valid_name(name) {
             debug_assert!(
                 false,

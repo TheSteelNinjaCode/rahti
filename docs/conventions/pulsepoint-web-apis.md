@@ -307,11 +307,18 @@ the ownership contract where a person would notice it breaking:
 - Worker scripts, `.wasm` modules, shaders, and model files go in `public/`,
   which serves them at the URL root.
 - Rahti's default CSP admits this: `worker-src 'self' blob:`, `script-src
-  'self' 'unsafe-eval'` (WebAssembly compilation needs `'unsafe-eval'`), and
+  'self'` (an application that compiles WebAssembly adds `'wasm-unsafe-eval'`), and
   `connect-src` with `https:` and `blob:`. A worker script, a library loaded
   with `import()`, and a `.wasm` module must be same-origin (or a `blob:` URL
   for a worker): vendor them into `public/`. An application that narrows its policy must keep these
   sources for the APIs it uses; see `security-middleware.md`.
+- The policy also requires Trusted Types with PulsePoint's policy as the only
+  one, so a library that writes markup by assigning a string to `innerHTML`
+  (or parses one with `DOMParser`) throws. Prefer a library that builds DOM
+  nodes or draws to a canvas; one that creates its own Trusted Types policy
+  works once its policy name is added to the CSP `trusted-types` directive.
+  Never evaluate strings as code — `eval`, `new Function`, string timers —
+  the policy refuses all of them.
 - Results that must stay authoritative or secret — prices, permissions,
   anything persisted — are computed in Rust behind `#[rpc]`. The browser API
   is for rendering, interaction, and client-side acceleration.

@@ -20,6 +20,23 @@ when the framework ships a new build.
 
 That bundle is the whole runtime. Never hand-edit the minified file.
 
+PulsePoint never turns page text into code. Every `{…}` binding, inline
+handler, `pp-for` collection and component `<script>` an `html!` template
+writes is compiled when the application is built and served as the client
+registry, `/_rahti/client.js`, which `main.js` imports before it mounts the
+page. The runtime runs only what that registry holds: a `{…}` no template
+wrote — text a user saved, markup injected into the page — renders as text.
+Handlers authored as `onclick={save()}` are emitted in inert compiler-owned
+`pp-on*` attributes. PulsePoint reads their registered code, installs event
+listeners, and removes the metadata. Native inline handler attributes never
+reach the browser parser, including on re-renders and loop rows. Write the
+native authoring form; never write `pp-on*` yourself or supply it through data
+attribute spreads.
+
+That is why the page's Content-Security-Policy needs no `'unsafe-eval'` (see
+`security-middleware.md`), and why client code belongs in `html!` and
+nowhere else.
+
 Companion guides:
 
 - `pulsepoint-hooks.md` — every `pp.*` hook with an example, context, refs,
@@ -32,7 +49,7 @@ Companion guides:
   `pp.redirect`.
 
 PulsePoint's **script API** mirrors React hooks. Its **markup is plain HTML**
-with `{…}` bindings, compiled by a template compiler that has no JSX support
+with `{…}` bindings, read by a template compiler that has no JSX support
 of any kind. Conflating the two is the most common way generated PulsePoint
 code fails.
 
@@ -175,12 +192,15 @@ bag. Each one, with an example, is in `pulsepoint-hooks.md`.
 
 `pp.createContext`, `pp.mount`, `pp.redirect`, `pp.rpc`, `pp.socket`,
 `pp.enablePerf`, `pp.disablePerf`, `pp.getPerfStats`, `pp.resetPerfStats`.
+`pp.registerClient` is called by the generated `/_rahti/client.js`; an
+application never calls it.
 
 ### Runtime-managed — never author
 
 `pp-component`, `pp-owner`, `pp-event-owner`, `pp-ref-owner`,
-`pp-ref-forward`, `<pp-context-provider>`, `<pp-fragment>`, every `data-pp-*`
-attribute, and `pp-keep*`. `html!` and the runtime write them — including the
+`pp-ref-forward`, `pp-script`, `pp-data`, `pp-loop-scope`,
+`<pp-context-provider>`, `<pp-fragment>`, every `data-pp-*` attribute, and
+`pp-keep*`. `html!` and the runtime write them — including the
 `<template pp-component="…">` around a root layout's `<slot />` and the
 `<!--pp:…-->`/`<!--/pp-->` pair around a `<>…</>` fragment.
 
@@ -233,11 +253,11 @@ and never by hand:
   as served and no boundary is created — the fragment is grouping only
   there, and its contents belong to the enclosing scope.
 
-The runtime compiles a boundary that has no `<script>` in its parent's
+The runtime renders a boundary that has no `<script>` in its parent's
 scope. That is what lets a script-less component take expressions from the
 page that renders it, the way rahti-ui's parts do. A `#[component]` whose own
 markup below the root writes a client `{…}` binding and has no script is
-compiled in its own scope instead: `html!` adds an empty `<script></script>`
+rendered in its own scope instead: `html!` adds an empty `<script></script>`
 before the root closes, so `<p>{pp.props.label}</p>` reads that component's
 props. A block with a spread below its root keeps the parent's scope, because
 the spread may carry the caller's `bindings`.
@@ -668,7 +688,9 @@ independent state, as `useState(props.x)` does.
 
 - `pp.mount()` mounts the document; `public/js/main.js` calls it.
 - `pp.redirect(url)` performs PulsePoint-aware navigation.
-- `pp.rpc(name, data?, optionsOrAbort?)` calls Rahti; see
+- `pp.rpc(name, data?, optionsOrAbort?)` calls Rahti. `name` is a string
+  literal naming an `#[rpc]` in the same file, checked at compile time with
+  the keys of an object-literal `data`; see "Compile-Time Call Checking" in
   `rpc-and-uploads.md`.
 - `pp.socket(name, args?, handlers?)` opens a WebSocket to a `#[socket]`
   function and returns `{ send, close, readyState }`. It keeps quiet
@@ -715,12 +737,12 @@ Captured events are mirrored to the server terminal and written as JSON Lines
 to `.rahti/dev.log`. See `diagnostics.md` for the schema, limits, privacy
 boundary, and AI debugging workflow.
 
-A component's script is compiled with a name, so an error thrown inside it
-has a stack frame of the form `pp://component/<boundary-id>.js:<line>:<col>`
-rather than an anonymous eval. The boundary id is the component's
-`pp-component` name, which `.rahti/manifest.json` maps back to its source
-file; the line counts from the first line of the script body (engines add a
-constant two-line header above it).
+A component's script runs as a function in `/_rahti/client.js` named after
+the component's boundary, so an error thrown inside it has a stack frame of
+the form `at <boundary-id> (…/_rahti/client.js:<line>:<col>)`. The boundary
+id is the component's `pp-component` name, which `.rahti/manifest.json` maps
+back to its source file, and `.rahti/dev.log` records that file beside the
+error.
 
 ## APIs Not Present
 

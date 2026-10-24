@@ -31,6 +31,7 @@ Rahti also records framework-handled backend failures:
 
 - fallible page responses and handler panics;
 - failed and panicking RPCs;
+- JSON RPC argument contract failures, with stable diagnostic codes and no input values;
 - upload spooling failures and invalid upload-limit configuration;
 - RPC stream serialization failures;
 - CSRF random-source failures.
@@ -85,7 +86,7 @@ Example:
 ```
 
 `target` identifies the framework subsystem, such as `page`, `page-panic`,
-`rpc`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `socket`, `upload-config`,
+`rpc`, `rpc-contract`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `socket`, `upload-config`,
 `csrf`, `jobs`, or `schedule`. An expected refusal — any 4xx an rpc or socket
 returns on purpose — is `warn`; `error` is reserved for failures.
 

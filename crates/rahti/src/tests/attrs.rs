@@ -425,7 +425,7 @@ fn an_owning_root_still_takes_the_rest_of_a_spread() {
     });
     assert_eq!(
         out,
-        " onsubmit=\"{save(event)}\" class=\"wide\" on-select=\"{pick}\""
+        " pp-onsubmit=\"{save(event)}\" class=\"wide\" on-select=\"{pick}\""
     );
 }
 
@@ -435,7 +435,7 @@ fn an_owning_root_still_takes_the_rest_of_a_spread() {
 fn a_spread_handler_is_kept_on_a_root_that_does_not_own_its_events() {
     assert_eq!(
         list(|list| list.spread(&Bindings::__from_html(&[("onclick", "pick()")]))),
-        " onclick=\"pick()\""
+        " pp-onclick=\"pick()\""
     );
 }
 
@@ -462,7 +462,7 @@ fn bindings_keep_their_source() {
     let bindings = Bindings::__from_html(&[("onclick", "pick({ id: 1 })"), ("title", "\"x\"")]);
     assert_eq!(
         list(|list| list.spread(&bindings)),
-        " onclick=\"pick({ id: 1 })\" title=\"{&quot;x&quot;}\""
+        " pp-onclick=\"pick({ id: 1 })\" title=\"{&quot;x&quot;}\""
     );
     assert_eq!(bindings.iter().count(), 2);
     assert!(Bindings::default().is_empty());
@@ -480,7 +480,7 @@ fn a_value_binding_is_written_back_in_braces() {
     ]);
     assert_eq!(
         list(|list| list.spread(&bindings)),
-        " class=\"{active ? classes.on : classes.off}\" on-select=\"{pick}\" onclick=\"save()\""
+        " class=\"{active ? classes.on : classes.off}\" on-select=\"{pick}\" pp-onclick=\"save()\""
     );
 }
 
@@ -500,50 +500,36 @@ fn a_data_spread_handler_is_dropped_in_release() {
     assert_eq!(out, " id=\"a\"");
 }
 
-/// `Attrs::bind` is the explicit way a component writes client code it
-/// composed itself: live braces, a handler allowed, while `set` of the very
-/// same text stays data.
+/// A value set in Rust is data: its braces are escaped, so no stored value
+/// can open a client expression. Client code is written in `html!`, where it
+/// is compiled into the page.
 #[test]
-fn a_bound_entry_is_live_and_a_set_one_is_data() {
-    let attrs = Attrs::new()
-        .bind("checked", "pp.props.checkedProp")
-        .bind("onclick", "save()")
-        .set("title", "{steal()}");
+fn a_set_value_is_data() {
+    let attrs = Attrs::new().set("title", "{steal()}");
     assert_eq!(
         list(|list| list.spread(&attrs)),
-        " checked=\"{pp.props.checkedProp}\" onclick=\"{save()}\" title=\"&#123;steal()&#125;\""
+        " title=\"&#123;steal()&#125;\""
     );
-    assert!(attrs.is_bound("checked"));
-    assert!(!attrs.is_bound("title"));
-    assert_eq!(attrs.get("onclick"), Some(Some("{save()}")));
 }
 
-/// Whatever names an attribute last decides what it is: a `set` after a
-/// `bind` makes it data again, and an `unset` removes it.
+/// Whatever names an attribute last decides it: an `unset` after a `set`
+/// removes it.
 #[test]
-fn the_last_word_on_a_name_decides_whether_it_is_bound() {
-    let attrs = Attrs::new().bind("title", "label").set("title", "{label}");
-    assert!(!attrs.is_bound("title"));
-    assert_eq!(
-        list(|list| list.spread(&attrs)),
-        " title=\"&#123;label&#125;\""
-    );
-
-    let attrs = Attrs::new().bind("title", "label").unset("title");
-    assert!(!attrs.is_bound("title"));
+fn the_last_word_on_a_name_decides_it() {
+    let attrs = Attrs::new().set("title", "a").unset("title");
     assert_eq!(list(|list| list.spread(&attrs)), "");
 }
 
 /// `merge` folds a caller's set into a component's own: last-wins in place,
-/// removals remove, and a binding is still a binding afterwards.
+/// and removals remove.
 #[test]
-fn merge_keeps_order_removals_and_bindings() {
+fn merge_keeps_order_and_removals() {
     let own = Attrs::new()
         .set("class", "base")
         .set("role", "img")
         .set("id", "a");
     let caller = Attrs::new()
-        .bind("class", "cls")
+        .set("class", "wide")
         .unset("role")
         .set("data-x", "1");
     let merged = own.merge(&caller);
@@ -551,32 +537,43 @@ fn merge_keeps_order_removals_and_bindings() {
     assert_eq!(
         merged.iter().collect::<Vec<_>>(),
         [
-            ("class", Some("{cls}")),
+            ("class", Some("wide")),
             ("role", None),
             ("id", Some("a")),
             ("data-x", Some("1")),
         ]
     );
-    assert!(merged.is_bound("class"));
     assert_eq!(
         list(|list| list.spread(&merged)),
-        " class=\"{cls}\" id=\"a\" data-x=\"1\""
+        " class=\"wide\" id=\"a\" data-x=\"1\""
     );
 }
 
-/// `only` splits a set by name, keeping order, removals and bindings.
+/// `only` splits a set by name, keeping order and removals.
 #[test]
 fn only_keeps_the_named_entries_as_they_were() {
     let attrs = Attrs::new()
         .set("id", "a")
-        .bind("aria-label", "label")
+        .set("aria-label", "Close")
         .unset("aria-hidden")
         .set("title", "t");
     let aria = attrs.only(|name| name.starts_with("aria-"));
 
     assert_eq!(
         aria.iter().collect::<Vec<_>>(),
-        [("aria-label", Some("{label}")), ("aria-hidden", None)]
+        [("aria-label", Some("Close")), ("aria-hidden", None)]
     );
-    assert!(aria.is_bound("aria-label"));
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "compiler-owned event metadata")]
+fn inert_event_metadata_cannot_be_supplied_as_attribute_data() {
+    let _ = list(|list| list.set("pp-onclick", "pick()"));
+}
+
+#[test]
+#[cfg(not(debug_assertions))]
+fn inert_event_metadata_from_attribute_data_is_dropped_in_release() {
+    assert_eq!(list(|list| list.set("pp-onclick", "pick()")), "");
 }

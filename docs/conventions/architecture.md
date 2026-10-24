@@ -2,8 +2,10 @@
 
 ## Ownership
 
-Rahti renders the initial response on the server. PulsePoint compiles and
-binds reactive expressions in the browser after the document loads.
+Rahti renders the initial response on the server. `html!` compiles every
+piece of client code a template writes when the application is built; the
+browser loads that client registry and PulsePoint binds it to the document
+after it loads. The browser compiles nothing.
 
 ```text
 src/app + src/components + src/models + src/migrations
@@ -22,10 +24,10 @@ rahti-build scans conventions
 Rust handlers render Html
         |
         v
-browser loads /js/main.js
+browser loads /js/main.js, which imports /_rahti/client.js
         |
         v
-PulsePoint v2 mounts reactive blocks
+PulsePoint v2 mounts reactive blocks with the registered code
 ```
 
 The generated router is ordinary Rust compiled into the application. Rahti
@@ -47,13 +49,16 @@ src/lib.rs::initialize_application
         +--> native/src/lib.rs  binds 127.0.0.1:0, the packaged application
 ```
 
-## Framework Packages
+## Workspace Crates
 
 ### `rahti`
 
 The server runtime exports:
 
 - `Html`, `Render`, `RenderJs`, and `Json`;
+- `client`: the client registry `html!` fills through `inventory` — every
+  binding, handler and component script compiled ahead of time — served as
+  `/_rahti/client.js` and written by static export;
 - `Attrs`, `Attributes`, `AttrList`, `Presence`, and `attribute`: whether an
   attribute is written at all, and what a `@{..spread}` puts on a tag;
 - layout and error-boundary response layers, including the root-layout layer
@@ -101,8 +106,8 @@ The server runtime exports:
 - link-time component RPC registration;
 - behind the optional `ws` cargo feature: `rahti::ws` — the socket endpoint,
   the `Socket`/`SocketSender` conversation types, link-time socket
-  registration, same-origin handshake check, and PulsePoint heartbeat
-  replies (see `websockets.md`);
+    registration, same-origin handshake check, and PulsePoint heartbeat
+    replies (see `websockets.md`);
 - behind the optional `mcp` cargo feature: the bearer-protected Streamable
   HTTP endpoint, its relative canonical redirect, and public discovery;
 - public-directory resolution;
@@ -147,15 +152,44 @@ The server runtime exports:
   attribute set onto the element, and a tag carrying one builds its whole open
   tag through `rahti::AttrList` so that a later attribute replaces an earlier
   one instead of being written beside it.
+- `html!` emits authored `on…` handlers as inert `pp-on*` metadata, so neither
+  initial parsing nor re-rendering asks the browser to compile inline code.
+  PulsePoint installs registered listeners and removes the metadata.
+- `html!` compiles every `{…}` binding, `on…` handler, `pp-for` collection
+  and bare `<script>` body through `rahti-js` and registers the result under
+  the source the runtime reads back off the page. A component script leaves
+  only `<script pp-script="…" pp-data="[…]">` in the markup, its `@{…}` values
+  rendered as JSON. Client code that is not JavaScript, and a `{…}` expression
+  hidden in quoted text, are compile errors.
+- Each `pp.rpc("name", …)` call in that client code is checked against the
+  `#[rpc]` it names: `html!` emits constants that reference the rpc's hidden
+  signature by name in the template's own module, and evaluates
+  `rahti::rpc_check` over the payload's object-literal keys and conservative
+  literal value shapes. An unknown name,
+  an unknown key, a missing required parameter, and a name that is not a
+  string literal are compile errors on the template. Nothing reaches the
+  client registry or the runtime.
 - `#[component]` validates a PascalCase function, stamps its returned root,
   and generates the hidden named-props companion the tag form calls through.
-- `#[rpc]` preserves the Rust function and generates its request shim and
-  registry entry. `#[rpc(auth)]` adds a session check to the shim, ahead of
+- `#[rpc]` preserves the Rust function and generates its request shim,
+  registry entry, and the hidden `__RAHTI_RPC_<name>` signature constant
+  (`rahti::rpc_check::Signature`) that `pp.rpc` calls are checked against. `#[rpc(auth)]` adds a session check to the shim, ahead of
   reading the payload; `auth` is the only argument the attribute takes.
 - `#[socket]` preserves the Rust function and generates the shim that reads
   the connection's first frame into the parameters, plus its registry entry.
   `#[socket(auth)]` marks the entry so the handshake is refused with a 401
   before the upgrade; `auth` is again the only argument.
+
+### `rahti-js`
+
+Compiles client code ahead of time for `html!`: parses a binding, handler or
+component script with a JavaScript parser, finds the names it reads, and
+returns the registry function — `(scope) => value`, `function (scope,
+event)`, or `function (pp, __pp_server)` returning the script's top-level
+bindings. `rpc_calls` lists the `pp.rpc` calls in a piece of client code —
+the name, the payload's keys and conservative literal shapes, and their byte
+spans — for `html!` to check.
+Used at compile time only; `rahti` does not depend on it.
 
 ### `rahti-build`
 
@@ -164,6 +198,9 @@ On every relevant Cargo build it:
 - reads `rahti.config.json`;
 - scans route convention files and `src/components/*.rs`;
 - validates route, RPC, and socket-name conflicts;
+- parses RPC declarations into the versioned `rpcContracts` agent inventory: source
+  locations, scoped URLs, parameters, response types, auth, transports, and
+  explicit unresolved-schema/checking limits;
 - generates routes, modules, and `.rahti/manifest.json`;
 - when `db` is configured, generates `src/models/mod.rs` and
   `src/migrations/mod.rs` — including the `Migrator` — without depending on
@@ -275,6 +312,12 @@ the project workspace, and `cargo-rahti-native` is a separate install.
 ## Implemented Feature Inventory
 
 The current implementation covers:
+
+- client code compiled ahead of time: a per-application registry of every
+  binding, handler and component script, so the default Content-Security-
+  Policy carries no `'unsafe-eval'` and requires Trusted Types with
+  PulsePoint's single `pulsepoint` policy, and injected `{…}` markup stays
+  inert;
 
 - optional server-side localization with configured Unicode locale
   identifiers, build-validated and binary-embedded Fluent catalogs,
@@ -416,7 +459,7 @@ Use this order when behavior is unclear:
 1. executable tests;
 2. implementation in `crates/`;
 3. generated output (`src/routes.rs`, `.rahti/manifest.json`);
-4. scaffold templates and assets under `crates/cargo-rahti/assets/`;
+4. examples in `src/app/` and `src/components/`;
 5. these convention documents.
 
 Generated output is evidence, not an editing surface.
@@ -426,12 +469,12 @@ Generated output is evidence, not an editing surface.
 PulsePoint ships as a prebuilt bundle. Nothing in this workspace compiles or
 bundles JavaScript, and a checkout is complete as it stands.
 
-The canonical runtime asset in this framework workspace is:
+The canonical runtime asset in this workspace is:
 
 ```text
 crates/cargo-rahti/assets/js/pp-reactive-v2.min.js
 ```
 
-`cargo rahti new` copies it to `public/js/pp-reactive-v2.min.js` in the new
-application. The scaffolded `public/js/main.js` imports that bundle, installs
-`twMerge`, and calls `pp.mount()` once the DOM is ready.
+A scaffolded application's `public/js/main.js` imports the minified runtime and the client registry
+(`/_rahti/client.js`), installs `twMerge`, and calls `pp.mount()` once the DOM
+is ready.

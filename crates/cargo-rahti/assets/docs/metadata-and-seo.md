@@ -169,7 +169,7 @@ head in a hidden `rahti-metadata` template. The scaffolded client entry
 copies that set into `document.head` after navigation.
 
 Keep `public/js/main.js` when customizing client startup, or preserve its
-metadata synchronization. A full browser load needs no JavaScript for SEO:
+client registry import and its metadata synchronization. A full browser load needs no JavaScript for SEO:
 the same tags are already rendered directly in the server response's head.
 
 Crossing into a different root layout performs a full load as before. Each

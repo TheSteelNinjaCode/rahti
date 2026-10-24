@@ -313,14 +313,12 @@ policy a browser applies to a page on a `http://127.0.0.1` origin. `security.csp
 is the value; the copy in `tauri.conf.json` covers the shell's own placeholder
 document.
 
-The default permits no external source of anything — and permits
-`'unsafe-eval'`, which is not an oversight. PulsePoint compiles the expressions
-in a reactive block at runtime, building a render function with `new Function`;
-that is what makes it a browser runtime rather than a build step. Remove the
-directive and the server-rendered page still appears with every binding on it
-dead, reporting an `EvalError` from inside the minified bundle. `script-src`
-still refuses every source but this origin, so injected markup cannot load an
-attacker's file.
+The default permits no external source of anything, no `'unsafe-eval'` and no
+inline script, and requires Trusted Types with the single `pulsepoint` policy
+— the same policy a web deployment sends. PulsePoint runs only the client
+registry the application compiled, served from this origin, so injected markup
+cannot run script and cannot load an attacker's file. An XSS here would reach
+the native bridge, which is why the policy stays this strict.
 
 ### The native command bridge
 
@@ -382,14 +380,14 @@ breaks on. Every use is a capability check with a web fallback.
 Because a reactive block cannot see `pp.native`, and that was measured rather
 than assumed.
 
-PulsePoint compiles the expressions in a reactive block into a function of its
-own making, and supplies the `pp` visible inside it. That `pp` is not
+A component script runs as the function the client registry compiled for it,
+and PulsePoint supplies the `pp` visible inside it. That `pp` is not
 `window.pp`: `pp.state(...)` works there, and a property added to the global
 `pp` is not visible. Attaching one and reading it back from a page returns
 `undefined`.
 
 Making `pp.native` work would mean changing the runtime bundle, which Rahti
-does not do. `window` *is* reachable from inside a compiled block, so the
+does not do. `window` *is* reachable from inside a component script, so the
 bridge is a global. The shell still attaches `pp.native` where it can, and
 nothing is documented as depending on it.
 

@@ -35,6 +35,13 @@ exercises private routes that nothing protects.
 
 ## Verification by Change Type
 
+### Compile-time browser code
+
+Run `cargo test -p rahti-js` for the JavaScript compiler and RPC call
+analysis, and `cargo test -p rahti-macros` for template integration.
+MCP tests use a temporary project with a generated-contract inventory;
+scaffold tests verify that applications receive the embedded browser assets.
+
 ### Rendering or macro change
 
 Run:

@@ -1,0 +1,17 @@
+[package]
+name = "rahti-js"
+description = "Compiles the client code in Rahti templates ahead of time. Not used directly — `html!` calls it at compile time."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+oxc_allocator = "0.154"
+oxc_ast = "0.154"
+oxc_ast_visit = "0.154"
+oxc_parser = "0.154"
+oxc_semantic = "0.154"
+oxc_span = "0.154"

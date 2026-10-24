@@ -308,11 +308,8 @@ impl<T: RenderJs> RenderJs for Option<T> {
     }
 }
 
-/// Numbers and flags need no quoting, so they go straight in — same as
-/// `Render`, since JS and HTML spell a number the same way. `NaN` and
-/// `Infinity` are valid JS literals here; they are not JSON, so a `Json<f64>`
-/// holding one would fail — that path goes through the field's own
-/// `RenderJs` impl instead.
+/// Integers and flags need no quoting, so they go straight in — JSON, JS and
+/// HTML spell them the same way.
 macro_rules! render_js_via_display {
     ($($ty:ty),* $(,)?) => {
         $(impl RenderJs for $ty {
@@ -325,8 +322,35 @@ macro_rules! render_js_via_display {
 }
 
 render_js_via_display!(
-    bool, char, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
+    bool, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
 );
+
+/// A float is written as a number, and `NaN` or an infinity as `null`: a
+/// component script's values arrive as JSON, which has no spelling for them.
+macro_rules! render_js_float {
+    ($($ty:ty),*) => {
+        $(impl RenderJs for $ty {
+            fn render_js_into(&self, out: &mut String) {
+                use ::std::fmt::Write;
+                if self.is_finite() {
+                    let _ = write!(out, "{self}");
+                } else {
+                    out.push_str("null");
+                }
+            }
+        })*
+    };
+}
+
+render_js_float!(f32, f64);
+
+/// A character is a one-character string.
+impl RenderJs for char {
+    fn render_js_into(&self, out: &mut String) {
+        let mut buffer = [0; 4];
+        str::render_js_into(self.encode_utf8(&mut buffer), out);
+    }
+}
 
 /// A `Serialize` value interpolated as a JSON literal inside a `<script>`.
 ///

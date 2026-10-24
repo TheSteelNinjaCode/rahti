@@ -55,6 +55,39 @@ pub const OWNER_ATTR: &str = "pp-owner";
 /// events — see [`is_native_event_name`].
 pub const EVENT_OWNER_ATTR: &str = "pp-event-owner";
 
+/// Names a component script's entry in the page's client registry. Written by
+/// `html!` on the empty `<script>` that stands where the script body was.
+pub const SCRIPT_ATTR: &str = "pp-script";
+
+/// What a piece of client code is, which decides how it is compiled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClientKind {
+    /// A `{…}` binding: one JavaScript expression.
+    Expression,
+    /// An `on…={…}` handler: an expression or a statement body.
+    Handler,
+    /// A component `<script>` body.
+    Script,
+}
+
+/// Client code a block puts on the page, which `html!` compiles and
+/// registers so the browser runtime never has to compile page text.
+#[derive(Debug, Clone)]
+pub struct ClientSource {
+    pub kind: ClientKind,
+    /// What the runtime looks the code up by: the source exactly as it reads
+    /// it back off the page, or a script's `pp-script` key.
+    pub key: String,
+    /// The JavaScript to compile. A script's `@{…}` values stand as
+    /// `__pp_server[i]`.
+    pub source: String,
+    pub span: Span,
+    /// A binding's tokens, inside its braces, so an error about part of the
+    /// code can land on the token that wrote it. A script body or a quoted
+    /// `pp-for` is one literal, which a span cannot reach inside.
+    pub tokens: Option<TokenStream>,
+}
+
 /// Does this attribute name a native DOM event handler?
 ///
 /// A component prop that is a Rust keyword, as the raw identifier its
@@ -245,6 +278,10 @@ pub enum Op {
     /// markup needs quoting in a script. Lifted past the raw-text rule that
     /// would otherwise copy the expression through as a JS block.
     ScriptText(TokenStream),
+    /// A component script's `@{…}` values, written as its `pp-data`
+    /// attribute: one JSON array, in the order the script reads them as
+    /// `__pp_server`.
+    ScriptData(Vec<TokenStream>),
     /// `<slot />` — the child content this layout wraps.
     Slot,
     /// A root layout's `<slot />`, which always sits in a deferred `<template
@@ -410,6 +447,8 @@ pub struct Parsed {
     pub renders_document: bool,
     /// Index of the first `Op::Slot`, which is where that wrapper goes.
     pub slot_at: Option<usize>,
+    /// Every piece of client code in the block, children included.
+    pub client_code: Vec<ClientSource>,
 }
 
 /// The element a block has to render to count as a document.
@@ -433,6 +472,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         root_binding: None,
         root_close_at: None,
         inner_spread: false,
+        client_code: Vec::new(),
     };
     let forced_component = parser.component_directive();
     parser.refuse_string_template()?;
@@ -462,6 +502,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         forced_component,
         renders_document,
         slot_at: parser.slot_at,
+        client_code: parser.client_code,
     })
 }
 
@@ -587,6 +628,8 @@ struct Parser {
     /// A spread sits on an element below the root. What it brings is only
     /// known at render, and may be the caller's `bindings`.
     inner_spread: bool,
+    /// See [`Parsed::client_code`].
+    client_code: Vec<ClientSource>,
 }
 
 impl Parser {
@@ -682,7 +725,8 @@ impl Parser {
                 }
                 // `{expr}` — the client runtime's, copied through untouched.
                 Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => {
-                    let source = binding_source(g);
+                    let g = g.clone();
+                    let source = binding_source(&g);
                     let span = g.span();
                     if let Some(msg) = crate::authoring::binding_mistake(None, &source) {
                         return Err(Error { span, msg });
@@ -690,6 +734,7 @@ impl Parser {
                     self.next();
                     self.mark_root(Root::Loose(span, "`{expr}`"));
                     self.client_bindings += 1;
+                    self.record_binding(None, &source, &g);
                     ops.push(Op::Static(escape_text(&source)));
                 }
                 // A run that is exactly one string literal keeps its contents
@@ -698,10 +743,11 @@ impl Parser {
                 Some(TokenTree::Literal(_)) if self.lone_string() => {
                     let span = self.span_now();
                     let text = self.literal_text()?;
+                    refuse_raw_brace(&text, span)?;
                     self.mark_root(Root::Loose(span, "this text"));
                     ops.push(Op::Static(escape_text(&text)));
                 }
-                Some(_) => self.text(ops),
+                Some(_) => self.text(ops)?,
             }
         }
     }
@@ -760,7 +806,7 @@ impl Parser {
     /// the indentation of the markup and disappears, a gap on one line is a
     /// space the author typed and survives. So `Hello <b>world</b>` keeps its
     /// space, while text sitting on its own line does not pick one up.
-    fn text(&mut self, ops: &mut Vec<Op>) {
+    fn text(&mut self, ops: &mut Vec<Op>) -> Result<(), Error> {
         let span = self.span_now();
         let first = self.pos;
         while !self.ends_text_run(0) {
@@ -782,8 +828,10 @@ impl Parser {
             text.push(' ');
         }
 
+        refuse_raw_brace(&text, span)?;
         self.mark_root(Root::Loose(span, "this text"));
         ops.push(Op::Static(escape_text(&text)));
+        Ok(())
     }
 
     /// What separated two tokens, by index.
@@ -857,6 +905,10 @@ impl Parser {
         let mut markup = format!("<{name}");
         let bindings_before = self.client_bindings;
         let mut attrs = self.tag_attributes(&name)?;
+        // A bare `<script>` is a component script, compiled ahead of time. One
+        // with attributes — a `type`d data block, a `src` — is written as it
+        // stands.
+        let component_script = name == "script" && attrs.is_empty();
         if is_root {
             self.root_attr_bindings = self.client_bindings - bindings_before;
             self.root_binding = attrs.iter().find_map(|attr| match attr {
@@ -897,14 +949,20 @@ impl Parser {
             return self.err(format!("rahti: expected `>` or `/>` to close `<{name}`"));
         }
         self.next();
-        markup.push('>');
-        ops.push(Op::Static(markup));
+        if component_script {
+            self.component_script(markup, ops)?;
+        } else {
+            markup.push('>');
+            ops.push(Op::Static(markup));
+        }
 
         if void {
             return Ok(());
         }
 
-        if RAW_TEXT.contains(&name.as_str()) {
+        if component_script {
+            // Written above, body and all.
+        } else if RAW_TEXT.contains(&name.as_str()) {
             self.raw_text(&name, ops)?;
         } else {
             self.depth += 1;
@@ -961,6 +1019,19 @@ impl Parser {
         if name == "script" {
             self.scripts += 1;
         }
+        let Some((contents, span)) = self.raw_body(name)? else {
+            return Ok(());
+        };
+        if name == "script" {
+            return raw_script(&contents, span, ops);
+        }
+        ops.push(Op::Static(contents));
+        Ok(())
+    }
+
+    /// The raw-string body of a `<script>` or `<style>`, up to its closing
+    /// tag; `None` for an empty one.
+    fn raw_body(&mut self, name: &str) -> Result<Option<(String, Span)>, Error> {
         let first = self.pos;
         while !self.closes_raw_text(name) {
             if self.next().is_none() {
@@ -969,7 +1040,7 @@ impl Parser {
         }
         let body = &self.toks[first..self.pos];
         let contents = match body {
-            [] => return Ok(()),
+            [] => return Ok(None),
             // `r##"…"##` is the one spelling: two `#`s, so neither a `"` nor
             // a `"#` — `"#fff"`, `querySelector("#id")` — can end the body.
             // More are accepted for the rare body that contains `"##`.
@@ -990,11 +1061,82 @@ impl Parser {
                 ),
             });
         };
-        if name == "script" {
-            return raw_script(&contents, span, ops);
+        Ok(Some((contents, span)))
+    }
+
+    /// A component script, compiled ahead of time and registered: the page
+    /// carries only `<script pp-script="key" pp-data="[…]"></script>`. The
+    /// browser skips an empty inline script before any CSP check, and the
+    /// runtime runs the registered function with the `@{…}` values from
+    /// `pp-data`, in order, as `__pp_server`.
+    fn component_script(&mut self, mut markup: String, ops: &mut Vec<Op>) -> Result<(), Error> {
+        self.scripts += 1;
+        let Some((body, span)) = self.raw_body("script")? else {
+            markup.push('>');
+            ops.push(Op::Static(markup));
+            return Ok(());
+        };
+        let mut source = String::new();
+        let mut values = Vec::new();
+        for segment in script_segments(&body, span)? {
+            match segment {
+                ScriptSegment::Text(text) => source.push_str(&text),
+                ScriptSegment::Value(expr) => {
+                    source.push_str(&format!("__pp_server[{}]", values.len()));
+                    values.push(expr);
+                }
+            }
         }
-        ops.push(Op::Static(contents));
+        let source = normalize_newlines(&source);
+        if source.trim().is_empty() {
+            markup.push('>');
+            ops.push(Op::Static(markup));
+            return Ok(());
+        }
+
+        let key = format!("s{:016x}", fnv1a64(&source));
+        markup.push_str(&format!(" {SCRIPT_ATTR}=\"{key}\""));
+        ops.push(Op::Static(markup));
+        if !values.is_empty() {
+            ops.push(Op::ScriptData(values));
+        }
+        ops.push(Op::Static(">".into()));
+        self.client_code.push(ClientSource {
+            kind: ClientKind::Script,
+            key,
+            source,
+            span,
+            tokens: None,
+        });
         Ok(())
+    }
+
+    /// Record a `{…}` binding written in this block: an `on…` attribute's is
+    /// a handler, a `pp-spread`'s is the object after its `...`, and any other
+    /// is an expression. The key is the source the runtime reads back off the
+    /// page.
+    fn record_binding(&mut self, attr: Option<&str>, source: &str, group: &proc_macro2::Group) {
+        let inner = source
+            .strip_prefix('{')
+            .and_then(|rest| rest.strip_suffix('}'))
+            .unwrap_or(source)
+            .trim();
+        let (kind, code) = match attr {
+            Some(name) if is_native_event_name(name) => (ClientKind::Handler, inner),
+            Some("pp-spread") => (
+                ClientKind::Expression,
+                inner.strip_prefix("...").unwrap_or(inner).trim(),
+            ),
+            _ => (ClientKind::Expression, inner),
+        };
+        let code = normalize_newlines(code);
+        self.client_code.push(ClientSource {
+            kind,
+            key: code.clone(),
+            source: code,
+            span: group.span(),
+            tokens: Some(group.stream()),
+        });
     }
 
     /// Are we sitting on the `</script>` that ends the body?
@@ -1364,7 +1506,8 @@ impl Parser {
                         .unwrap_or(&source)
                         .trim()
                         .to_string();
-                    bindings.push((prop.to_string().trim_start_matches("r#").to_string(), expr));
+                    self.record_binding(Some(&html_name), &source, &g);
+                    bindings.push((html_name, expr));
                 }
                 _ => {
                     return self.err(format!(
@@ -1511,6 +1654,18 @@ impl Parser {
                             msg: crate::authoring::server_value_in_text(&name),
                         });
                     }
+                    refuse_raw_brace(&value, span)?;
+                    if name == "pp-for"
+                        && let Some(collection) = loop_collection(&value)
+                    {
+                        self.client_code.push(ClientSource {
+                            kind: ClientKind::Expression,
+                            key: collection.clone(),
+                            source: collection,
+                            span,
+                            tokens: None,
+                        });
+                    }
                     if name == COMPONENT_ATTR && !crate::component::is_valid_js_identifier(&value) {
                         return Err(Error {
                             span,
@@ -1560,6 +1715,7 @@ impl Parser {
                     }
                     self.next();
                     self.client_bindings += 1;
+                    self.record_binding(Some(&name), &source, &g);
                     attrs.push(TagAttr::Literal {
                         name,
                         value: Some(source),
@@ -1683,6 +1839,9 @@ fn emit_attributes(attrs: Vec<TagAttr>, markup: &mut String, ops: &mut Vec<Op>) 
             match attr {
                 TagAttr::Literal { name, value } => {
                     markup.push(' ');
+                    if is_native_event_name(&name) {
+                        markup.push_str("pp-");
+                    }
                     markup.push_str(&name);
                     if let Some(value) = value {
                         markup.push_str("=\"");
@@ -1787,6 +1946,26 @@ fn raw_string_contents(repr: &str) -> Option<String> {
 /// Finding the end of an `@{…}` counts braces, skipping Rust string and char
 /// literals so `@{format!("{}", x)}` ends where it should.
 fn raw_script(js: &str, span: Span, ops: &mut Vec<Op>) -> Result<(), Error> {
+    for segment in script_segments(js, span)? {
+        match segment {
+            ScriptSegment::Text(text) => ops.push(Op::Static(text)),
+            ScriptSegment::Value(expr) => ops.push(Op::ScriptText(expr)),
+        }
+    }
+    Ok(())
+}
+
+enum ScriptSegment {
+    Text(String),
+    Value(TokenStream),
+}
+
+/// A raw-string script body split at each `@{expr}`.
+///
+/// Finding the end of an `@{…}` counts braces, skipping Rust string and char
+/// literals so `@{format!("{}", x)}` ends where it should.
+fn script_segments(js: &str, span: Span) -> Result<Vec<ScriptSegment>, Error> {
+    let mut segments = Vec::new();
     let mut run = String::new();
     let mut rest = js;
     while let Some(at) = rest.find("@{") {
@@ -1818,12 +1997,68 @@ fn raw_script(js: &str, span: Span, ops: &mut Vec<Op>) -> Result<(), Error> {
                 msg: "rahti: `@{}` in a `<script>` is empty — write `@{expr}`".into(),
             });
         }
-        flush_text(&mut run, ops);
-        ops.push(Op::ScriptText(expr));
+        if !run.is_empty() {
+            segments.push(ScriptSegment::Text(std::mem::take(&mut run)));
+        }
+        segments.push(ScriptSegment::Value(expr));
         rest = &after[end + 1..];
     }
     run.push_str(rest);
-    flush_text(&mut run, ops);
+    if !run.is_empty() {
+        segments.push(ScriptSegment::Text(run));
+    }
+    Ok(segments)
+}
+
+/// The collection of `pp-for="item in items"` or `pp-for="(item, i) in items"`.
+fn loop_collection(directive: &str) -> Option<String> {
+    let at = directive.find(" in ")?;
+    let collection = directive[at + 4..].trim();
+    (!collection.is_empty()).then(|| normalize_newlines(collection))
+}
+
+/// The browser reads every line break in a document as a line feed.
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn fnv1a64(input: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in input.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Quoted text or a quoted attribute value whose `{…}` holds a JavaScript
+/// expression: the browser runtime would read it as client code, but it is
+/// text to `html!`, so no registry entry stands for it. Braces around
+/// anything else — `data-config="{"a": 1}"` — are text either way and pass.
+fn refuse_raw_brace(text: &str, span: Span) -> Result<(), Error> {
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let mut depth = 1usize;
+        let close = after.char_indices().find_map(|(at, c)| {
+            match c {
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                _ => {}
+            }
+            (depth == 0).then_some(at)
+        });
+        let Some(close) = close else {
+            return Ok(());
+        };
+        if rahti_js::is_expression(after[..close].trim()) {
+            return Err(Error {
+                span,
+                msg: crate::authoring::RAW_BRACE.into(),
+            });
+        }
+        rest = &after[close + 1..];
+    }
     Ok(())
 }
 
@@ -1877,13 +2112,6 @@ fn closing_brace(text: &str) -> Option<usize> {
 /// Move accumulated literal text into one `Op::Static`. Adjacent `Op::Static`s
 /// are folded together downstream, so this keeps a script's writes small
 /// between lifts.
-fn flush_text(run: &mut String, ops: &mut Vec<Op>) {
-    if run.is_empty() {
-        return;
-    }
-    ops.push(Op::Static(std::mem::take(run)));
-}
-
 /// Recover the contents of a Rust string literal, plain or raw.
 ///
 /// `proc_macro2` hands literals back as source text, so `"a\nb"` arrives as

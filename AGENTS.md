@@ -260,9 +260,10 @@ preserve them, and documentation or scaffold changes must teach them.
     with rate limiting and the application pipeline in their documented
     order. Applications customize policies during startup rather than editing
     generated code or bypassing framework boundaries. `script-src` is
-    `'self' 'unsafe-eval'`: keep `'unsafe-eval'` (the runtime compiles with
-    `new Function`), name a vendor SDK's exact host, and never add `https:`
-    or `'unsafe-inline'`, either of which lets injected markup run script.
+    `'self'`, with `require-trusted-types-for 'script'; trusted-types
+    pulsepoint`: name a vendor SDK's exact host, and never add `https:`,
+    `'unsafe-inline'` or `'unsafe-eval'`. The browser runs only code compiled
+    by `html!` into the client registry at `/_rahti/client.js`.
 37. Production observability owns request correlation, bounded events and
     metrics, plus liveness/readiness routes. Error handling preserves RPC
     shapes, uses Problem Details elsewhere, redacts private production
@@ -313,6 +314,11 @@ preserve them, and documentation or scaffold changes must teach them.
     write, and a new one lands with tests for the refusal and for the
     ordinary code it must not catch.
 
+44. `html!` checks literal `pp.rpc` calls against the `#[rpc]` declaration
+    in the same module. Inspect `rpcContracts` in `.rahti/manifest.json`
+    after changing a declaration. Dynamic payloads and response field access
+    require checking the Rust/Serde types. See `rpc-and-uploads.md`.
+
 ## Repository Map
 
 - `crates/rahti/` - server runtime: HTML values, layouts, metadata, errors,
@@ -321,6 +327,8 @@ preserve them, and documentation or scaffold changes must teach them.
   scheduling, application time, localization, sockets, statics, live reload,
   and shutdown.
 - `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[socket]`.
+- `crates/rahti-js/` - compile-time JavaScript compiler for `html!`; the
+  browser compiles nothing.
 - `crates/rahti-build/` - configuration, filesystem scan, router/component
   generation, manifest, and CSS.
 - `crates/cargo-rahti/` - `cargo rahti new` and `cargo rahti upgrade`, plus

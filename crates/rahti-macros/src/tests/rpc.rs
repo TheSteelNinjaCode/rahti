@@ -40,6 +40,56 @@ fn error_with(attr: &str, item: &str) -> String {
 
 // ------------------------------------------------------------------- shape
 
+/// The constant `html!` checks `pp.rpc` calls against: the wire name, each
+/// key, and which keys a call may leave out.
+#[test]
+fn the_signature_records_each_key_and_whether_it_is_required() {
+    let out = expanded(
+        "pub async fn update(id: i32, text: Option<String>, tags: Vec<String>) -> bool { todo!() }",
+    );
+    assert!(out.contains("# [doc (hidden)]"), "{out}");
+    assert!(
+        out.contains("pub const __RAHTI_RPC_update : :: rahti :: rpc_check :: Signature"),
+        "{out}"
+    );
+    assert!(out.contains("name : \"update\""), "{out}");
+    assert!(out.contains("key : \"id\" , required : true"), "{out}");
+    assert!(out.contains("key : \"text\" , required : false"), "{out}");
+    assert!(out.contains("key : \"tags\" , required : true"), "{out}");
+    assert!(out.contains("upload : false"), "{out}");
+}
+
+#[test]
+fn standard_wire_shapes_and_qualified_options_are_recorded() {
+    for (source, wire, nullable) in [
+        ("String", "String", false),
+        ("i32", "Number", false),
+        ("bool", "Boolean", false),
+        ("Vec<String>", "Array", false),
+        ("std::option::Option<i32>", "Number", true),
+        ("Contact", "Opaque", false),
+        ("MaybeNumber", "Opaque", false),
+    ] {
+        let (actual, optional) = wire_shape(ts(source));
+        assert_eq!((actual, optional), (wire, nullable), "{source}");
+    }
+    let out = expanded("pub fn save(id: std::option::Option<i32>) -> bool { todo!() }");
+    assert!(out.contains("required : false"), "{out}");
+}
+
+/// A file makes the payload an upload. Only a required file must be sent.
+#[test]
+fn the_signature_marks_an_upload_and_its_optional_files() {
+    let out = expanded(
+        "pub async fn send(a: RpcFile, b: Option<RpcFile>, c: Vec<RpcFile>, d: RpcUpload)          -> bool { todo!() }",
+    );
+    assert!(out.contains("key : \"a\" , required : true"), "{out}");
+    assert!(out.contains("key : \"b\" , required : false"), "{out}");
+    assert!(out.contains("key : \"c\" , required : false"), "{out}");
+    assert!(out.contains("key : \"d\" , required : true"), "{out}");
+    assert!(out.contains("upload : true"), "{out}");
+}
+
 /// The function is the author's. The attribute only adds to it.
 #[test]
 fn the_function_is_left_alone() {

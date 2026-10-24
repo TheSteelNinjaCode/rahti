@@ -11,13 +11,17 @@ removed, and the name is taken permanently.
 - [x] **READMEs.** The workspace `README.md` is the framework's face and the
       `rahti` crate's page (`readme = "../../README.md"`); every other
       publishable crate carries its own.
-- [ ] `cargo test --workspace` clean.
+- [x] `cargo test --workspace` clean.
 - [ ] Commit everything. `cargo publish` records the git revision.
 
 ## Order
 
 Each crate can only be published once everything it depends on is already on
 crates.io, so the order is forced:
+
+```bash
+cargo publish -p rahti-js
+```
 
 ```bash
 cargo publish -p rahti-macros
@@ -59,7 +63,8 @@ Publish strictly in the dependency order above.
 each intra-framework dependency to that same number. This is deliberate:
 `html!` expands to paths in `rahti`, and `rahti-build` writes code calling
 functions in it, so a project that mixed versions would fail to compile with
-an error naming neither crate. The optional HTTP feature makes `rahti-mcp` a
+an error naming neither crate. `rahti-macros` depends on the compile-time `rahti-js` compiler, so
+`rahti-js` must publish first. The optional HTTP feature makes `rahti-mcp` a
 dependency of `rahti`, so it must publish first. Release them together,
 always.
 

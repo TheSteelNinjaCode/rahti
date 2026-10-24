@@ -80,6 +80,35 @@ async fn an_argument_of_the_wrong_type_is_reported_against_its_name() {
     assert!(body.contains("\"error\""), "{body}");
 }
 
+#[tokio::test]
+async fn argument_contract_errors_are_structured_and_do_not_echo_input() {
+    let call = parsed(call("update", r#"{"id":"private-value-do-not-log"}"#)).await;
+    for (argument, code, received) in [
+        ("id", "RAHTI_RPC_ARGUMENT_TYPE", "string"),
+        ("missing", "RAHTI_RPC_MISSING_ARGUMENT", "missing"),
+    ] {
+        let res = call.arg::<u32>(argument).unwrap_err();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+        let body = body_of(res).await;
+        assert!(!body.contains("private-value-do-not-log"));
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["code"], code);
+        assert_eq!(body["rpc"], "update");
+        assert_eq!(body["argument"], argument);
+        assert_eq!(body["expectedRustType"], "u32");
+        assert_eq!(body["receivedType"], received);
+    }
+}
+
+#[tokio::test]
+async fn text_fields_still_follow_the_documented_json_decoding_rules() {
+    let call = parsed(call("update", r#"{"id":"42","active":"true","name":"42"}"#)).await;
+    assert_eq!(call.arg::<u32>("id").unwrap(), 42);
+    assert!(call.arg::<bool>("active").unwrap());
+    assert_eq!(call.arg::<String>("name").unwrap(), "42");
+}
+
 /// `pp.rpc("reload")` sends `{}`, but a call with nothing to say need not
 /// send a body at all.
 #[tokio::test]
