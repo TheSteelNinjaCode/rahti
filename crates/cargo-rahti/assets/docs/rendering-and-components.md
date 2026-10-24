@@ -221,6 +221,18 @@ let aria = caller.only(|name| name.starts_with("aria-"));
 remain literal. `@{...}` is supported inside `<script>`; it is not lifted
 inside `<style>`.
 
+### Class composition and Tailwind conflicts
+
+`Attrs::merge` combines attribute sets, last attribute wins. It does not
+merge the Tailwind utilities inside a `class` value. A Rust helper that
+joins class strings also does not resolve CSS conflicts. In Tailwind
+projects, use the existing browser `twMerge` in a compiled binding or script;
+do not add a Rust merger or construct a binding by formatting a Rust string.
+Pass server class data through `@{...}` in the script and bind an element
+inside that script's root. For the complete example, helper availability,
+and CSS-engine rules, read "Tailwind class merging: agent contract" in
+`configuration-and-tooling.md`.
+
 ### Scripts
 
 A `<script>` body is JavaScript exactly as written — comments, single

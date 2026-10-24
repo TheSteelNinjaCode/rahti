@@ -1818,7 +1818,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/security.md` |\n",
     );
     out.push_str(
-        "| `rahti.config.json`, CSS, static files, the CLI | \
+        "| `rahti.config.json`, CSS engines, frontend `twMerge`, static files, the CLI | \
          `docs/conventions/configuration-and-tooling.md` |\n",
     );
     out.push_str(
@@ -2168,6 +2168,21 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
                 .to_string(),
         );
     }
+
+    rules.push(
+        "Tailwind class conflicts use the scaffold's browser `twMerge`, not\n\
+         a Rust dependency or `pp.twMerge`. Check `css.engine`, the helper\n\
+         asset, and `public/js/main.js`: Tailwind scaffolds publish it before\n\
+         `pp.mount()`; plain CSS scaffolds do not. Rust helpers join class\n\
+         data; `Attrs::merge` merges attributes, not Tailwind utilities.\n\
+         Static class attributes are not automatically merged. Call `twMerge`\n\
+         explicitly in compiled bindings or scripts when utilities conflict;\n\
+         pass server strings through script `@{...}`, never formatted code.\n\
+         Do not add `tw_merge`, npm tooling, or another merger for this\n\
+         behavior. `twMerge` does not generate CSS. Read the Tailwind class\n\
+         merging agent contract in `docs/conventions/configuration-and-tooling.md`."
+            .to_string(),
+    );
 
     for (index, rule) in rules.iter().enumerate() {
         let numbered = format!("{}. {}\n", index + 1, rule.replace('\n', "\n    "));

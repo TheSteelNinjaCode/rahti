@@ -55,6 +55,7 @@ application, which is the perspective every rule below serves.
 | IANA application time, conversion, DST-safe day bounds | `docs/conventions/application-timezone.md` |
 | SeaORM entities, migrations, the connection, database tests | `docs/conventions/database.md` |
 | Escaping, CSRF, redirects, upload trust, development exposure | `docs/conventions/security.md` |
+| Tailwind class composition, frontend `twMerge`, CSS engines | `docs/conventions/configuration-and-tooling.md` |
 | `rahti.config.json`, CSS, static files, CLI, environment variables | `docs/conventions/configuration-and-tooling.md` |
 | Workspace test placement and verification | `docs/conventions/workspace-testing.md` |
 | Application test suites (the application guide) | `docs/conventions/testing.md` |
@@ -98,10 +99,10 @@ preserve them, and documentation or scaffold changes must teach them.
 6. Runtime values are escaped, braces included (`&#123;`), so no value can
    open a PulsePoint expression; `Html::from_raw` is only for explicitly
    trusted markup, whose braces stay live. A component forwards its tag's
-   `{…}` props through a `bindings: Bindings` parameter. Client code a
-   component composes in Rust is written with `Attrs::bind`, never with
-   `Attrs::set`, whose values are data; `Attrs::merge` and `Attrs::only`
-   compose sets and keep bindings live.
+   `{…}` props through a `bindings: Bindings` parameter. Client code is
+   written in `html!`, where it is compiled into the client registry; the
+   browser compiles nothing. `Attrs::set` writes data, never JavaScript, and
+   `Attrs::merge` and `Attrs::only` compose attribute sets.
 7. An `@{…}` attribute value decides whether its attribute is written at all.
    `Option::None` writes none, and a `bool` on one of the names HTML reads by
    presence writes `name=""` or nothing. That list lives in `rahti-macros`'
@@ -318,6 +319,18 @@ preserve them, and documentation or scaffold changes must teach them.
     in the same module. Inspect `rpcContracts` in `.rahti/manifest.json`
     after changing a declaration. Dynamic payloads and response field access
     require checking the Rust/Serde types. See `rpc-and-uploads.md`.
+
+45. Tailwind class conflict resolution uses the scaffold's existing browser
+    `twMerge`, not a Rust dependency or `pp.twMerge`. Check `css.engine`,
+    the helper asset, and `public/js/main.js`: Tailwind scaffolds publish it
+    before `pp.mount()`; plain CSS scaffolds do not. Rust class helpers join
+    data, and `Attrs::merge` merges attributes, not Tailwind utilities. Static
+    class attributes are not automatically merged. Call `twMerge` explicitly
+    in compiled bindings or scripts when utilities conflict; pass server
+    strings through script `@{...}`, never formatted JavaScript strings.
+    Do not add `tw_merge`, npm tooling, or another merger for this behavior.
+    `twMerge` does not generate CSS. Read "Tailwind class merging: agent
+    contract" in `docs/conventions/configuration-and-tooling.md`.
 
 ## Repository Map
 

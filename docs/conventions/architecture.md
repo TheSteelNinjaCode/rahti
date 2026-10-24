@@ -373,8 +373,9 @@ The current implementation covers:
 - static asset fallback, configurable public directory, development reload,
   CSS hot swapping, browser/backend diagnostic capture, graceful shutdown;
 - Tailwind, plain CSS, and externally managed CSS modes;
-- globally available `twMerge` support for browser-computed Tailwind class
-  strings;
+- the Tailwind scaffold supplies the browser `twMerge` global for explicit
+  class-conflict resolution; plain CSS has no helper and Rust has no merger
+  dependency;
 - an optional SeaORM database: a scaffold choice of backend, generated module
   wiring for `src/models/` and a generated `Migrator` for `src/migrations/`,
   and a process-wide connection reached without handler state — the framework
@@ -466,8 +467,10 @@ Generated output is evidence, not an editing surface.
 
 ## The Browser Runtime Asset
 
-PulsePoint ships as a prebuilt bundle. Nothing in this workspace compiles or
-bundles JavaScript, and a checkout is complete as it stands.
+PulsePoint ships as a prebuilt bundle; building the application does not
+rebuild or bundle that runtime. `html!` compiles authored client bindings and
+scripts ahead of time through `rahti-js` into `/_rahti/client.js`. Both the
+shipped runtime asset and that generated registry are needed for hydration.
 
 The canonical runtime asset in this workspace is:
 
@@ -476,5 +479,8 @@ crates/cargo-rahti/assets/js/pp-reactive-v2.min.js
 ```
 
 A scaffolded application's `public/js/main.js` imports the minified runtime and the client registry
-(`/_rahti/client.js`), installs `twMerge`, and calls `pp.mount()` once the DOM
-is ready.
+(`/_rahti/client.js`) and calls `pp.mount()` once the DOM is ready. The
+Tailwind entry also imports the bundled class-merging helper and publishes
+`globalThis.twMerge` before mounting; the plain entry does not. This does not
+automatically merge static class attributes. The agent contract and a
+compiled binding example are in `configuration-and-tooling.md`.

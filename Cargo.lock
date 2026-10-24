@@ -152,7 +152,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cargo-rahti"
-version = "0.0.57"
+version = "0.0.58"
 dependencies = [
  "getrandom 0.3.4",
  "proc-macro2",
@@ -1420,7 +1420,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rahti"
-version = "0.0.57"
+version = "0.0.58"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1451,7 +1451,7 @@ dependencies = [
 
 [[package]]
 name = "rahti-build"
-version = "0.0.57"
+version = "0.0.58"
 dependencies = [
  "fluent-syntax",
  "proc-macro2",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "rahti-js"
-version = "0.0.57"
+version = "0.0.58"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -1475,7 +1475,7 @@ dependencies = [
 
 [[package]]
 name = "rahti-macros"
-version = "0.0.57"
+version = "0.0.58"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "rahti-mcp"
-version = "0.0.57"
+version = "0.0.58"
 dependencies = [
  "axum",
  "rmcp",

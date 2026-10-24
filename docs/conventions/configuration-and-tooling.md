@@ -178,22 +178,71 @@ The application entry `public/js/main.js`:
 1. imports `/js/pp-reactive-v2.min.js`;
 2. imports `/_rahti/client.js`, the client registry — every binding, handler
    and component script `html!` compiled — before anything mounts;
-3. imports and publishes `twMerge`;
+3. for a Tailwind project, imports `/js/tailwind-merge.mjs` and assigns its
+   `twMerge` export to `globalThis.twMerge`;
 4. calls `pp.mount()` after DOM readiness.
 
-Keep the registry import first after the runtime: PulsePoint runs only
-registered code, so a page that mounts without it renders with every binding
-inert.
+Keep the registry import first after the runtime and publish the Tailwind
+helper before mounting. PulsePoint runs only registered code; mounting
+without the registry leaves bindings inert.
 
-`twMerge` is available to every mounted PulsePoint script as the global
-function `twMerge(classes)`. Use it when a reactive class string can contain
-conflicting Tailwind utilities; it returns the resolved string without changing
-the input. It handles variants, `!important`, arbitrary values, and
-overlapping utility groups.
+### Tailwind class merging: agent contract
+
+The Tailwind scaffold (`css.engine: "tailwind"`) supplies the local
+`public/js/tailwind-merge.mjs` asset and the import/global assignment above.
+The plain CSS scaffold supplies neither. `css.engine: "none"` only disables
+CSS output management; it does not guarantee any frontend helper. Inspect
+`rahti.config.json`, `public/js/main.js`, and the local asset before assuming
+`twMerge` is available. A CSS build does not install JavaScript imports.
+
+`twMerge(classes)` is the existing **browser JavaScript** helper, not a Rust
+API and not `pp.twMerge`. Do not add `tw_merge`, a Rust Tailwind merger, an
+npm install, or a second merger to implement this frontend behavior. Use the
+bundled helper from a compiled `html!` binding or component script. It
+resolves conflicting utilities, including variants, important modifiers,
+arbitrary values, and overlapping utility groups, and returns a string.
+
+Class composition and conflict resolution are separate operations:
+
+- Rust may join base, variant, size, and caller class strings as data.
+  A helper named `cn` does not imply that those strings have been merged.
+- `class="..."`, `class=@{classes}`, and `Attrs::set("class", classes)`
+  write data. Neither Tailwind nor PulsePoint automatically calls `twMerge`
+  on every class attribute. The last token in a static class list is not a
+  general guarantee of CSS precedence.
+- Call `twMerge` explicitly when class layers can conflict. For stateful
+  classes, keep the call in the binding or script so it recomputes on render.
+- `twMerge` does not generate CSS. Keep complete utility names in sources
+  Tailwind scans; merging a runtime string cannot create a missing rule.
+
+Pass server class strings into the script as data, then merge in the browser:
 
 ```rust
-<div class={twMerge("p-2 px-4")}></div>
+let base_classes = "rounded-md px-4 py-2";
+let caller_classes = "px-8";
+html! {
+    <section>
+        <button
+            class={twMerge(baseClasses + " " + callerClasses + (compact ? " px-2" : ""))}
+            onclick={setCompact(!compact)}
+        >
+            "Toggle compact padding"
+        </button>
+        <script>r##"
+            const baseClasses = @{base_classes};
+            const callerClasses = @{caller_classes};
+            const [compact, setCompact] = pp.state(false);
+        "##</script>
+    </section>
+}
 ```
+
+The initial merged padding is `px-8`; compact state replaces it with `px-2`
+while retaining `py-2`. The binding is inside the root that owns its script.
+Do not format `"{twMerge(...)}"` in Rust or place JavaScript in an `Attrs`
+value: strings remain data, and the browser never compiles them. Server
+`@{...}` interpolation belongs in the script as shown, not inside a client
+`{...}` expression. See `rendering-and-components.md` for `Bindings` forwarding.
 
 The runtime is the shipped asset `public/js/pp-reactive-v2.min.js`, replaced
 by `cargo rahti upgrade` when the framework ships a new build. Never

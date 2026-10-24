@@ -195,6 +195,14 @@ bag. Each one, with an example, is in `pulsepoint-hooks.md`.
 `pp.registerClient` is called by the generated `/_rahti/client.js`; an
 application never calls it.
 
+Tailwind projects also expose the scaffold's browser helper `twMerge(classes)`.
+It is a global function, not a `pp.*` API. Call it explicitly in a compiled
+class binding or component script when utilities conflict; static class
+attributes are not automatically merged. The plain CSS scaffold does not
+supply it. Read "Tailwind class merging: agent contract" in
+`configuration-and-tooling.md` before adding class composition helpers or
+changing CSS engines. This frontend behavior needs no Rust merger dependency.
+
 ### Runtime-managed — never author
 
 `pp-component`, `pp-owner`, `pp-event-owner`, `pp-ref-owner`,
