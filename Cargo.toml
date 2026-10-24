@@ -20,22 +20,22 @@ members = [
 # that mixed versions would fail to compile with an error naming neither
 # crate. Releasing them in lockstep makes the mismatch impossible to reach.
 [workspace.package]
-version = "0.0.58"
+version = "0.0.59"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/TheSteelNinjaCode/rahti"
 # Keep this release line on the Rust version required by the Rahti crates.
 # Naming the minimum explicitly makes Cargo reject an older compiler before
 # it starts compiling the framework or one of its dependencies.
-rust-version = "1.97"
+rust-version = "1.99"
 
 # One place to bump when the framework releases. `version` alongside `path`
 # is what makes these publishable: cargo uses the path locally and the
 # version once the crate is on crates.io, and a path-only dependency cannot
 # be published at all.
 [workspace.dependencies]
-rahti = { path = "crates/rahti", version = "0.0.58" }
-rahti-build = { path = "crates/rahti-build", version = "0.0.58" }
-rahti-macros = { path = "crates/rahti-macros", version = "0.0.58" }
-rahti-mcp = { path = "crates/rahti-mcp", version = "0.0.58", default-features = false }
-rahti-js = { path = "crates/rahti-js", version = "0.0.58" }
+rahti = { path = "crates/rahti", version = "0.0.59" }
+rahti-build = { path = "crates/rahti-build", version = "0.0.59" }
+rahti-macros = { path = "crates/rahti-macros", version = "0.0.59" }
+rahti-mcp = { path = "crates/rahti-mcp", version = "0.0.59", default-features = false }
+rahti-js = { path = "crates/rahti-js", version = "0.0.59" }

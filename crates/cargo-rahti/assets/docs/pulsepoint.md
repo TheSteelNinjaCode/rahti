@@ -270,6 +270,14 @@ before the root closes, so `<p>{pp.props.label}</p>` reads that component's
 props. A block with a spread below its root keeps the parent's scope, because
 the spread may carry the caller's `bindings`.
 
+A boundary re-renders when its own state changes and when anything above it
+re-renders, exactly as a React child does. Server-rendered markup is no
+exception: the HTML cannot have changed, but the scope runs again, and every
+`pp.effect` written without a dependency list runs again with it. An effect
+that drives the boundary imperatively — listeners, observers, an opening
+scroll or focus position — therefore takes `[]`; see "Controller Effects" in
+`pulsepoint-hooks.md`.
+
 Two things are deliberately *not* boundaries. A block whose root is a
 component tag (composition) contributes no markup of its own, so it adds no
 scope — the inner component's boundary is what mounts. And several instances

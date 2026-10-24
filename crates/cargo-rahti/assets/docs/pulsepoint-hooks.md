@@ -122,8 +122,84 @@ html! {
   renders in a row driven only by state set inside `pp.effect`, PulsePoint
   drops the next render and logs `[PP-WARN] Maximum update depth exceeded
   for component "…"`, which reaches `.rahti/dev.log`. The cause is a missing
-  dependency array or a dependency rebuilt each render. Any other update — an
-  event, a parent re-render, an async callback — starts the count again.
+  dependency array or a dependency rebuilt each render.
+- That counter follows a chain only while it stays *synchronously inside* a
+  passive effect. It does cross a component boundary: a child effect that
+  calls a parent's setter directly is counted, because the write happens with
+  the effect still on the stack. One hop through a microtask, a timer, a
+  frame, an observer or a browser-dispatched event does not — the next write
+  lands with no effect running, the chain reads as a fresh start, and the
+  count never reaches two. The shape to know is a component that announces
+  itself: an effect dispatches a `CustomEvent`, a page listens and writes
+  state, the page re-renders, the morph re-renders this boundary, the effect
+  runs again. Re-announcing from a `requestAnimationFrame` or a
+  `ResizeObserver` — which is what a controller does when it has to measure
+  first — puts the hop on the path, and this counter goes quiet.
+- `[PP-WARN] Runaway renders for component "…"` is the one that does not
+  care what drove the render. It reports a boundary rendering more than 300
+  times in a second, once per runaway rather than once per render, and both
+  ends of a loop report. Nothing is dropped and no state is lost: it is a
+  diagnostic, not a budget, because a page that is genuinely busy has to keep
+  rendering. 300 is far above anything real — a component repainting every
+  animation frame renders 60 times a second, and a mount or a list update is
+  a burst, not a sustained rate — so treat it as proof of a loop and look for
+  the effect without a dependency list.
+
+## Controller Effects
+
+An effect that drives a subtree imperatively — attaching listeners, starting
+an `IntersectionObserver`, `MutationObserver` or `ResizeObserver`, measuring
+a layout, applying an opening scroll or focus position — is a *controller*,
+and a controller takes `[]`.
+
+Without a dependency list the rule above still holds, but its consequence is
+different in kind. A subscription that reruns costs a teardown and a setup. A
+controller that reruns undoes the work the user has done since it mounted:
+the cleanup detaches, and the setup reapplies the position the element had
+when it first appeared. A reader who had scrolled is put back where they
+started, and that happens on every render of every ancestor.
+
+```rust
+html! {
+    <div data-slot="viewport" pp-ref={viewRef}>
+        <script>r##"
+            const viewRef = pp.ref(null);
+            pp.effect(() => {
+                const view = viewRef.current;
+                if (!view) return;
+                const onScroll = () => { /* … */ };
+                view.addEventListener("scroll", onScroll, { passive: true });
+                const sizer = new ResizeObserver(() => { /* … */ });
+                sizer.observe(view);
+                // Once per element, not once per run of the effect.
+                if (!view.opened) {
+                    view.opened = true;
+                    view.scrollTop = view.scrollHeight;
+                }
+                return () => {
+                    view.removeEventListener("scroll", onScroll);
+                    sizer.disconnect();
+                };
+            }, []);
+        "##</script>
+    </div>
+}
+```
+
+Two rules, and the second is not redundant:
+
+- **`[]` on the effect.** It mounts once and its cleanup runs on unmount.
+- **One-time setup is idempotent against the element, not against the
+  effect.** A morph that replaces the element is a genuinely new subtree and
+  does mount again; a flag on the DOM node distinguishes that from a rerun.
+  An attribute would be visible in the served markup and reconciled away, so
+  the flag is a property on the element.
+
+A controller that announces itself — `root.dispatchEvent(new CustomEvent(…))`
+from the setup pass, so a page can hold its state — needs both. With neither,
+the announcement is a loop and the counter above will not catch it. Writing
+attributes and dispatching only when the value has actually changed keeps the
+announcement cheap even when something else drives a rerender.
 
 ## Derived Values and Reducers
 
