@@ -20,6 +20,12 @@
 //! cargo dev
 //! ```
 //!
+//! A coding agent cannot press Ctrl+C or watch a tab, so a dev server also
+//! describes itself. [`announce`] writes `.rahti/dev-server.json` with its
+//! address, boot id and a one-run token, and `/__rahti/dev/status` and
+//! `/__rahti/dev/shutdown` answer whoever can read that file. `cargo rahti
+//! restart`, `cargo rahti status` and the MCP tools are the callers.
+//!
 //! All of this is off in release builds, and `RAHTI_DEV` overrides either
 //! way. When it is off, [`routes`] is an empty `Router` and [`inject`] is a
 //! move, so the generated router can wire it in unconditionally.
@@ -32,9 +38,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -55,12 +62,18 @@ const SSE_PATH: &str = "/__rahti/dev";
 const SCRIPT_PATH: &str = "/__rahti/dev.js";
 const LOG_PATH: &str = ".rahti/dev.log";
 const LOG_INGEST_PATH: &str = "/__rahti/dev/log";
+const STATUS_PATH: &str = "/__rahti/dev/status";
+const SHUTDOWN_PATH: &str = "/__rahti/dev/shutdown";
+const SERVER_INFO_PATH: &str = ".rahti/dev-server.json";
+const TOKEN_HEADER: &str = "x-rahti-dev-token";
 const MAX_LOG_BODY: usize = 128 * 1024;
 const MAX_LOG_ENTRIES: usize = 50;
 const MAX_LOG_FIELD: usize = 16 * 1024;
 
 static LOG_WRITE: Mutex<()> = Mutex::new(());
 static DIAGNOSTICS_ACTIVE: AtomicBool = AtomicBool::new(false);
+static ANNOUNCED: AtomicBool = AtomicBool::new(false);
+static STARTED_AT_MS: OnceLock<u128> = OnceLock::new();
 
 /// Marks a document as already carrying the client.
 ///
@@ -131,7 +144,12 @@ pub fn routes(public_dir: PathBuf) -> Router {
     let (tx, _) = broadcast::channel::<Signal>(64);
     watch_public(public_dir, tx.clone());
     if !cfg!(test) {
-        init_diagnostics();
+        // A test binary builds this router too, and must not wipe the log of
+        // a server that is running. An announced server owns the file, so a
+        // process that finds one waits for its own `announce` to take over.
+        if !Path::new(SERVER_INFO_PATH).exists() {
+            init_diagnostics();
+        }
         DIAGNOSTICS_ACTIVE.store(true, Ordering::Release);
     }
 
@@ -145,6 +163,92 @@ pub fn routes(public_dir: PathBuf) -> Router {
         .route(SSE_PATH, get(move || stream(tx.subscribe())))
         .route(SCRIPT_PATH, get(script))
         .route(LOG_INGEST_PATH, post(browser_log))
+        .route(STATUS_PATH, get(status))
+        .route(SHUTDOWN_PATH, post(shutdown))
+}
+
+/// The credential tooling proves it can read `.rahti/dev-server.json` with.
+///
+/// A dev server listens on every interface by default, and these routes
+/// expose job errors and stop the process, so being on the network is not
+/// enough. Random per process, and never logged or written anywhere else.
+fn token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| {
+        let mut bytes = [0_u8; 32];
+        getrandom::fill(&mut bytes).expect("the operating system's random source");
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    })
+}
+
+fn authorized(headers: &HeaderMap) -> bool {
+    let Some(given) = headers.get(TOKEN_HEADER) else {
+        return false;
+    };
+    let (given, expected) = (given.as_bytes(), token().as_bytes());
+    given.len() == expected.len()
+        && given
+            .iter()
+            .zip(expected)
+            .fold(0, |difference, (a, b)| difference | (a ^ b))
+            == 0
+}
+
+/// What tooling needs to find this process, written once it can be reached.
+///
+/// Only with the dev routes installed, so a test binary that binds a listener
+/// for its own reasons does not claim to be the project's server.
+pub(crate) fn announce(listener: &tokio::net::TcpListener) {
+    if !DIAGNOSTICS_ACTIVE.load(Ordering::Acquire) {
+        return;
+    }
+    let Ok(address) = listener.local_addr() else {
+        return;
+    };
+    init_diagnostics();
+    let started = *STARTED_AT_MS.get_or_init(now_millis);
+    let info = json!({
+        "pid": std::process::id(),
+        "url": crate::local_url(listener),
+        "address": crate::listen::local_address(address),
+        "boot": boot_id(),
+        "token": token(),
+        "startedAtMs": started,
+    });
+    match std::fs::write(SERVER_INFO_PATH, format!("{info}\n")) {
+        Ok(()) => ANNOUNCED.store(true, Ordering::Release),
+        Err(error) => eprintln!("rahti dev: cannot write {SERVER_INFO_PATH}: {error}"),
+    }
+}
+
+/// Take the announcement back on a clean exit. A file left by a crash is told
+/// apart by asking the address it names.
+pub(crate) fn retire() {
+    if ANNOUNCED.swap(false, Ordering::AcqRel) {
+        let _ = std::fs::remove_file(SERVER_INFO_PATH);
+    }
+}
+
+async fn status(headers: HeaderMap) -> Response {
+    if !authorized(&headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    Json(json!({
+        "boot": boot_id(),
+        "pid": std::process::id(),
+        "startedAtMs": STARTED_AT_MS.get(),
+        "jobs": crate::jobs::status().await,
+    }))
+    .into_response()
+}
+
+/// The same graceful path as Ctrl+C: requests drain, then jobs.
+async fn shutdown(headers: HeaderMap) -> Response {
+    if !authorized(&headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    crate::shutdown::begin();
+    StatusCode::ACCEPTED.into_response()
 }
 
 /// Make the browser revalidate instead of trusting its own cache.
@@ -260,10 +364,13 @@ async fn browser_log(body: Bytes) -> Response {
             .map(|file| format!(" ({file})"))
             .unwrap_or_default();
 
-        eprintln!(
-            "rahti browser {level}: {}{component}{file}{url}{source}",
-            limit(message, 1000)
-        );
+        // A page load is evidence for tooling, not a problem to report.
+        if level != "load" {
+            eprintln!(
+                "rahti browser {level}: {}{component}{file}{url}{source}",
+                limit(message, 1000)
+            );
+        }
         append_diagnostic(entry);
     }
 

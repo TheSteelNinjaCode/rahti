@@ -52,6 +52,34 @@ manifest and `.env` are amended with the dependency, feature and connection
 string the new files need. Additions only, and never twice — running it again
 changes nothing.
 
+## `cargo rahti restart`, `status`, `stop`
+
+The apply step for coding agents. `restart` type-checks while the old server
+stays up, stops it gracefully, builds, and starts a detached server. `status`
+says whether that server is running the current source, which routes loaded with
+what browser errors, and how jobs are doing.
+
+```bash
+cargo rahti restart
+```
+
+```bash
+cargo rahti status
+```
+
+## `cargo rahti generate`
+
+```bash
+cargo rahti generate job send_receipt --params order_id:i64
+```
+
+```bash
+cargo rahti generate job-store
+```
+
+The first adds a typed `#[job]` to `src/jobs.rs`. The second keeps jobs in the
+application's database. See `docs/conventions/background-jobs.md`.
+
 ## `cargo rahti fmt`
 
 ```bash

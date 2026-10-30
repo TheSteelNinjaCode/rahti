@@ -911,6 +911,7 @@ pub fn manifest_json(
     components: &[String],
     component_rpcs: &[Rpc],
     sockets: &[Rpc],
+    jobs: &[serde_json::Value],
     database: Option<&crate::db::Scan>,
     config: &Config,
     contracts: &serde_json::Value,
@@ -1070,6 +1071,13 @@ pub fn manifest_json(
         ));
     }
     out.push_str("  ],\n");
+
+    // Every `#[job]`: what a coding agent reads to learn what work exists,
+    // what it takes, and the call that enqueues it.
+    out.push_str(&format!(
+        "  \"jobs\": {},\n",
+        serde_json::Value::from(jobs.to_vec())
+    ));
 
     if let Some(i18n) = &config.i18n {
         let json_list = |values: &[String]| {

@@ -27,13 +27,17 @@ fn channel() -> &'static broadcast::Sender<()> {
     CHANNEL.get_or_init(|| broadcast::channel(1).0)
 }
 
-/// Resolves once the process should stop, having told every subscriber.
+/// Resolves once the process should stop, having told every subscriber:
+/// on Ctrl+C, or when something in the process calls [`begin`], which is how
+/// `cargo rahti stop` reaches a server with no terminal to press it in.
 ///
 /// Hand this to `axum::serve(..).with_graceful_shutdown(..)`.
 pub async fn signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install Ctrl+C handler");
+    let requested = watch();
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => result.expect("failed to install Ctrl+C handler"),
+        _ = requested.fired() => {}
+    }
 
     begin();
 }

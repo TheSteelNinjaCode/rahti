@@ -38,7 +38,7 @@ pub struct ErrorSource(pub String);
 #[derive(Debug, Clone)]
 pub struct Error {
     status: StatusCode,
-    message: String,
+    pub(crate) message: String,
     public_message: Option<String>,
     details: Option<serde_json::Value>,
 }

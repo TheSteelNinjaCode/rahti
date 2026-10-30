@@ -6,7 +6,9 @@
 //!
 //! Each command reads its own arguments and reports unsupported options.
 
+mod dev_server;
 mod fmt;
+mod generate;
 mod native;
 mod new;
 mod prompt;
@@ -36,6 +38,11 @@ fn main() -> ExitCode {
         Some("upgrade") => upgrade::run(&args[1..]),
         Some("build") => static_build::run(&args[1..]),
         Some("fmt") => fmt::run(&args[1..]),
+        Some("generate") => generate::run(&args[1..]),
+        Some("restart") => dev_server::run_restart(&args[1..]),
+        Some("stop") => dev_server::run_stop(&args[1..]),
+        Some("status") => dev_server::run_status(&args[1..]),
+        Some("__launch") => dev_server::run_launch(),
         // Handed to `cargo-rahti-native`, which is a separate install. Returns
         // rather than falling through to the `Result` below, because what the
         // helper exited with is what this should exit with.
@@ -82,6 +89,11 @@ USAGE:
     cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
     cargo rahti native <command> [options]
     cargo rahti fmt [--check] [path...]
+    cargo rahti restart [--timeout <seconds>]
+    cargo rahti stop [--timeout <seconds>]
+    cargo rahti status [--json]
+    cargo rahti generate job <name> [--params name:Type,...]
+    cargo rahti generate job-store
 
 NEW:
     A flag adds a feature. Leaving it out is how you say no.
@@ -110,6 +122,25 @@ FMT:
     expressions, strings, comments and attribute order. Run cargo fmt for
     ordinary Rust; script/style bodies keep their authored formatting.
     --check           Report differences without writing; fail if any differ.
+
+RESTART, STOP, STATUS:
+    Apply an edit to the running development server. Restart checks the
+    source while the old server stays up, so a compile error costs nothing,
+    then stops it gracefully, builds, starts a detached server with its output
+    in .rahti/dev-server.log, and prints the URL once it answers.
+
+    Status says whether the server is running the current source, which routes
+    loaded under this boot with their browser errors, and how jobs are doing.
+    It exits non-zero unless the server is up and current.
+
+    --timeout <seconds>  How long to wait at each step. Defaults to 60.
+    --json               Print the status report as JSON.
+
+GENERATE:
+    job <name>         Add a #[job] to src/jobs.rs, declare the module, and
+                       start the workers. Types default to String.
+    job-store          Keep jobs in the application's database: an adapter, a
+                       table and a migration. Needs a project with a database.
 
 UPGRADE:
     -n, --dry-run      Print what would change, and change nothing.

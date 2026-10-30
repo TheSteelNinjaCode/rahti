@@ -370,6 +370,43 @@ also set `RAHTI_MCP_ALLOWED_HOSTS` to a comma-separated hostname allowlist;
 browser callers may set `RAHTI_MCP_ALLOWED_ORIGINS` to full origins. Neither
 credential belongs in `rahti.config.json` or `public/llms.txt`.
 
+
+## Applying an Edit
+
+`cargo dev` suits a person watching a browser. A coding agent works in batches
+and has to know when its edit is live, so it owns the step:
+
+```bash
+cargo rahti restart
+```
+
+Restart type-checks the source while the old server stays up, so a compile
+error costs nothing and is reported as "still running the old code". It then
+stops the server the way Ctrl+C does, builds, starts a detached server with its
+output in `.rahti/dev-server.log`, waits for that boot to answer, and prints the
+URL. `--timeout <seconds>` bounds each wait and defaults to 60.
+
+```bash
+cargo rahti status
+```
+
+Status says whether that server is running the current source. See
+`diagnostics.md`. `cargo rahti stop` stops it gracefully.
+
+A dev server writes `.rahti/dev-server.json` with its address, boot id, and a
+token generated for that process. The `/__rahti/dev/status` and
+`/__rahti/dev/shutdown` routes need that token, and exist only in development.
+These commands, and the MCP status tools, are the only readers. The file is
+gitignored with the rest of `.rahti/`, and no output carries the token.
+
+Do not run `cargo dev` and `cargo rahti restart` together. The watcher starts its
+own server on the next save, and a busy port falls forward to the next free one,
+so two servers would run with only the newest announced.
+
+Never force-kill a dev server or start a second one for fresh code. A forced
+kill skips job drain, and a second server answers on another port while the open
+tab still shows the first.
+
 ## Scaffold CLI
 
 ### Formatting authored markup

@@ -67,6 +67,12 @@ pub const HOST_ENV: &str = "HOST";
 /// contract the rest of startup (`db::connect`, the auth policy) holds to: a
 /// server that cannot start says why once, without a backtrace.
 pub async fn listen(host: &str, port: u16) -> TcpListener {
+    let listener = bind(host, port).await;
+    crate::dev::announce(&listener);
+    listener
+}
+
+async fn bind(host: &str, port: u16) -> TcpListener {
     // Both variables may come from a `.env`, so the file has to be in the
     // environment before either is read. Idempotent, and startup calls it
     // from `db::connect` and the auth policy too.
@@ -169,6 +175,16 @@ pub fn local_url(listener: &TcpListener) -> String {
             .local_addr()
             .expect("a bound listener has an address"),
     )
+}
+
+/// Where this machine reaches a listener, for tooling: a wildcard bind answers
+/// on the loopback of its own family.
+pub(crate) fn local_address(addr: SocketAddr) -> String {
+    match addr.ip() {
+        ip if !ip.is_unspecified() => addr.to_string(),
+        std::net::IpAddr::V4(_) => format!("127.0.0.1:{}", addr.port()),
+        std::net::IpAddr::V6(_) => format!("[::1]:{}", addr.port()),
+    }
 }
 
 /// The printing half, separated from the socket so it can be tested over the

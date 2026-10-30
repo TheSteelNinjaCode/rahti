@@ -321,7 +321,7 @@ async fn run_entry(
             _ = sleep(wait) => {}
         }
 
-        dispatch(&queue, &entry, &state);
+        dispatch(&queue, &entry, &state).await;
         let now = SystemTime::now();
         let Some(next) = entry.cadence.next(due, now) else {
             return;
@@ -330,18 +330,21 @@ async fn run_entry(
     }
 }
 
-fn dispatch(queue: &JobQueue, entry: &Entry, state: &State) {
+async fn dispatch(queue: &JobQueue, entry: &Entry, state: &State) {
     state.due.fetch_add(1, Ordering::Relaxed);
     let result = if entry.allow_overlap {
         queue
             .try_enqueue(&entry.job, entry.payload.clone())
+            .await
             .map(Some)
     } else {
-        queue.try_enqueue_unique(
-            &format!("schedule:{}", entry.schedule),
-            &entry.job,
-            entry.payload.clone(),
-        )
+        queue
+            .try_enqueue_unique(
+                &format!("schedule:{}", entry.schedule),
+                &entry.job,
+                entry.payload.clone(),
+            )
+            .await
     };
 
     match result {

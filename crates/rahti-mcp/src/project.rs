@@ -83,6 +83,7 @@ impl Project {
                 "layouts": array(&manifest, "layouts").len(),
                 "components": array(&manifest, "components").len(),
                 "sockets": array(&manifest, "sockets").len(),
+                "jobs": array(&manifest, "jobs").len(),
                 "pageRpcs": rpc_contracts(&manifest)?.iter().filter(|rpc| rpc["scope"] == "page").count(),
                 "componentRpcs": rpc_contracts(&manifest)?.iter().filter(|rpc| rpc["scope"] == "component").count(),
             },
@@ -152,6 +153,7 @@ impl Project {
             "loading",
             "components",
             "sockets",
+            "jobs",
         ] {
             for item in array(&manifest, section) {
                 if let Some(file) = item.get("file").and_then(Value::as_str) {
@@ -183,6 +185,19 @@ impl Project {
             "errors": errors,
             "warnings": warnings,
         }))
+    }
+
+    pub fn jobs(&self) -> Result<Value, String> {
+        Ok(Value::Array(array(&self.manifest()?, "jobs").to_vec()))
+    }
+
+    pub fn server_status(&self) -> Value {
+        rahti_build::dev_server::status(&self.root)
+    }
+
+    pub fn browser_status(&self) -> Value {
+        let boot = rahti_build::dev_server::read_info(&self.root).map(|info| info.boot);
+        rahti_build::dev_server::browser_report(&self.root, boot.as_deref())
     }
 
     pub fn recent_diagnostics(&self, requested_limit: Option<usize>) -> Result<Value, String> {
@@ -388,7 +403,12 @@ pub(crate) fn test_project() -> TestProject {
   "errors": [],
   "loading": [],
   "components": [],
-  "sockets": []
+  "sockets": [],
+  "jobs": [{
+    "name": "send_receipt",
+    "file": "src/app/account/page.rs",
+    "enqueue": "crate::jobs::send_receipt::enqueue(order_id).await"
+  }]
 }"#,
     )
     .expect("write project manifest");
@@ -427,6 +447,23 @@ mod tests {
             project.summary().unwrap()["authentication"]["browserSessionUsed"],
             false
         );
+    }
+
+    #[test]
+    fn jobs_are_listed_with_the_call_that_enqueues_them() {
+        let fixture = test_project();
+        let jobs = fixture.project.jobs().expect("job inventory");
+        assert_eq!(
+            jobs[0]["enqueue"],
+            "crate::jobs::send_receipt::enqueue(order_id).await"
+        );
+    }
+
+    #[test]
+    fn a_stopped_server_reports_rather_than_fails() {
+        let fixture = test_project();
+        assert_eq!(fixture.project.server_status()["running"], false);
+        assert_eq!(fixture.project.browser_status()["errors"], 0);
     }
 
     #[test]

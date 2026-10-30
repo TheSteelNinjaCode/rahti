@@ -84,9 +84,10 @@ The server runtime exports:
 - `observability`: production request ids, JSONL request/application events,
   fixed-cardinality process metrics, and framework-owned liveness/readiness
   probes with concurrent dependency checks;
-- `jobs`: typed named handlers on bounded process-local queues, explicit
-  backpressure, retry/backoff and attempt timeouts, request-origin
-  correlation, fixed-cardinality counters, and grace-bounded shutdown drain;
+- `jobs`: typed `#[job]` handlers registered at link time, one installed queue
+  in memory or over a `JobStore`, explicit backpressure, retry/backoff and
+  attempt timeouts, leased claiming, a store conformance test, request-origin
+  correlation, fixed-cardinality counters, and grace-bounded shutdown;
 - `schedule`: process-local interval, application-timezone/UTC daily, and
   one-shot timers that submit registered jobs, prevent overlap by default,
   coalesce missed ticks, and stop before job queues drain;
@@ -118,9 +119,11 @@ The server runtime exports:
   to the next free one in dev mode while release treats it as an error;
 - `local_url`: where to open a browser for a listener, printing a wildcard
   bind address as `localhost` because `0.0.0.0` is not a destination;
-- development reload routes and graceful-shutdown coordination — `signal` for
-  Ctrl+C, and `begin_shutdown` for a host that says when instead of waiting to
-  be told, which is every native package;
+- development reload routes, the token-protected status and shutdown routes
+  tooling reads from `.rahti/dev-server.json`, and graceful-shutdown
+  coordination — `signal` for Ctrl+C or a request from inside the process, and
+  `begin_shutdown` for a host that says when instead of waiting to be told,
+  which is every native package;
 - behind the default `dev-watch` cargo feature: the `public/` filesystem
   watcher. A Windows native debug run serves the checkout and uses the same
   fast asset reload as the web host. Android cannot read the host directory,
@@ -175,6 +178,10 @@ The server runtime exports:
   registry entry, and the hidden `__RAHTI_RPC_<name>` signature constant
   (`rahti::rpc_check::Signature`) that `pp.rpc` calls are checked against. `#[rpc(auth)]` adds a session check to the shim, ahead of
   reading the payload; `auth` is the only argument the attribute takes.
+- `#[job]` preserves the Rust function and adds a shim that reads its stored
+  arguments, a link-time `JobEntry`, and a variant-less enum of the same name
+  whose `enqueue`, `enqueue_unique`, `request`, `payload` and `NAME` make an
+  enqueue a checked call. It refuses a job outside `src/jobs.rs` or `src/jobs/`.
 - `#[socket]` preserves the Rust function and generates the shim that reads
   the connection's first frame into the parameters, plus its registry entry.
   `#[socket(auth)]` marks the entry so the handshake is refused with a 401
@@ -201,6 +208,8 @@ On every relevant Cargo build it:
 - parses RPC declarations into the versioned `rpcContracts` agent inventory: source
   locations, scoped URLs, parameters, response types, auth, transports, and
   explicit unresolved-schema/checking limits;
+- reads `src/jobs.rs` and `src/jobs/` into the manifest's `jobs` inventory and
+  refuses two jobs sharing a stored name;
 - generates routes, modules, and `.rahti/manifest.json`;
 - when `db` is configured, generates `src/models/mod.rs` and
   `src/migrations/mod.rs` — including the `Migrator` — without depending on
@@ -210,6 +219,10 @@ On every relevant Cargo build it:
   their sources into the generated router;
 - emits Cargo watch directives for every relevant path.
 
+It also exports `dev_server`, the one reading of a running development server:
+liveness, source files changed since boot, the per-boot browser report, and job
+health. `cargo rahti status` and the MCP tools both go through it.
+
 ### `cargo-rahti`
 
 - `cargo rahti fmt [--check] [path...]` formats authored `html!` nesting and
@@ -217,6 +230,15 @@ On every relevant Cargo build it:
   attribute order. It excludes generated sources and leaves blocks with
   source-sensitive bare text untouched. Ordinary Rust uses `cargo fmt`.
 
+- `cargo rahti restart`, `stop` and `status` are the agent's apply step:
+  type-check beside the running server, stop it gracefully, build, start a
+  detached server, and report whether it runs the current source. On Windows
+  the server is created through WMI so it outlives an agent's job object.
+- `cargo rahti generate job` adds a `#[job]` to `src/jobs.rs`, declares the
+  module, and installs the queue. `cargo rahti generate job-store` adds the
+  application-owned SeaORM adapter, entity, and migration from
+  `crates/cargo-rahti/assets/templates/`, which a test holds byte-identical to
+  the copies this workspace proves.
 - `cargo rahti new <name>` scaffolds a project and records hashes of owned
   scaffold files. `--tailwind`, `--db [backend]`, `--ws`, and `--mcp` answer its
   questions from the command line; each flag only ever says yes.
@@ -264,7 +286,9 @@ On every relevant Cargo build it:
 
 ### `rahti-mcp`
 
-The read-only MCP server uses the official Rust MCP SDK. Local clients launch
+The read-only MCP server uses the official Rust MCP SDK. Its tools cover routes,
+components, RPC contracts, sockets, jobs, the database, diagnostics, and the
+running server through `server_status` and `browser_status`. Local clients launch
 its stdio executable through `.mcp.json`; an opted-in application compiles the
 same tools behind bearer-protected Streamable HTTP at `/mcp/`. It reads
 `rahti.config.json`, generated `.rahti/manifest.json`, convention documents,
@@ -425,9 +449,11 @@ The current implementation covers:
   opt into anonymous complete-document caching with TTL and tags, and
   successful authoritative writes can explicitly revalidate a concrete path
   or tag; no distributed adapter or implicit caching is implied;
-- typed process-local background jobs on bounded named queues, with explicit
-  backpressure, retries and backoff, attempt timeouts, request-origin
-  correlation, fixed-cardinality metrics, and grace-bounded shutdown drain;
+- typed background jobs through `#[job]`, with compile-checked enqueues, a
+  bounded memory queue or an application-owned durable store, transactional
+  enqueue, leased claiming with crash recovery, retries and backoff, attempt
+  timeouts, unique keys, request-origin correlation, fixed-cardinality metrics,
+  retained failures, and grace-bounded shutdown;
 - process-local task scheduling for intervals, one-shot instants, and daily
   application-timezone or UTC wall times, submitting registered jobs with
   overlap prevention by default, missed-tick coalescing, bounded-queue
@@ -437,7 +463,9 @@ The current implementation covers:
   conversion, DST-correct half-open local-day query bounds, and deliberate
   separation from absolute expiration and duration clocks;
 - generated manifest metadata for routes, layouts, errors, loading regions,
-  components, RPCs, sockets, and the database;
+  components, RPCs, sockets, jobs, and the database;
+- an agent apply loop: `cargo rahti restart`, `status` and `stop`, with stale
+  source detection, per-boot browser and job reports, and matching MCP tools;
 - optional read-only MCP project inspection over local stdio and secured
   Streamable HTTP, selected with `cargo rahti new --mcp`, with public
   `llms.txt` and well-known discovery, and absent from an application that did

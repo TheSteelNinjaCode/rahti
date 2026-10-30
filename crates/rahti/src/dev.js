@@ -129,6 +129,10 @@
 
   addEventListener("pagehide", flush);
 
+  // Proof a page really loaded under this server. A route nobody opened has
+  // no errors because nothing ran, and only this tells the two cases apart.
+  enqueue({ level: "load", message: "page loaded" });
+
   const source = new EventSource("/__rahti/dev");
   let boot = null;
 

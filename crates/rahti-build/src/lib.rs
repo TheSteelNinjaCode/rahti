@@ -14,7 +14,9 @@ mod components;
 mod contracts;
 mod css;
 mod db;
+pub mod dev_server;
 mod i18n;
+mod jobs;
 mod route;
 mod scanner;
 pub mod sha256;
@@ -195,6 +197,9 @@ pub fn run() {
     // such line: changing one rebuilds the build script itself, which cargo
     // already treats as a reason to rerun it.
     println!("cargo:rerun-if-changed={CONFIG_PATH}");
+    // Declaring `mod jobs;` is the edit that brings a job module into the
+    // build, and a file that does not exist yet cannot be watched.
+    println!("cargo:rerun-if-changed=src/lib.rs");
 
     let mut config = load_config();
     if let Some(localization) = config.i18n.as_mut() {
@@ -227,6 +232,9 @@ pub fn run() {
     let sockets = socket_list(&scan.entries, &components.sockets);
     components::check_socket_names(&sockets);
 
+    let jobs = jobs::scan(Path::new("."));
+    jobs::check_names(&jobs.jobs);
+
     // Every directory, not just the app root — see `scanner::Scan::watched`.
     let watched_db = database.as_ref().map(|d| &d.watched);
     for path in scan
@@ -234,6 +242,7 @@ pub fn run() {
         .iter()
         .chain(&components.watched)
         .chain(watched_db.into_iter().flatten())
+        .chain(&jobs.watched)
     {
         println!("cargo:rerun-if-changed={path}");
     }
@@ -265,6 +274,7 @@ pub fn run() {
         &components.files,
         &components.rpcs,
         &sockets,
+        &jobs.jobs,
         database.as_ref(),
         &config,
         &contracts::inventory(&scan.entries, &components.rpcs),

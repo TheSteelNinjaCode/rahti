@@ -11,37 +11,41 @@ occurrence will run.
 
 ## Define the Schedule
 
-Start the background-job queue first, then build one scheduler for it during
-`initialize_application`:
+Install the background-job queue first, then build one scheduler for it during
+`initialize_application`. A `#[job]` supplies its stored name and its payload,
+so both stay checked by the compiler:
 
 ```rust
 use std::{sync::OnceLock, time::{Duration, SystemTime}};
 use rahti::schedule::{Scheduler, SchedulerHandle};
 
+use crate::jobs::{finish_import, refresh_index, send_summary};
+
 static SCHEDULER: OnceLock<SchedulerHandle> = OnceLock::new();
 
-pub fn start_schedule(queue: rahti::jobs::JobQueue) {
+pub fn start_schedule() {
+    let queue = rahti::jobs::queue().expect("the job queue is installed");
     let scheduler = Scheduler::new(queue)
         .every(
             "refresh-search-index",
             Duration::from_secs(5 * 60),
-            "refresh-index",
-            (),
+            refresh_index::NAME,
+            refresh_index::payload().expect("a payload"),
         )
         .expect("valid interval schedule")
         .daily(
             "send-daily-summary",
             8,
             30,
-            "send-summary",
-            SummaryInput { locale: "en".into() },
+            send_summary::NAME,
+            send_summary::payload("en".to_string()).expect("a payload"),
         )
         .expect("valid daily schedule")
         .once(
             "finish-import",
             SystemTime::now() + Duration::from_secs(60),
-            "finish-import",
-            ImportInput { import_id: 42 },
+            finish_import::NAME,
+            finish_import::payload(42).expect("a payload"),
         )
         .expect("valid one-shot schedule")
         .start();

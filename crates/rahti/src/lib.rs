@@ -84,7 +84,7 @@ pub use metadata::{Metadata, Page, Robots, apply_metadata, merge_metadata};
 /// point into generated tokens.
 #[cfg(feature = "ws")]
 pub use rahti_macros::socket;
-pub use rahti_macros::{component, html, rpc};
+pub use rahti_macros::{component, html, job, rpc};
 pub use rate_limit::{middleware as rate_limit, state as rate_limit_state};
 pub use registry::{RpcEntry, RpcHandler, check_rpc_names, dispatch as dispatch_registered};
 pub use rpc::{

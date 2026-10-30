@@ -15,6 +15,7 @@
 mod attribute;
 mod authoring;
 mod component;
+mod job;
 mod parse;
 mod rpc;
 mod rpc_calls;
@@ -263,6 +264,48 @@ pub fn socket(
     let original: TokenStream = item.clone().into();
 
     match socket::expand(attr.into(), item.into()) {
+        Ok(expanded) => expanded.into(),
+        Err(err) => {
+            // The function still compiles, so the error reported is the one
+            // that matters rather than every call site as well.
+            let mut out = attribute::to_compile_error_item(&err);
+            out.extend(original);
+            out.into()
+        }
+    }
+}
+
+/// Run this function after the response, by name, with retries.
+///
+/// ```ignore
+/// use rahti::{job, jobs::JobError};
+///
+/// #[job(attempts = 5, timeout_secs = 20)]
+/// pub async fn send_receipt(order_id: i64) -> Result<(), JobError> {
+///     Ok(())
+/// }
+/// ```
+///
+/// The function stays an ordinary function. Its name also gains
+/// `send_receipt::enqueue(order.id).await?`, `enqueue_unique`, `request` for a
+/// transactional insert, `payload` for a schedule, and `NAME` — so a misspelled
+/// job and a mistyped argument are compile errors on the caller.
+///
+/// A job is `async`, lives in `src/jobs.rs` or under `src/jobs/`, takes owned
+/// parameters that serialize, and returns nothing, `Result<(), JobError>`, or
+/// `rahti::Result<()>`. `attempts`, `timeout_secs`, `backoff_ms` and
+/// `max_backoff_ms` override the queue's policy; `name = "…"` pins the stored
+/// name so the function can be renamed. `rahti::jobs::Jobs::install` starts
+/// the workers.
+#[proc_macro_attribute]
+pub fn job(
+    attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let file = proc_macro::Span::call_site().file();
+    let original: TokenStream = item.clone().into();
+
+    match job::expand(attr.into(), item.into(), &file) {
         Ok(expanded) => expanded.into(),
         Err(err) => {
             // The function still compiles, so the error reported is the one

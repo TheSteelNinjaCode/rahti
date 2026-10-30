@@ -50,3 +50,16 @@ async fn a_watcher_that_waits_a_while_still_hears_it() {
 fn stopping_with_no_watchers_is_fine() {
     let _ = channel().send(());
 }
+
+/// `cargo rahti stop` has no terminal to press Ctrl+C in: asking from inside
+/// the process has to release `axum::serve` the same way.
+#[tokio::test]
+async fn a_request_from_inside_the_process_ends_the_signal() {
+    let waiting = tokio::spawn(signal());
+    tokio::task::yield_now().await;
+    begin();
+    tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+        .await
+        .expect("signal resolves on begin")
+        .expect("signal did not panic");
+}

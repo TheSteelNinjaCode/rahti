@@ -84,6 +84,27 @@ impl RahtiMcp {
         Self::tool_result(self.project.sockets())
     }
 
+    #[tool(
+        description = "List background jobs: parameters, retry policy, source location, and the exact call that enqueues each one"
+    )]
+    fn list_jobs(&self) -> Result<Json<Value>, ErrorData> {
+        Self::tool_result(self.project.jobs())
+    }
+
+    #[tool(
+        description = "Is the dev server running the current source? Answers running, url, stale, changedFiles, the browser report, job health and recent job failures, and what to do next. Run `cargo rahti restart` when stale"
+    )]
+    fn server_status(&self) -> Result<Json<Value>, ErrorData> {
+        Ok(Json(self.project.server_status()))
+    }
+
+    #[tool(
+        description = "What browsers reported to the current server boot: routes that really loaded, with error and warning counts. A route not listed was never opened, which proves nothing"
+    )]
+    fn browser_status(&self) -> Result<Json<Value>, ErrorData> {
+        Ok(Json(self.project.browser_status()))
+    }
+
     #[tool(description = "List configured SeaORM backend, model files, and migration files")]
     fn list_database_artifacts(&self) -> Result<Json<Value>, ErrorData> {
         Self::tool_result(self.project.database_artifacts())
@@ -202,6 +223,9 @@ mod tests {
         let tools = client.list_all_tools().await.unwrap();
         assert!(tools.iter().any(|tool| tool.name == "list_rpcs"));
         assert!(tools.iter().any(|tool| tool.name == "recent_diagnostics"));
+        for tool in ["list_jobs", "server_status", "browser_status"] {
+            assert!(tools.iter().any(|t| t.name == tool), "{tool}");
+        }
 
         let resources = client.list_all_resources().await.unwrap();
         assert!(

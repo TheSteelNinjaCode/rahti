@@ -16,6 +16,25 @@ repository and newly scaffolded applications.
 
 Browser diagnostics are also mirrored in concise form to the server terminal.
 
+## For Coding Agents
+
+An agent cannot see a tab or a terminal, so a dev server describes itself:
+
+```bash
+cargo rahti status
+```
+
+It reports whether the server is running, whether source files changed since it
+booted, which routes really loaded under this boot with their browser errors
+and warnings, and how background jobs are doing, then says what to do next. It
+exits non-zero unless the server is up and current, and `--json` prints the same
+report as JSON. MCP `server_status` and `browser_status` return it too.
+
+Only entries from the current boot count, so an old error cannot fail a new
+server and an old page load cannot prove one. The injected client records each
+full page load for this reason: a route the report does not list was never
+opened, and its lack of errors proves nothing.
+
 ## What Is Captured
 
 The injected development client starts before deferred module scripts,

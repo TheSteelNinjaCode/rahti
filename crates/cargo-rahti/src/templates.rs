@@ -9,6 +9,17 @@
 use rahti_build::Backend;
 
 /// The client runtime, embedded so `new` never needs the network.
+pub const JOB_STORE_RS: &str = include_str!("../assets/templates/job_store.rs");
+pub const MODEL_JOB_RS: &str = include_str!("../assets/templates/job.rs");
+pub const MIGRATION_JOB: &str = include_str!("../assets/templates/create_job.rs");
+
+/// The line that starts background workers, as `lib_rs` writes it and as
+/// `cargo rahti generate job` adds it to a project without it.
+pub const INSTALL_JOBS: &str = r#"    // Starts workers for every `#[job]`, and nothing when there are none. See
+    // docs/conventions/background-jobs.md.
+    rahti::jobs::Jobs::new().install();
+"#;
+
 pub const PP_RUNTIME: &[u8] = include_bytes!("../assets/js/pp-reactive-v2.min.js");
 
 /// The runtime's type declarations for the application's own modules in
@@ -821,6 +832,11 @@ pub async fn initialize_application() -> Result<ApplicationRuntime, StartupError
     // native package calls this function too, and a packaged application whose
     // private pages were public would be a quiet thing to ship.
 
+"#,
+    );
+    out.push_str(INSTALL_JOBS);
+    out.push_str(
+        r#"
     Ok(ApplicationRuntime {
         router: routes::router(),
         host: routes::HOST,
@@ -1688,6 +1704,33 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          This file is the scaffold's until you edit it: `cargo rahti upgrade`\n\
          refreshes an unedited copy as the framework evolves, and leaves an\n\
          edited one alone.\n\n",
+    );
+
+    out.push_str(
+        "## Applying an edit\n\n\
+         Nothing you edit is real until the running server is replaced, and you\n\
+         own that step. After every batch of edits:\n\n\
+         1. `cargo rahti restart`. A compile error leaves the old server running\n\
+            and says so. Do not start a second server, and never force-kill one.\n\
+         2. Load every affected route in a browser with a full page load, and\n\
+            exercise what changed.\n\
+         3. `cargo rahti status`, or MCP `server_status`. It says whether the\n\
+            server is running the current source, which routes loaded under this\n\
+            boot with their browser errors, and how background jobs are doing. A\n\
+            route it does not list was never opened, so it proves nothing.\n\n\
+         End with what you applied: \"Restarted, loaded `/todo`, saved a row;\n\
+         browser clean.\" If you have no browser, say so and give the exact URL.\n\n",
+    );
+
+    out.push_str(
+        "## Background jobs for agents\n\n\
+         `cargo rahti generate job <name> --params id:i64` adds a `#[job]` to\n\
+         `src/jobs.rs`. Call it as `crate::jobs::<name>::enqueue(id).await?`, after\n\
+         the write it follows commits; a wrong name or argument is a compile\n\
+         error. `jobs` in `.rahti/manifest.json`, or MCP `list_jobs`, gives each\n\
+         job's parameters, policy and exact call. Retryable jobs run more than\n\
+         once, so make them idempotent. Payloads are ids, never secrets. See\n\
+         `docs/conventions/background-jobs.md`.\n\n",
     );
 
     out.push_str(
