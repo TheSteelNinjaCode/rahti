@@ -331,6 +331,58 @@ fn deferred(markup: &str) -> String {
     out
 }
 
+fn guarded(markup: &str) -> String {
+    let mut out = String::from(markup);
+    guard_binding_dollar(&mut out);
+    out
+}
+
+#[test]
+fn a_dollar_before_a_binding_becomes_a_binding_of_its_own() {
+    assert_eq!(guarded("<p>$"), "<p>{\"$\"}");
+    assert_eq!(guarded("US$"), "US{\"$\"}");
+    assert_eq!(guarded("$"), "{\"$\"}");
+}
+
+/// A run moves whole: a sign left behind would touch the brace written for
+/// the one after it.
+#[test]
+fn every_trailing_dollar_moves() {
+    assert_eq!(guarded("$$"), "{\"$\"}{\"$\"}");
+    assert_eq!(guarded("a$&#36;$"), "a{\"$\"}{\"$\"}{\"$\"}");
+}
+
+/// The browser's parse turns each of these into the sign itself.
+#[test]
+fn a_dollar_reference_is_a_dollar() {
+    for reference in [
+        "&#36;", "&#036;", "&#x24;", "&#X24;", "&#x0024;", "&dollar;",
+    ] {
+        assert_eq!(guarded(reference), "{\"$\"}", "{reference}");
+    }
+}
+
+#[test]
+fn nothing_else_beside_a_binding_changes() {
+    for markup in [
+        "",
+        "<p>",
+        "$ ",
+        "$<b>",
+        "&amp;",
+        "&#37;",
+        "&#x25;",
+        "&#;",
+        "&#+36;",
+        "&Dollar;",
+        // Doubled, the reference is the text the author asked to show.
+        "&amp;#36;",
+        "a;",
+    ] {
+        assert_eq!(guarded(markup), markup);
+    }
+}
+
 /// Inside the root layout's deferred template a single-layer reference is
 /// raised one layer, so the browser's parse leaves `&#123;` for the runtime
 /// to render as a brace.

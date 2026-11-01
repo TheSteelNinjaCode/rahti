@@ -58,6 +58,7 @@ fn markup(src: &str, file: &str) -> String {
                 Op::Attr { name, .. } => format!("{name}=\"@{{}}\""),
                 Op::OpenTag(attrs) => attrs.iter().map(show_tag_attr).collect(),
                 Op::Slot | Op::DeferredSlot => "<slot/>".to_string(),
+                Op::DollarGuard => String::new(),
                 Op::Component(call) => match &call.children {
                     None => format!("<{}/>", call.name),
                     Some(child) => {

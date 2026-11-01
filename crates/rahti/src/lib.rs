@@ -63,7 +63,9 @@ pub use dev::{DEV_ENV, revalidate, routes as dev_routes};
 /// whether or not it has a database.
 pub use env::load_env;
 pub use error::{Error, ErrorInfo, ErrorSource, Result, apply_error, panic_response};
-pub use html::{Html, Json, PageBody, Render, RenderJs, render_deferred_children};
+pub use html::{
+    Html, Json, PageBody, Render, RenderJs, guard_binding_dollar, render_deferred_children,
+};
 pub use layout::{
     ROOT_LAYOUT_HEADER, apply_layout, apply_layout_metadata, apply_root_layout,
     apply_root_layout_metadata, root_document, root_document_metadata,

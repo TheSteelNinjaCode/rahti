@@ -290,6 +290,11 @@ pub enum Op {
     /// brace reference one encoding layer so a value's `&#123;` survives the
     /// browser's parse and the runtime never reads it as an expression.
     DeferredSlot,
+    /// Written before a text binding whose left neighbour may end in a dollar
+    /// sign. The runtime reads `${` as a literal template placeholder, so
+    /// `rahti::guard_binding_dollar` turns that sign into a binding of its own
+    /// and the two authored tokens stay two things on the page.
+    DollarGuard,
     /// `<Card …>` — a call to the `#[component]` function of that name,
     /// rendered where the tag stands.
     Component(ComponentCall),
@@ -735,6 +740,10 @@ impl Parser {
                     self.mark_root(Root::Loose(span, "`{expr}`"));
                     self.client_bindings += 1;
                     self.record_binding(None, &source, &g);
+                    if may_end_in_dollar(ops) {
+                        self.record_dollar_binding(span);
+                        ops.push(Op::DollarGuard);
+                    }
                     ops.push(Op::Static(escape_text(&source)));
                 }
                 // A run that is exactly one string literal keeps its contents
@@ -1137,6 +1146,15 @@ impl Parser {
             span: group.span(),
             tokens: Some(group.stream()),
         });
+    }
+
+    /// Register the `"$"` binding [`Op::DollarGuard`] may write, so it is
+    /// client code this page can run like any other.
+    fn record_dollar_binding(&mut self, span: Span) {
+        let dollar = TokenTree::Literal(proc_macro2::Literal::string("$"));
+        let mut group = proc_macro2::Group::new(Delimiter::Brace, TokenStream::from(dollar));
+        group.set_span(span);
+        self.record_binding(None, "\"$\"", &group);
     }
 
     /// Are we sitting on the `</script>` that ends the body?
@@ -2052,6 +2070,19 @@ fn fnv1a64(input: &str) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
+}
+
+/// Could the markup so far end in a dollar sign once it is rendered?
+///
+/// A value, a slot or a component is known only then. Static markup is known
+/// now: a `;` is here for a reference such as `&#36;`, which the runtime reads
+/// back as `$`. Everything else, an element's `>` above all, closes the text.
+fn may_end_in_dollar(ops: &[Op]) -> bool {
+    match ops.last() {
+        Some(Op::Static(markup)) => markup.ends_with(['$', ';']),
+        Some(Op::Text(_) | Op::Slot | Op::DeferredSlot | Op::Component(_)) => true,
+        _ => false,
+    }
 }
 
 /// Quoted text or a quoted attribute value whose `{…}` holds a JavaScript

@@ -182,6 +182,36 @@ async fn a_value_cannot_open_a_client_expression() {
     assert!(!body.contains("{steal()}"), "{body}");
 }
 
+/// PulsePoint reads `${` as a literal template placeholder, so a dollar sign
+/// never reaches the page directly before a binding, however it was written.
+#[test]
+fn a_dollar_sign_never_touches_the_binding_after_it() {
+    let value = "$";
+    assert_eq!(
+        html! { <p>"$"{price}</p> }.as_str(),
+        "<p>{\"$\"}{price}</p>"
+    );
+    assert_eq!(
+        html! { <p>@{value}{price}</p> }.as_str(),
+        "<p>{\"$\"}{price}</p>"
+    );
+    assert_eq!(
+        html! { <p>"&#36;"{price}</p> }.as_str(),
+        "<p>{\"$\"}{price}</p>"
+    );
+    assert_eq!(
+        html! { <p>"US$$"{price}</p> }.as_str(),
+        "<p>US{\"$\"}{\"$\"}{price}</p>"
+    );
+    // A dollar with anything after it is ordinary text.
+    assert_eq!(html! { <p>"$ "{price}</p> }.as_str(), "<p>$ {price}</p>");
+    // A literal `${…}` is still written as text, braces and all.
+    assert_eq!(
+        html! { <p>"$&#123;price&#125;"</p> }.as_str(),
+        "<p>$&amp;#123;price&amp;#125;</p>"
+    );
+}
+
 /// A component tag's `{…}` props reach the element the component renders,
 /// as live source.
 #[tokio::test]

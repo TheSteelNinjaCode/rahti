@@ -504,6 +504,50 @@ pub fn render_deferred_children(children: &Html, out: &mut String) {
     out.push_str(rest);
 }
 
+/// Separate a dollar sign from the client binding `html!` is about to write.
+///
+/// PulsePoint keeps `${…}` as literal text, which is right for text that says
+/// so, but a `"$"` and a `{price}` are two things the author wrote, and side by
+/// side in a string they read as that one placeholder. So the sign goes out as
+/// a binding of its own, `{"$"}{price}`, which every render path already
+/// understands and which `html!` registers like any other. It is a constant,
+/// so a value that ends in `$` decides nothing but whether it is written.
+///
+/// Every trailing sign moves, or the first one left would meet the new brace.
+#[doc(hidden)]
+pub fn guard_binding_dollar(out: &mut String) {
+    let mut signs = 0;
+    while let Some(len) = trailing_dollar_len(out) {
+        out.truncate(out.len() - len);
+        signs += 1;
+    }
+    for _ in 0..signs {
+        out.push_str("{\"$\"}");
+    }
+}
+
+/// The length of the dollar sign `markup` ends in, whether written as itself
+/// or as a character reference, which the browser's parse turns into the sign.
+fn trailing_dollar_len(markup: &str) -> Option<usize> {
+    if markup.ends_with('$') {
+        return Some(1);
+    }
+    let body = markup.strip_suffix(';')?;
+    let name = &body[body.rfind('&')? + 1..];
+    let is_dollar = match name.strip_prefix('#') {
+        Some(number) => {
+            let (digits, radix) = match number.strip_prefix(['x', 'X']) {
+                Some(hex) => (hex, 16),
+                None => (number, 10),
+            };
+            digits.bytes().all(|b| b.is_ascii_hexdigit())
+                && u32::from_str_radix(digits, radix) == Ok(u32::from('$'))
+        }
+        None => name == "dollar",
+    };
+    is_dollar.then_some(name.len() + 2)
+}
+
 /// The length of the `<script>…</script>` or `<style>…</style>` element that
 /// `tail` opens, through its end tag — or the rest of the input when the end
 /// tag is missing. `None` when `tail` opens anything else.

@@ -55,7 +55,9 @@ use quote::quote;
 ///   (`hidden={!open}`); a handler is one too (`onclick={save()}`). The macro
 ///   does not read it: its source is copied through and escaped as text, so
 ///   the runtime finds the expression the author wrote when it reads the
-///   element back off the page.
+///   element back off the page. A dollar sign directly before a text binding
+///   — `"$"{price}`, or a value ending in one — is written as a binding of its
+///   own, `{"$"}{price}`, because the runtime keeps `${` as literal text.
 /// - `@{expr}` — Rust, rendered here. Any value implementing
 ///   `::rahti::Render`. Escaped in both text and attribute position; an
 ///   `Html` value passes through raw.
@@ -556,6 +558,9 @@ fn emit(ops: Vec<Op>) -> TokenStream {
             }),
             Op::DeferredSlot => body.extend(quote! {
                 ::rahti::render_deferred_children(&children, &mut __rahti);
+            }),
+            Op::DollarGuard => body.extend(quote! {
+                ::rahti::guard_binding_dollar(&mut __rahti);
             }),
             // `<Card …>` — a call through the named-props companion that
             // `#[component]` generates beside the function: a struct literal

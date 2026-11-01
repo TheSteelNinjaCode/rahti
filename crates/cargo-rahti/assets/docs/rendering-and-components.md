@@ -308,6 +308,13 @@ around anything that is not an expression are text
 character reference such as `"&#123;user&#125;"`; the macro protects it so the
 browser runtime does not treat it as a binding.
 
+A dollar sign before a binding is a dollar sign and a binding: `"$"{price}`
+renders `$10.00`, as does a value ending in `$`, as in `@{symbol}{price}`, and
+a reference such as `"&#36;"{price}`. PulsePoint keeps a `${…}` it reads in a
+loop row as literal text, so `html!` writes the sign as a binding of its own,
+`{"$"}{price}`, which compiles into the client registry like any other. To show
+the placeholder itself, write `"$&#123;price&#125;"`.
+
 The root layout's `<slot />` sits inside a deferred `<template
 pp-component>`, and the browser decodes one layer of character references as
 it parses that template. `html!` therefore writes a root layout's children one

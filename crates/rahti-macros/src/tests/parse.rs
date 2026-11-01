@@ -69,6 +69,7 @@ fn show(ops: &[Op]) -> String {
                 out.push_str(&format!(" pp-data=\"[{}]\"", values.join(",")));
             }
             Op::Slot | Op::DeferredSlot => out.push_str("<slot/>"),
+            Op::DollarGuard => out.push_str("@dollar"),
             Op::Component(call) => {
                 out.push('<');
                 out.push_str(&call.name.to_string());
@@ -585,6 +586,69 @@ fn brace_references_are_sent_doubled() {
         render(r#"<p>"&#x7B;a&#x7d; &lbrace;b&rbrace;"</p>"#),
         "<p>&amp;#x7B;a&amp;#x7d; &amp;lbrace;b&amp;rbrace;</p>"
     );
+}
+
+/// Two authored tokens stay two: the guard stands between a dollar sign and
+/// the binding after it, and the binding it may write is registered.
+#[test]
+fn a_binding_after_a_dollar_sign_is_guarded() {
+    for src in [
+        r#"<p>"$"{price}</p>"#,
+        r#"<p>"US$"{price}</p>"#,
+        r#"<p>"&#36;"{price}</p>"#,
+        r#"<p>{a}"$"{price}</p>"#,
+    ] {
+        let parsed = parse_ok(src);
+        assert!(show(&parsed.ops).ends_with("@dollar{price}</p>"), "{src}");
+        assert!(
+            parsed.client_code.iter().any(|code| code.key == "\"$\""),
+            "{src}"
+        );
+    }
+}
+
+/// What only rendering can tell is guarded too: a value, a slot or a
+/// component may end in the sign.
+#[test]
+fn a_binding_after_a_rendered_value_is_guarded() {
+    assert_eq!(
+        render("<p>@{symbol}{price}</p>"),
+        "<p>@{symbol}@dollar{price}</p>"
+    );
+    assert_eq!(
+        render("<p><slot />{price}</p>"),
+        "<p><slot/>@dollar{price}</p>"
+    );
+    assert_eq!(
+        render("<p><Tag />{price}</p>"),
+        "<p><Tag/>@dollar{price}</p>"
+    );
+}
+
+/// Nothing that closes the text is guarded, and a page that never needs the
+/// `"$"` binding does not register it.
+#[test]
+fn other_bindings_are_not_guarded() {
+    for src in [
+        "<p>{price}</p>",
+        r#"<p>"Total: "{price}</p>"#,
+        r#"<p>"$ "{price}</p>"#,
+        r#"<p><b>"$"</b>{price}</p>"#,
+        r#"<p>{a}{price}</p>"#,
+    ] {
+        let parsed = parse_ok(src);
+        assert!(!show(&parsed.ops).contains("@dollar"), "{src}");
+        assert!(
+            !parsed.client_code.iter().any(|code| code.key == "\"$\""),
+            "{src}"
+        );
+    }
+}
+
+/// An attribute's binding is the whole value; no text ever stands before it.
+#[test]
+fn an_attribute_binding_is_not_guarded() {
+    assert!(!render(r#"<p title={price}>"$"</p>"#).contains("@dollar"));
 }
 
 /// The doubling is for text. An attribute escapes every `&` already, and what
