@@ -1440,11 +1440,35 @@ impl Parser {
             // `for="…"`, written as HTML writes it, fills the parameter Rust
             // spells `r#for`.
             let prop = raw_if_keyword(prop);
-            if self.is_punct(0, '-') {
-                return self.err(format!(
-                    "rahti: a prop of `<{name}>` names one of its parameters, and a Rust \
-                     identifier has no `-`."
-                ));
+            let mut html_name = prop.to_string().trim_start_matches("r#").to_string();
+            let attribute_name = self.is_punct(0, '-') || self.is_punct(0, ':');
+            while self.is_punct(0, '-') || self.is_punct(0, ':') {
+                let separator = if self.is_punct(0, '-') { '-' } else { ':' };
+                self.next();
+                let part = match self.next() {
+                    Some(TokenTree::Ident(id)) => id.to_string(),
+                    Some(TokenTree::Literal(literal)) => literal.to_string(),
+                    _ => return self.err(format!("rahti: expected a name after `{separator}`")),
+                };
+                html_name.push(separator);
+                html_name.push_str(&part);
+            }
+            if attribute_name {
+                if let Some(msg) = crate::authoring::attribute_mistake(name, &html_name) {
+                    return Err(Error {
+                        span: prop.span(),
+                        msg,
+                    });
+                }
+                // Bound attributes are entries in `Bindings`, not Rust fields.
+                // Static values still name a typed parameter and need `attrs`.
+                if !(self.is_punct(0, '=') && self.brace_at(1)) {
+                    return self.err(format!(
+                        "rahti: `{html_name}` on `<{name}>` is an HTML attribute, not a Rust \
+                         parameter. Write `{html_name}={{expression}}` for a client binding, \
+                         or pass static attributes through the component's `attrs` prop."
+                    ));
+                }
             }
 
             if !self.is_punct(0, '=') {
@@ -1492,7 +1516,6 @@ impl Parser {
                     // passes for static children and loses its owner.
                     self.client_bindings += 1;
                     let source = binding_source(&g);
-                    let html_name = prop.to_string().trim_start_matches("r#").to_string();
                     if let Some(msg) = crate::authoring::binding_mistake(Some(&html_name), &source)
                     {
                         return Err(Error {

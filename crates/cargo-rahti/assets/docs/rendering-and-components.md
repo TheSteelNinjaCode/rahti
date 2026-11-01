@@ -196,6 +196,13 @@ pub fn Button(bindings: Bindings, children: Html) -> Html {
 // renders <button class="btn" onclick={save()} title={label}>Save</button>
 ```
 
+Client binding names may contain hyphens or namespace separators, just as
+HTML attributes do: `<Button aria-pressed={selected} data-state={state}
+pp-ref={button}>"Select"</Button>`. These names are entries in `Bindings`,
+not Rust parameter names. A static or server-interpolated attribute still
+uses the component's explicit `attrs` prop; ordinary typed props remain
+Rust identifiers. Unsupported directives are refused on component tags too.
+
 Each binding keeps its authored expression. A native handler (`onclick`)
 travels in inert compiler-owned `pp-on*` metadata, which PulsePoint removes
 when it installs the registered event listener. Everything else — a value, `on-select`, a

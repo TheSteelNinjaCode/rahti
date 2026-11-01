@@ -255,6 +255,10 @@ async fn the_counter_counts() {
 - `goto`, `click`, `double_click`, `click_at`, `move_mouse`, `press`,
   `key_down`/`key_up` (hold a key), and `type_text` produce trusted input,
   the same kind a person does.
+- `click` and `double_click` scroll the matching element into view and wait
+  for a stable, unobstructed centre across animation frames before sending
+  input. This lets SPA scroll restoration finish without invalidating the
+  click position. `click_at` uses the exact coordinates supplied by the test.
 - `eval::<T>(js)` reads a value back; `wait_for(js)` polls a condition for up
   to 30 seconds and, when it gives up, names the condition and any page
   errors.

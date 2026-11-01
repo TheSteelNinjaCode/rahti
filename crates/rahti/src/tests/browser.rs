@@ -58,6 +58,42 @@ async fn a_click_is_a_trusted_click_that_changes_the_page() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_click_retries_when_pending_scroll_restoration_moves_its_target() {
+    let app = Router::new().route("/", get(|| async {
+        Html(r#"<!doctype html><html><body style="height:2500px">
+            <button id="target" style="position:absolute;top:1400px" onclick="this.textContent = 'clicked'">Ready</button>
+            <script>
+                const target = document.getElementById('target');
+                const scroll = target.scrollIntoView.bind(target);
+                let pending = true;
+                target.scrollIntoView = function(options) {
+                    scroll(options);
+                    if (pending) {
+                        pending = false;
+                        // Restore after the immediate coordinate measurement,
+                        // before the next protocol input reaches the page.
+                        queueMicrotask(() => window.scrollTo(0, 0));
+                    }
+                };
+            </script>
+        </body></html>"#)
+    }));
+    let address = serve(app).await;
+    let Some(mut browser) = Browser::launch().await.unwrap() else {
+        return;
+    };
+    browser.goto(&format!("http://{address}/")).await.unwrap();
+    browser.click("#target").await.unwrap();
+    assert!(
+        browser
+            .eval::<bool>("document.querySelector('#target').textContent === 'clicked'")
+            .await
+            .unwrap()
+    );
+    assert!(browser.errors().is_empty(), "{:?}", browser.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn keys_and_mouse_movement_reach_the_page() {
     let Some((mut browser, url)) = page().await else {
         return;

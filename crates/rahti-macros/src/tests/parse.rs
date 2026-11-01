@@ -964,6 +964,44 @@ fn a_client_binding_prop_is_carried_as_source() {
     );
 }
 
+#[test]
+fn component_attribute_bindings_keep_their_full_html_names() {
+    let parsed = parse_ok(
+        r#"<Button aria-pressed={selected} aria-label={label} data-state={state} pp-ref={button} on-select={choose} xlink:href={url} />"#,
+    );
+    let [Op::Component(call)] = parsed.ops.as_slice() else {
+        panic!("expected a component");
+    };
+    assert!(call.props.is_empty());
+    assert_eq!(
+        call.bindings,
+        [
+            ("aria-pressed".into(), "selected".into()),
+            ("aria-label".into(), "label".into()),
+            ("data-state".into(), "state".into()),
+            ("pp-ref".into(), "button".into()),
+            ("on-select".into(), "choose".into()),
+            ("xlink:href".into(), "url".into()),
+        ]
+    );
+    assert_eq!(parsed.client_code.len(), 6);
+}
+
+#[test]
+fn static_component_attributes_still_require_an_explicit_attrs_prop() {
+    for source in [
+        r#"<Button aria-label="Save" />"#,
+        r#"<Button data-state=@{state} />"#,
+        r#"<Button aria-hidden />"#,
+    ] {
+        let message = error(source);
+        assert!(message.contains("attrs"), "{message}");
+    }
+    assert!(error(r#"<Button pp-if={open} />"#).contains("not a PulsePoint directive"));
+    assert!(error(r#"<Button pp-for={items} />"#).contains("only on a `<template>`"));
+    assert!(error(r#"<Button pp-onclick={save()} />"#).contains("compiler-owned"));
+}
+
 /// Rust props and client bindings on the same tag stay in their own lanes.
 #[test]
 fn a_tag_may_carry_both_kinds_of_prop() {

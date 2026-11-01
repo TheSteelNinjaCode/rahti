@@ -378,7 +378,8 @@ impl Browser {
         tokio::time::sleep(duration).await;
     }
 
-    /// Click the centre of the first element matching a CSS selector.
+    /// Scroll the first matching element into view and click its stable,
+    /// unobstructed centre after layout and scroll restoration settle.
     pub async fn click(&mut self, selector: &str) -> BrowserResult<()> {
         let (x, y) = self.center_of(selector).await?;
         self.click_at(x, y, 1).await
@@ -479,17 +480,34 @@ impl Browser {
         let selector_js = serde_json::to_string(selector).unwrap_or_default();
         let point: Option<(f64, f64)> = self
             .eval(&format!(
-                "(() => {{ const el = document.querySelector({selector_js}); if (!el) return null; \
-                 el.scrollIntoView({{ block: 'center', inline: 'center' }}); \
-                 const r = el.getBoundingClientRect(); \
-                 if (r.width === 0 && r.height === 0) return null; \
-                 return [r.left + r.width / 2, r.top + r.height / 2]; }})()"
+                "(async () => {{
+                    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+                    const deadline = performance.now() + {timeout};
+                    while (performance.now() < deadline) {{
+                        const el = document.querySelector({selector_js});
+                        if (!el) return null;
+                        el.scrollIntoView({{ block: 'center', inline: 'center', behavior: 'instant' }});
+                        const before = el.getBoundingClientRect();
+                        if (!before.width || !before.height) return null;
+                        await frame();
+                        await frame();
+                        if (!el.isConnected || document.querySelector({selector_js}) !== el) continue;
+                        const after = el.getBoundingClientRect();
+                        if (['x', 'y', 'width', 'height'].some(key => Math.abs(before[key] - after[key]) > 0.5)) continue;
+                        const x = after.left + after.width / 2;
+                        const y = after.top + after.height / 2;
+                        const hit = document.elementFromPoint(x, y);
+                        if (hit && el.contains(hit)) return [x, y];
+                    }}
+                    return null;
+                }})()",
+                timeout = TIMEOUT.as_millis().saturating_sub(1000),
             ))
             .await?;
         match point {
             Some(point) => Ok(point),
             None => fail(format!(
-                "no visible element matches `{selector}`{}",
+                "no stable, unobstructed visible element matches `{selector}`{}",
                 self.errors_suffix()
             )),
         }

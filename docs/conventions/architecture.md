@@ -379,7 +379,8 @@ The current implementation covers:
   value and spread, raised one encoding layer inside the root layout's
   deferred template, compile-time refusal of a server value in a handler or
   a `{…}` binding, a render-time refusal of a handler from a data spread, and
-  `Bindings` as the one carrier of a component tag's `{…}` source;
+  `Bindings` as the one carrier of a component tag's `{…}` source, including
+  hyphenated HTML attribute names such as `aria-pressed` and `pp-ref`;
 - local and dependency-provided components, nested components, and children;
 - nested component module directories with Rust-valid module names;
 - isolated component instances and component-owned RPCs;
