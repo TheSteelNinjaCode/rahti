@@ -19,6 +19,13 @@ streaming rpcs, uploads, sockets, sessions and PulsePoint bindings all work,
 because none of them are involved. There is nothing to convert and no
 compatibility subset.
 
+The system WebView still has to implement the browser features the application
+uses. Rahti UI's overlay components require the Popover API. The injected
+native bridge detects that specific case: an application that renders a
+`popover` on an older engine gets a visible instruction to update Android
+System WebView or WebView2, while an application that uses no popover receives
+no warning.
+
 **It is not an HTML-to-native-widget compiler.** Nothing here translates
 markup. What the user sees is a WebView, and the controls in it are the
 browser's, not the platform's.
@@ -45,23 +52,55 @@ Android additionally needs the Android SDK, the NDK, a JDK and four Rust
 targets. `cargo rahti native doctor` names each missing one and the command
 that supplies it. It installs nothing itself.
 
+The JDK has to start and has to be one the generated project's Gradle can run:
+Java 17 to 24 on Gradle 8.14, which is what Tauri generates today. Android
+Studio's bundled `jbr` can be newer than that. A `JAVA_HOME` that fits is always
+used. One that does not is passed over, for the build's process only, in favour
+of a suitable JDK already on the machine, and the build prints which.
+
+The generated `native/build.rs` links the Android library for 16 KB memory
+pages, which Google Play requires of current apps. A shell generated before this
+picks it up from `cargo rahti native init`, unless its `build.rs` was edited.
+
 ## The commands
 
 ```text
 cargo rahti native init --identifier com.example.myapp --windows --android
 cargo rahti native doctor
+cargo rahti native icon  public/images/logo.svg
 cargo rahti native dev   --target windows
 cargo rahti native dev   --target android
 cargo rahti native build --target windows
 cargo rahti native build --target android --format apk
 cargo rahti native build --target android --format aab
+cargo rahti native build --target android --debug --device emulator-5554
 ```
 
 `cargo rahti-native …` reaches the same tool directly, through cargo's own
 subcommand dispatch. If the helper is not installed, `cargo rahti native`
 prints the one line that installs it and does nothing else.
 
-`build` prints the absolute path of every artifact it produced.
+`build` prints the absolute path of every artifact this run produced, and
+nothing an earlier build left in the output directories.
+
+### From an agent
+
+Every command here ends on its own, and each conclusion can be read without
+scraping a terminal:
+
+| Question | Answer |
+| --- | --- |
+| Can this project build? | `doctor --json`: `ready`, and each finding's `name`, `state` and `advice`. Add `--release` for what a release needs. It exits non-zero when `ready` is false. |
+| What did the build produce, and what should be said about it? | `native/.rahti/build.json`: `target`, `profile`, `abi`, `device`, `installed`, `artifacts` and `warnings`. |
+| Does the change work on a device? | `build --target android --debug --device <serial>` builds an APK for that device's ABI, installs it, starts the application and exits. `dev` does the same and stays running. |
+
+`--device` takes a serial from `adb devices`, and is refused before anything
+compiles if that device is not attached. `--abi` builds one ABI without a
+device. Prefer either to a universal debug package, which carries four debug
+libraries and can be too large for an emulator to install.
+
+A debug package carries the values `development.env` names, and the build says
+which. Keep it on your own devices.
 
 ## Development reload
 
@@ -83,13 +122,13 @@ the package boundary, so the automatic loop takes as long as an incremental
 Android build and deployment.
 
 The application is outside `native/`'s deliberately separate Cargo workspace.
-Observing it needs the additional watch folders of Tauri CLI 2.8 or later;
-`doctor` checks the CLI version and prints the upgrade command when it is
-lower.
+Tauri CLI 2.8 introduced the additional watch folders needed to observe it;
+`doctor` refuses an older CLI and prints the upgrade command.
 
-`cargo rahti native init` writes the shell and refreshes it when run again:
-untouched generated shell files are updated, and an application-owned file
-you edited remains yours and is reported.
+An existing project gets this behavior after updating `cargo-rahti-native` and
+running `cargo rahti native init` again. Untouched generated shell files are
+updated; an application-owned file you edited remains yours and is reported,
+as usual.
 
 ## Your application has to expose its startup
 
@@ -167,13 +206,21 @@ in a Rahti project that depends on Tauri, so `cargo check --workspace`,
 
 The generated icons are the **Rahti mark** — a real icon set, at every size
 Windows and Android ask for, so a first build looks like an application rather
-than a blank square. It is still not *your* mark: replace it with
+than a blank square. It is still not *your* mark, and `doctor` warns until you
+replace it with
 
 ```bash
-cargo tauri icon path/to/icon.png
+cargo rahti native icon path/to/logo.svg
 ```
 
-which rewrites the whole set from one square PNG.
+which rewrites the whole set from one square PNG or SVG. `--background '#0a2540'`
+sets the colour behind the Android adaptive icon, which is white by default.
+
+Use this rather than `cargo tauri icon`, which it calls for the drawing. Android
+shows the central 72dp of a 108dp adaptive layer through a mask, and Tauri draws
+the layer edge to edge, so launchers cut off whatever is near the edges of the
+logo. `icon` keeps the artwork inside the safe zone, and writes only the files
+this shell uses.
 
 The Android half matters more than it looks. `cargo tauri android init` writes
 a project whose `res/mipmap-*` already holds the project template's own
@@ -252,11 +299,44 @@ rather than reviewed.
 application storage, reached through an absolute `DATABASE_URL` created on
 first launch.
 
-A project on PostgreSQL or MySQL sets `remote`, and its `DATABASE_URL` is left
-exactly as it is. Rewriting it to a local SQLite file would start the
-application against an empty database that looked like a working one. A
-packaged application is a client of a remote database, and that is the whole
-of what native packaging does about it.
+A project on PostgreSQL or MySQL sets `remote`, and its `DATABASE_URL` is never
+rewritten to a local SQLite file: that would start the application against an
+empty database that looked like a working one.
+
+A packaged application reads no `.env`, though, so where a `remote`
+`DATABASE_URL` comes from depends on the build.
+
+**A development build** takes it from the project's `.env`, along with any
+other name in `development.env`:
+
+```json
+"database": { "mode": "remote" },
+"development": { "env": ["STORAGE_API_KEY", "APP_TIMEZONE"] }
+```
+
+The list holds names, never values. The generated `build.rs` copies those lines
+into `OUT_DIR` for the debug profile, and `apply_development_env` puts them in
+the environment before `initialize_application` runs. `AUTH_SECRET` and the
+variables the shell sets itself are refused. Editing the list and re-running
+`init` is how the shell learns it, and an edited `build.rs` needs `--force`.
+
+On Android, `localhost` is the device. `cargo rahti native dev` runs
+`adb reverse` for a database on this machine, on every attached device. A debug
+package installed some other way uses a forwarded port if it finds one, and
+otherwise reaches an emulator's host at `10.0.2.2`. A phone needs the port
+forwarded by hand:
+
+```text
+adb reverse tcp:5432 tcp:5432
+```
+
+Those values are in the debug package, so do not hand one to anybody.
+
+**A release build** carries none of them, and must not: anything in a package
+can be read back out of it, and a database password in a public installer is
+full access for everyone who downloads it. So a `remote` release starts with no
+database at all, and `doctor --release` says so. Its backend has to be hosted on
+a public address.
 
 ## The session key
 
@@ -344,6 +424,12 @@ A link to anywhere else opens in the user's browser and the window stays where
 it is. A privileged WebView that navigated to an external page would be running
 somebody else's HTML with the bridge attached.
 
+The bridge also handles authored `<a target="_blank">` links. A new WebView is
+not supported consistently on Android and can be discarded on desktop, so an
+external target is passed to `open_external`; a same-origin target stays in the
+application's existing window. The source remains ordinary web markup and
+keeps its normal new-tab behavior outside the native package.
+
 Adding a command means three places, on purpose: a `#[tauri::command]` in
 `native/src/lib.rs`, an entry in `rahti_native::commands()`, and a permission
 in `native/capabilities/default.json`. Assume the page calling it has been
@@ -394,6 +480,13 @@ nothing is documented as depending on it.
 The bridge is a framework-owned script the shell injects before any page script
 runs. PulsePoint's bundle is not edited, patched or wrapped.
 
+## Build outputs
+
+A successful native build prints the executable and installer paths. Windows
+output discovery uses Cargo's resolved target directory, including
+`CARGO_TARGET_DIR` and `.cargo/config.toml` overrides. Android packages are
+reported from `native/gen/android/app/build/outputs`.
+
 ## Signing
 
 Nothing about signing is in any committed file, and `native/.gitignore` refuses
@@ -435,7 +528,9 @@ Android's lifecycle has nothing like it.
 On exit the shell fires Rahti's shutdown broadcast — which ends the dev event
 stream and every open socket, because a graceful shutdown would otherwise wait
 for connections that were never going to close — then stops accepting and waits
-a bounded five seconds for what is left. Dropping the server handle without a
+a bounded five seconds for what is left. The host then calls
+`rahti::jobs::finish_shutdown()` through the application re-export to stop
+schedulers and drain background queues. Dropping the server handle without a
 shutdown also stops it, which is the Android case: the operating system can
 destroy the process without giving anything a chance to run.
 

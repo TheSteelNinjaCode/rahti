@@ -1744,6 +1744,18 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          accesses are not proved by compilation. See `docs/conventions/rpc-and-uploads.md`.\n\n",
     );
 
+    out.push_str(
+        "## Native packaging for agents\n\n\
+         This applies once the project has a `native/` shell.\n\
+         `cargo rahti native doctor --json` says whether it can build: `ready`, and\n\
+         each finding's `advice`. `cargo rahti native icon <image>` replaces the\n\
+         generated icons.\n\
+         `cargo rahti native build --target android --debug --device <serial>`\n\
+         builds for that device, installs the application and starts it.\n\
+         `native/.rahti/build.json` records what the last build produced and its\n\
+         warnings. See `docs/conventions/native-packaging.md`.\n\n",
+    );
+
     out.push_str("## Required Reading\n\n| Work area | Document |\n| --- | --- |\n");
     out.push_str(
         "| Pages, layouts, route groups, dynamic routes, APIs, errors, 404s | \

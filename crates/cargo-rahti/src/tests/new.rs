@@ -895,6 +895,21 @@ fn the_guide_names_only_documents_the_project_has() {
     assert!(ledger.contains_key("docs/conventions/websockets.md"));
 }
 
+/// An agent working on a packaged project reads a tool's report rather than
+/// scraping a terminal, so the guide has to name where those reports are.
+#[test]
+fn the_guide_teaches_the_native_agent_surface() {
+    let guide = t::agents_md("example", false, false);
+    for surface in [
+        "cargo rahti native doctor --json",
+        "cargo rahti native icon <image>",
+        "cargo rahti native build --target android --debug --device <serial>",
+        "native/.rahti/build.json",
+    ] {
+        assert!(guide.contains(surface), "{surface} is missing:\n{guide}");
+    }
+}
+
 /// The copies under `assets/docs/` exist because a published crate cannot
 /// read a file outside its own directory. This holds each one byte-identical
 /// to its canonical original in `docs/conventions/`, the same promise the
