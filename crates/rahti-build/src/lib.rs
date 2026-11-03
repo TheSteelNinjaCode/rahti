@@ -419,10 +419,16 @@ fn parse_config(raw: &str) -> Config {
         host: string_at("server", "host", "0.0.0.0"),
         port: u16::try_from(port)
             .unwrap_or_else(|_| panic!("rahti: server.port must be 0-65535, got {port}")),
-        mcp: value
-            .get("mcp")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false),
+        // `true` mounts the endpoint; `{ "http": false }` keeps the project's
+        // MCP tooling and leaves `/mcp` to the application.
+        mcp: match value.get("mcp") {
+            Some(serde_json::Value::Object(mcp)) => mcp
+                .get("http")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true),
+            Some(value) => value.as_bool().unwrap_or(false),
+            None => false,
+        },
         i18n: i18n::parse(&value),
         css,
     }

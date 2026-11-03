@@ -116,7 +116,8 @@ pub fn run_status(args: &[&str]) -> Result<(), String> {
         [other, ..] => return Err(format!("unknown option `{other}`")),
     };
 
-    let report = dev_server::status(&root);
+    let mut report = dev_server::status(&root);
+    report["mcpMissing"] = json!(missing_mcp_commands(&root));
     if json_output {
         println!("{report}");
     } else {
@@ -139,6 +140,7 @@ pub(crate) fn describe(report: &Value) -> String {
 
     if report["running"] != true {
         line(&mut out, "Server: not running".to_string());
+        mcp_line(&mut out, report);
         line(&mut out, format!("Next: {}", text(report, "next")));
         return out;
     }
@@ -247,8 +249,69 @@ pub(crate) fn describe(report: &Value) -> String {
         }
     }
 
+    mcp_line(&mut out, report);
     line(&mut out, format!("Next: {}", text(report, "next")));
     out
+}
+
+/// An MCP server `.mcp.json` starts but this machine cannot: the client runs
+/// the command, it is not found, and the agent sees only a closed connection.
+fn mcp_line(out: &mut String, report: &Value) {
+    for command in list(&report["mcpMissing"]) {
+        let install = if command == "rahti-mcp" {
+            format!(
+                " Install it with `cargo install rahti-mcp --version {}`.",
+                env!("CARGO_PKG_VERSION")
+            )
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "MCP: .mcp.json starts `{command}`, which is not installed, so MCP clients \
+             cannot connect.{install}\n"
+        ));
+    }
+}
+
+/// The commands `.mcp.json` names that are not on `PATH`.
+pub(crate) fn missing_mcp_commands(root: &Path) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(root.join(".mcp.json")) else {
+        return Vec::new();
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut missing = Vec::new();
+    for server in config["mcpServers"].as_object().into_iter().flatten() {
+        let Some(command) = server.1["command"].as_str() else {
+            continue;
+        };
+        if !installed(command, &path) && !missing.iter().any(|known| known == command) {
+            missing.push(command.to_string());
+        }
+    }
+    missing
+}
+
+/// Whether `command` resolves the way a client starting it would resolve it:
+/// a path as written, otherwise a `PATH` entry, with Windows' executable
+/// extensions.
+pub(crate) fn installed(command: &str, path: &std::ffi::OsStr) -> bool {
+    let named = Path::new(command);
+    if named.components().count() > 1 {
+        return named.is_file();
+    }
+    let extensions: &[&str] = if cfg!(windows) {
+        &["", ".exe", ".cmd", ".bat"]
+    } else {
+        &[""]
+    };
+    std::env::split_paths(path).any(|dir| {
+        extensions
+            .iter()
+            .any(|extension| dir.join(format!("{command}{extension}")).is_file())
+    })
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {

@@ -41,6 +41,14 @@
 //! Dev mode is [`crate::dev::enabled`]: the build profile, overridden either
 //! way by `RAHTI_DEV`.
 //!
+//! A port can also be half taken. `0.0.0.0` binds IPv4 only, and an operating
+//! system lets a different process hold the same port on IPv6. The bind then
+//! succeeds, but the `http://localhost:…` line points a browser at the other
+//! server, because `localhost` resolves to `::1` first. So a wildcard IPv4
+//! bind counts as busy when another server answers `[::1]` on its port: dev
+//! mode moves on as it would for any busy port, and a release build keeps the
+//! port it was given and says that `localhost` reaches someone else.
+//!
 //! A moved port does not disturb CSRF: the token cookie's name is derived per
 //! request from the browser's own `Host` header, not from the configured port.
 
@@ -86,6 +94,27 @@ async fn bind(host: &str, port: u16) -> TcpListener {
 
     let addr = format!("{host}:{port}");
     match TcpListener::bind(&addr).await {
+        Ok(listener) if shadowed(&listener).await => {
+            if crate::dev::enabled() {
+                drop(listener);
+                if let Some(listener) = next_free(&host, port).await {
+                    let moved = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+                    println!(
+                        "rahti dev: localhost:{port} is answered by another server on IPv6 \
+                         ([::1]:{port}) — using port {moved} instead."
+                    );
+                    return listener;
+                }
+                eprintln!("rahti: no free port after {port}.");
+                std::process::exit(1);
+            }
+            eprintln!(
+                "rahti: warning: another server answers [::1]:{port}, so \
+                 http://localhost:{port} reaches it, not this one. Use \
+                 http://127.0.0.1:{port}, or stop the other server."
+            );
+            listener
+        }
         Ok(listener) => listener,
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
             if crate::dev::enabled() {
@@ -209,8 +238,36 @@ fn url_of(addr: SocketAddr) -> String {
 async fn next_free(host: &str, port: u16) -> Option<TcpListener> {
     for candidate in port.checked_add(1)?..=u16::MAX {
         if let Ok(listener) = TcpListener::bind((host, candidate)).await {
-            return Some(listener);
+            if !shadowed(&listener).await {
+                return Some(listener);
+            }
         }
     }
     None
+}
+
+/// Whether `localhost` on this listener's port reaches another process: an
+/// IPv4 wildcard bind, with something else accepting connections on `[::1]`.
+///
+/// Asked by connecting, not by binding: Windows lets `[::1]` be bound over
+/// another process's `[::]`, so a bind probe misses exactly the server that
+/// hides an application. A live loopback listener accepts at once; a closed
+/// port is refused at once on Linux and macOS, and Windows retries it until
+/// the timeout, which is all this check can cost.
+async fn shadowed(listener: &TcpListener) -> bool {
+    let Ok(addr) = listener.local_addr() else {
+        return false;
+    };
+    if !(addr.is_ipv4() && addr.ip().is_unspecified()) {
+        return false;
+    }
+    let probe = SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, addr.port()));
+    matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            tokio::net::TcpStream::connect(probe),
+        )
+        .await,
+        Ok(Ok(_))
+    )
 }

@@ -1012,7 +1012,10 @@ impl Config {
             tailwind,
             db,
             ws: value.get("ws").and_then(|v| v.as_bool()).unwrap_or(false),
-            mcp: value.get("mcp").and_then(|v| v.as_bool()).unwrap_or(false),
+            // An object is opted in too: `{ "http": false }` only drops the endpoint.
+            mcp: value
+                .get("mcp")
+                .is_some_and(|v| v.is_object() || v.as_bool() == Some(true)),
             local: local_checkout(&manifest),
             ledger,
             from: value

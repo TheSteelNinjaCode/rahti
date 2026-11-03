@@ -105,8 +105,21 @@
       "description": "The project uses WebSockets: its Cargo.toml carries the `ws` feature on the `rahti` dependency, which is what compiles `rahti::ws` and the `#[socket]` attribute. Absent means no — the same reading as an absent `db`. The build itself never needs this key (a `#[socket]` in the tree is what wires the endpoint); it exists so `cargo rahti upgrade` knows the manifest is expected to carry the feature, and can say precisely what to add when it does not."
     },
     "mcp": {
-      "type": "boolean",
-      "description": "The project opts into MCP. When true, the scaffold owns .mcp.json for local stdio, enables rahti's optional mcp Cargo feature, publishes an editable public/llms.txt, and mounts a bearer-protected Streamable HTTP endpoint at /mcp/. Absent or false means none of those application routes or dependencies are generated."
+      "description": "The project opts into MCP. When true, the scaffold owns .mcp.json for local stdio, enables rahti's optional mcp Cargo feature, publishes an editable public/llms.txt, and mounts a bearer-protected Streamable HTTP endpoint at /mcp/. { \"http\": false } keeps the tooling but mounts no endpoint, leaving /mcp and /.well-known/mcp.json to the application. Absent or false means none of those application routes or dependencies are generated.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "properties": {
+            "http": {
+              "type": "boolean",
+              "default": true,
+              "description": "Mount Rahti's Streamable HTTP MCP endpoint at /mcp/. False leaves /mcp to the application."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "i18n": {
       "type": "object",

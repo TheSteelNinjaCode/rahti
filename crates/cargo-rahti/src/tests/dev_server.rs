@@ -101,3 +101,38 @@ fn a_timeout_option_is_read_and_anything_else_is_refused() {
     assert!(timeout_from(&["--timeout"]).is_err());
     assert!(timeout_from(&["--force"]).is_err());
 }
+
+#[test]
+fn an_mcp_command_that_is_not_installed_is_named_with_its_install() {
+    let out = describe(&json!({
+        "running": false,
+        "next": "Start the server with `cargo rahti restart`.",
+        "mcpMissing": ["rahti-mcp"],
+    }));
+    assert!(out.contains("`rahti-mcp`, which is not installed"), "{out}");
+    assert!(out.contains("cargo install rahti-mcp --version"), "{out}");
+}
+
+#[test]
+fn a_command_is_found_on_path_or_as_a_path() {
+    let dir = std::env::temp_dir().join(format!("rahti-mcp-path-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = if cfg!(windows) { "tool.exe" } else { "tool" };
+    std::fs::write(dir.join(file), "").unwrap();
+    let path = std::env::join_paths([&dir]).unwrap();
+
+    assert!(installed("tool", &path));
+    assert!(!installed("rahti-mcp-nowhere", &path));
+    assert!(installed(dir.join(file).to_str().unwrap(), &path));
+
+    std::fs::write(
+        dir.join(".mcp.json"),
+        r#"{ "mcpServers": { "rahti": { "command": "rahti-mcp-nowhere", "args": [] } } }"#,
+    )
+    .unwrap();
+    assert_eq!(
+        missing_mcp_commands(&dir),
+        vec!["rahti-mcp-nowhere".to_string()]
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

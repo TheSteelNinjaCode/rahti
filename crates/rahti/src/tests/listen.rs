@@ -127,3 +127,40 @@ async fn two_fallbacks_from_one_port_do_not_collide() {
 async fn the_scan_stops_at_the_end_of_the_port_range() {
     assert!(next_free("127.0.0.1", u16::MAX).await.is_none());
 }
+
+/// Another process on `[::1]` takes `localhost` from an IPv4 wildcard bind on
+/// the same port, so that port counts as busy and the scan passes it.
+#[tokio::test]
+async fn a_port_held_on_ipv6_is_skipped_by_a_wildcard_bind() {
+    // A machine without IPv6 has no `localhost` to lose.
+    let Ok(other) = TcpListener::bind("[::1]:0").await else {
+        return;
+    };
+    let wildcard = TcpListener::bind("[::]:0").await.unwrap();
+    let wide = wildcard.local_addr().unwrap().port();
+    let ours = TcpListener::bind(("0.0.0.0", wide)).await.unwrap();
+    // The case that hid a running app: the other server bound every IPv6 address.
+    assert!(
+        shadowed(&ours).await,
+        "a [::] listener shadows localhost too"
+    );
+    drop(ours);
+    let port = other.local_addr().unwrap().port();
+    let Ok(ours) = TcpListener::bind(("0.0.0.0", port)).await else {
+        return;
+    };
+    assert!(shadowed(&ours).await);
+    drop(ours);
+
+    let fallback = next_free("0.0.0.0", port - 1).await.expect("a free port");
+    assert_ne!(fallback.local_addr().unwrap().port(), port);
+    assert!(!shadowed(&fallback).await);
+}
+
+/// Only the IPv4 wildcard is printed as `localhost`, so only it can be
+/// shadowed: an explicit address is reached as written.
+#[tokio::test]
+async fn an_explicit_address_is_never_shadowed() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    assert!(!shadowed(&listener).await);
+}

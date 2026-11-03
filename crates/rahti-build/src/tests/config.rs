@@ -84,6 +84,16 @@ fn mcp_routes_are_reserved_only_when_the_endpoint_is_enabled() {
     assert!(refused.is_err());
 }
 
+/// `{ "http": false }` keeps MCP tooling but not the endpoint, so an
+/// application can serve its own `/mcp`; an object without it mounts it.
+#[test]
+fn mcp_can_leave_its_http_endpoint_to_the_application() {
+    assert!(!parse_config(r#"{"mcp":{"http":false}}"#).mcp);
+    assert!(parse_config(r#"{"mcp":{"http":true}}"#).mcp);
+    assert!(parse_config(r#"{"mcp":{}}"#).mcp);
+    assert!(!parse_config(r#"{"mcp":false}"#).mcp);
+}
+
 /// An empty file is a project that has configured nothing, which is a
 /// supported way to have a project — not a parse error.
 #[test]
