@@ -196,3 +196,106 @@ fn only_pp_dot_rpc_is_collected() {
 fn code_that_does_not_parse_has_no_calls() {
     assert!(rpc_calls(Code::Expression, "pp.rpc(\"a\", {").is_empty());
 }
+
+/// The reads of an rpc result in a script, as `rpc: a.b` lines.
+fn reads(source: &str) -> Vec<String> {
+    rpc_reads(Code::Script, source)
+        .into_iter()
+        .map(|read| {
+            let path: Vec<String> = read
+                .steps
+                .iter()
+                .map(|step| match step {
+                    Step::Field { name, .. } => name.clone(),
+                    Step::Index => "[]".to_string(),
+                })
+                .collect();
+            format!("{}: {}", read.rpc, path.join("."))
+        })
+        .collect()
+}
+
+#[test]
+fn a_field_read_off_an_awaited_rpc_result_is_found() {
+    let source = r#"
+        async function save() {
+            const result = await pp.rpc("save", { name });
+            setId(result.contactId);
+            const first = result.tags[0].label;
+            if (result?.owner?.name) show((result).note);
+        }
+    "#;
+    assert_eq!(
+        reads(source),
+        [
+            "save: contactId",
+            "save: tags.[].label",
+            "save: tags",
+            "save: owner.name",
+            "save: owner",
+            "save: note",
+        ]
+    );
+}
+
+#[test]
+fn a_read_names_the_span_of_the_field_it_reads() {
+    let source = r#"const r = await pp.rpc("load"); r.total;"#;
+    let read = &rpc_reads(Code::Script, source)[0];
+    let Step::Field { name, span } = &read.steps[0] else {
+        panic!("a field step");
+    };
+    assert_eq!(name, "total");
+    assert_eq!(&source[span.clone()], "total");
+}
+
+#[test]
+fn destructuring_an_awaited_rpc_result_reads_each_key() {
+    let source = r#"const { tokens, message: text, ...rest } = await pp.rpc(`issue`);"#;
+    assert_eq!(reads(source), ["issue: tokens", "issue: message"]);
+}
+
+#[test]
+fn only_a_script_holds_an_awaited_result() {
+    let source = r#"async function f() { const made = await pp.rpc("create", {}); go(made.id); }"#;
+    assert_eq!(rpc_reads(Code::Script, source).len(), 1);
+    assert!(rpc_reads(Code::Handler, source).is_empty());
+    assert!(rpc_reads(Code::Expression, r#"pp.rpc("create").id"#).is_empty());
+}
+
+#[test]
+fn values_that_are_not_certainly_the_response_are_left_alone() {
+    for source in [
+        // Assigned again: the second value is something else.
+        r#"let r = await pp.rpc("a"); r = other(); r.field;"#,
+        // Given fields of its own.
+        r#"const r = await pp.rpc("a"); r.extra = 1; r.extra;"#,
+        r#"const r = await pp.rpc("a"); r.count++; r.count;"#,
+        r#"const r = await pp.rpc("a"); delete r.gone; r.gone;"#,
+        r#"const r = await pp.rpc("a"); Object.assign(r, { extra: 1 }); r.extra;"#,
+        // Not awaited, not `pp.rpc`, or not named by a literal.
+        r#"const r = pp.rpc("a"); r.then;"#,
+        r#"const r = await other.rpc("a"); r.field;"#,
+        r#"const r = await pp.rpc(which); r.field;"#,
+        // Another variable of the same name, in another scope.
+        r#"async function a() { const r = await pp.rpc("a"); } function b(r) { r.field; }"#,
+        // Handed on: what the callee reads is its own business.
+        r#"const r = await pp.rpc("a"); setState(r); show(r);"#,
+        r#"pp.rpc("a").then((r) => r.field);"#,
+        // A computed key is only known at run time.
+        r#"const r = await pp.rpc("a"); r[key];"#,
+    ] {
+        assert!(reads(source).is_empty(), "{source}: {:?}", reads(source));
+    }
+}
+
+#[test]
+fn a_shadowing_variable_is_not_the_result() {
+    let source = r#"
+        const r = await pp.rpc("outer");
+        r.kept;
+        function inner(r) { return r.other; }
+        items.map((r) => r.row);
+    "#;
+    assert_eq!(reads(source), ["outer: kept"]);
+}

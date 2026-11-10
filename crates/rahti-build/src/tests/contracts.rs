@@ -100,6 +100,18 @@ fn contracts_carry_the_shapes_their_file_can_account_for() {
         types[file],
         json!({ "Contact": "{ id: number; name: string }" })
     );
+    // What `html!` reads: one line per response and one per declaration.
+    let lines: Vec<&str> = found.shapes.lines().collect();
+    assert!(lines.contains(&format!("R	{file}	save	Contact[]").as_str()));
+    assert!(lines.contains(&format!("R	{file}	remove	null").as_str()));
+    assert!(lines.contains(&format!("T	{file}	Contact	{{ id: number; name: string }}").as_str()));
+    assert_eq!(save["checks"]["literalKeys"], "compile-time");
+    assert!(
+        save["checks"]["responseUsage"]
+            .as_str()
+            .unwrap()
+            .starts_with("compile-time")
+    );
     assert!(found.read.iter().any(|path| path.ends_with("/wire.rs")));
     assert!(found.read.iter().all(|path| !path.contains('\\')));
 }

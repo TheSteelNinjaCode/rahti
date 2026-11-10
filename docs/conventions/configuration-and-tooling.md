@@ -666,6 +666,8 @@ security model: `native-packaging.md`.
   of each payload and response, source locations, auth, transports, and
   checking limits. `rpcTypes` holds, per file, the type declarations those
   shapes name. See `rpc-and-uploads.md` for the agent workflow.
+- `.rahti/rpc-shapes.tsv` - generated beside the manifest: each rpc's response
+  shape, as `html!` reads it to check what a script reads off a result.
 - `public/css/styles.css` - generated/copied but intentionally checked in.
 
 Run a Cargo build after changing route/component/configuration inputs and

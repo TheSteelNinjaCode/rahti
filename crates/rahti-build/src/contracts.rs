@@ -15,6 +15,9 @@ pub struct Inventory {
     /// File to `{ "Name<T>": "body" }`: the declarations a contract in that
     /// file names. A name is unique within its file, not across files.
     pub types: Value,
+    /// The response shapes as `html!` reads them, one line each:
+    /// `R\tfile\trpc\ttype` and `T\tfile\thead\tbody`.
+    pub shapes: String,
     pub read: Vec<String>,
 }
 
@@ -47,6 +50,7 @@ pub fn inventory(entries: &[Entry], components: &[Rpc]) -> Inventory {
     }
     let mut contracts = Vec::new();
     let mut types = serde_json::Map::new();
+    let mut lines = String::new();
     let mut sources = Sources::default();
     for (file, owners) in files {
         let source = fs::read_to_string(&file)
@@ -66,7 +70,13 @@ pub fn inventory(entries: &[Entry], components: &[Rpc]) -> Inventory {
             contract["file"] = json!(file);
             contract["urls"] = json!(urls);
             contract["module"] = json!(module);
+            if let Some(response) = contract["response"]["typescript"].as_str() {
+                lines.push_str(&format!("R\t{file}\t{name}\t{response}\n"));
+            }
             contracts.push(contract);
+        }
+        for (head, body) in &shapes.types {
+            lines.push_str(&format!("T\t{file}\t{head}\t{body}\n"));
         }
         if !shapes.types.is_empty() {
             types.insert(file, json!(shapes.types));
@@ -75,6 +85,7 @@ pub fn inventory(entries: &[Entry], components: &[Rpc]) -> Inventory {
     Inventory {
         contracts: Value::Array(contracts),
         types: Value::Object(types),
+        shapes: lines,
         read: sources
             .read
             .iter()
@@ -202,7 +213,8 @@ fn describe(function: &syn::ItemFn, shapes: &mut Scope) -> Value {
             "transport": if streaming { "stream" } else { "json" },
             "schemaStatus": response_status, "typescript": response_type },
         "checks": { "name": "compile-time", "literalKeys": "compile-time",
-            "literalValueShapes": "conservative", "dynamicValues": "server", "responseUsage": "unchecked" },
+            "literalValueShapes": "conservative", "dynamicValues": "server",
+            "responseUsage": "compile-time for fields read off `const x = await pp.rpc(…)`" },
         "call": format!("pp.rpc(\"{}\", {{ … }})", signature.ident),
     })
 }

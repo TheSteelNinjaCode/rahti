@@ -319,8 +319,10 @@ preserve them, and documentation or scaffold changes must teach them.
     in the same module. Inspect `rpcContracts` in `.rahti/manifest.json`
     after changing a declaration, and write payload keys and response-field
     accesses from its `typescript` shapes. A `schemaStatus` other than
-    `resolved` requires checking the Rust/Serde types; compilation does not
-    check dynamic payloads or response field access. See
+    `resolved` requires checking the Rust/Serde types. `html!` refuses a
+    field read directly off `const x = await pp.rpc("name", …)` that the
+    response does not have; compilation does not check dynamic payloads,
+    or a result read after it was stored in state or passed on. See
     `rpc-and-uploads.md`.
 
 45. Tailwind class conflict resolution uses the scaffold's existing browser

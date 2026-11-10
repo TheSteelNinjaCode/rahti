@@ -215,3 +215,95 @@ fn a_binding_locates_the_name_and_each_key() {
     assert_eq!(locator.span(span).start().column, 21);
     assert_eq!(locator.span(span).end().column, 36);
 }
+
+// ----- reads of a response ------------------------------------------------
+
+/// The shapes a build writes for a page whose `save` answers `Saved`.
+fn response_shapes() -> crate::rpc_shapes::Shapes {
+    crate::rpc_shapes::Shapes::parse(
+        "R\tpage.rs\tsave\tSaved\n\
+         T\tpage.rs\tSaved\t{ contactId: number; tags: string[]; owner: { name: string } | null }\n",
+        "page.rs",
+    )
+}
+
+/// What the template's client code is refused with against those shapes.
+fn read_refused(src: &str) -> Option<String> {
+    let parsed = parsed(src);
+    let shapes = response_shapes();
+    let mut next = 0;
+    parsed
+        .client_code
+        .iter()
+        .find_map(|source| checks_against(source, &mut next, Some(&shapes)).err())
+        .map(|error| error.msg)
+}
+
+#[test]
+fn reading_a_field_the_response_does_not_have_is_refused() {
+    let message = read_refused(&script(
+        "async function save() {\n\
+             const result = await pp.rpc(\"save\", { name });\n\
+             setId(result.contact_id);\n\
+         }",
+    ))
+    .expect("a refusal");
+    assert!(message.contains("RAHTI_RPC_RESPONSE_FIELD"), "{message}");
+    assert!(
+        message.contains("`save` answers `Saved`, which has no field `contact_id`"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Its fields are `contactId`, `owner`, `tags`"),
+        "{message}"
+    );
+
+    let nested = read_refused(&script(
+        "async function save() { const r = await pp.rpc(\"save\", { name }); show(r.owner.nmae); }",
+    ))
+    .expect("a refusal");
+    assert!(
+        nested.contains("`Saved.owner`, which has no field `nmae`"),
+        "{nested}"
+    );
+
+    let destructured = read_refused(&script(
+        "async function save() { const { contact_id } = await pp.rpc(\"save\", { name }); }",
+    ))
+    .expect("a refusal");
+    assert!(
+        destructured.contains("no field `contact_id`"),
+        "{destructured}"
+    );
+}
+
+#[test]
+fn ordinary_reads_of_a_response_are_not_refused() {
+    for body in [
+        // Fields the response has, through a nullable value and an array.
+        "const r = await pp.rpc(\"save\", { name }); use(r.contactId, r.tags, r.owner?.name);",
+        "const r = await pp.rpc(\"save\", { name }); use(r.tags.length, r.tags.map((t) => t), r.tags[0].trim());",
+        "const { contactId, tags } = await pp.rpc(\"save\", { name });",
+        // A result that is not certainly the response as the rpc wrote it.
+        "let r = await pp.rpc(\"save\", { name }); r = shaped(r); use(r.anything);",
+        "const r = await pp.rpc(\"save\", { name }); r.local = 1; use(r.local);",
+        "const r = await pp.rpc(\"save\", { name }); setSaved(r); render(r);",
+        "pp.rpc(\"save\", { name }).then((r) => use(r.anything));",
+        // Another value with a field of that name.
+        "const r = await pp.rpc(\"save\", { name }); use(other.contact_id, r.contactId);",
+    ] {
+        let source = script(&format!("async function save() {{ {body} }}"));
+        assert_eq!(read_refused(&source), None, "{body}");
+    }
+}
+
+#[test]
+fn a_template_with_no_shapes_is_checked_as_before() {
+    let source =
+        script("async function f() { const r = await pp.rpc(\"save\", { name }); r.nope; }");
+    let parsed = parsed(&source);
+    let mut next = 0;
+    for code in &parsed.client_code {
+        assert!(checks_against(code, &mut next, None).is_ok());
+    }
+}

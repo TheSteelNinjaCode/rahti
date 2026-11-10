@@ -208,6 +208,29 @@ pub fn rpc_name_not_literal(argument: &str) -> String {
     )
 }
 
+/// `result.contact_id` when the rpc's response has no such field. `owner` is
+/// the value read from, as the build names it, and `line` is where, for code
+/// a span cannot point inside.
+pub fn rpc_response_field(
+    rpc: &str,
+    owner: &str,
+    field: &str,
+    fields: &[String],
+    line: &str,
+) -> String {
+    let has = if fields.is_empty() {
+        "It has no fields".to_string()
+    } else {
+        let names: Vec<String> = fields.iter().map(|field| format!("`{field}`")).collect();
+        format!("Its fields are {}", names.join(", "))
+    };
+    format!(
+        "rahti[RAHTI_RPC_RESPONSE_FIELD]: `{rpc}` answers `{owner}`, which has no field \
+         `{field}`{line}.\n  {has}. The shape is the JSON Serde writes, not the Rust \
+         spelling: see this rpc's `response` in `.rahti/manifest.json`."
+    )
+}
+
 /// `pp.rpc()` — a call that names no rpc at all.
 pub fn rpc_name_missing() -> String {
     "rahti[RAHTI_RPC_NAME_MISSING]: `pp.rpc()` names no `#[rpc]`.\n  Write the function's name first, as a string \

@@ -9,6 +9,11 @@
 //! const _: () = ::rahti::rpc_check::complete(__RAHTI_RPC_CALL_0, &["name"]);
 //! ```
 //!
+//! What the code then reads off an awaited result — `result.contactId` — is
+//! checked here rather than by rustc, against the response shape the build
+//! wrote for that rpc (see `rpc_shapes`): a field the response does not have
+//! is refused on the token that names it.
+//!
 //! The first names the signature `#[rpc]` wrote beside the function, so it
 //! resolves through the module the template is written in: a name no `#[rpc]`
 //! there declares is rustc's own "cannot find value" error, suggestions
@@ -23,10 +28,21 @@ use quote::{format_ident, quote, quote_spanned};
 use rahti_js::{Code, Payload, RpcName};
 
 use crate::parse::{ClientKind, ClientSource, Error};
+use crate::rpc_shapes::Shapes;
 
 /// The checks for every `pp.rpc` call in `source`. `next` numbers the calls
 /// across one block, so each gets its own constant.
 pub fn checks(source: &ClientSource, next: &mut usize) -> Result<TokenStream, Error> {
+    checks_against(source, next, Shapes::current().as_deref())
+}
+
+/// [`checks`], with the response shapes of the file the template is in, when
+/// the build wrote them.
+pub fn checks_against(
+    source: &ClientSource,
+    next: &mut usize,
+    shapes: Option<&Shapes>,
+) -> Result<TokenStream, Error> {
     let code = match source.kind {
         ClientKind::Expression => Code::Expression,
         ClientKind::Handler => Code::Handler,
@@ -115,6 +131,27 @@ pub fn checks(source: &ClientSource, next: &mut usize) -> Result<TokenStream, Er
             }
         }
     }
+
+    if let Some(shapes) = shapes {
+        for read in rahti_js::rpc_reads(code, &source.source) {
+            let Some(missing) = shapes.missing(&read.rpc, &read.steps) else {
+                continue;
+            };
+            let Some(rahti_js::Step::Field { name, span }) = read.steps.get(missing.step) else {
+                continue;
+            };
+            return Err(Error {
+                span: locator.span(span),
+                msg: crate::authoring::rpc_response_field(
+                    &read.rpc,
+                    &missing.owner,
+                    name,
+                    &missing.fields,
+                    &locator.line_at(span.start),
+                ),
+            });
+        }
+    }
     Ok(out)
 }
 
@@ -173,9 +210,13 @@ impl Locator {
         let (RpcName::Literal { span, .. }
         | RpcName::NotLiteral { span }
         | RpcName::Missing { span }) = name;
+        self.line_at(span.start)
+    }
+
+    fn line_at(&self, at: usize) -> String {
         match self.literal_line {
             Some(first) => {
-                let before = self.source.get(..span.start).unwrap_or_default();
+                let before = self.source.get(..at).unwrap_or_default();
                 format!(" (line {})", first + before.matches('\n').count())
             }
             None => String::new(),

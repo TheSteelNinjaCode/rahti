@@ -124,9 +124,49 @@ are encoded as text. A spread or computed key also prevents value-shape checks.
 The final duplicate property is the effective value. Objects with custom
 `toJSON`, prototype setters, or unknown properties have unresolved shapes.
 
-Only a call written `pp.rpc(…)` is checked. JavaScript variables, functions,
-response-field accesses, and return-value usage are not type-checked.
-An unchecked expression is not evidence that its value satisfies the contract.
+Only a call written `pp.rpc(…)` is checked. JavaScript variables and
+functions are not type-checked, and of a call's result only the reads
+described under "Response Reads" are. An unchecked expression is not evidence
+that its value satisfies the contract.
+
+### Response Reads
+
+A component script that holds an awaited result in a variable has every field
+it reads off that variable checked against the rpc's response shape (see
+"Wire Shapes"). Given `save` answering
+`Saved = { contactId: number; tags: string[]; owner: Contact | null }`:
+
+```javascript
+const result = await pp.rpc("save", { name });
+result.contactId;            // checked: a field of Saved
+result.owner?.name;          // checked through `| null`, into Contact
+result.tags[0].trim();       // checked up to `tags`; a string's members are not
+result.contact_id;           // RAHTI_RPC_RESPONSE_FIELD: Saved has no field `contact_id`
+const { tags, total } = await pp.rpc("save", { name });   // `total` is refused
+```
+
+The error names the rpc, the value read from, the field, and the fields that
+value has. It is the JSON Serde writes that is checked, so a
+`#[serde(rename_all = "camelCase")]` response is read as `contactId`, and
+renaming a field in Rust is a compile error in every script that still reads
+the old name.
+
+A read is refused only when the value is an object whose every field is
+known and the name is not one of them. These are left alone:
+
+- a result that is not held as `const x = await pp.rpc("name", …)` or
+  destructured from it: one passed to `.then`, stored in state, returned, or
+  handed to a function and read there;
+- a variable that is assigned again, or given fields (`result.extra = …`,
+  `Object.assign(result, …)`, `delete result.field`);
+- what an array, a string or a number answers to (`length`, `map`, `trim`),
+  and a computed key (`result[key]`);
+- a shape that is not fully known: `unknown`, a flattened map, a type the
+  build could not follow (`schemaStatus` other than `resolved`), a stream;
+- bindings and handlers, which hold no awaited result.
+
+To read a field the shape does not declare, read it through another
+variable: `const loose = result; loose.anything`.
 
 In a binding or handler the error lands on the token: the name string, the
 key, or the payload object. A `<script>` body is one Rust string literal,
@@ -158,7 +198,9 @@ every payload, and the handler validates business rules before side effects
    `pp.rpc("name", { ... })` shape. Prefer explicit object keys when the data
    is already available; submit forms with the documented `FormData` pattern.
 5. Run `cargo check` and then the relevant router/browser tests. Compilation
-   does not prove that a dynamic payload or response-field access is correct.
+   proves the fields read directly off an awaited result (see "Response
+   Reads"); it does not prove a dynamic payload, or a result read after it
+   was stored in state or passed on.
 
 ## Wire Shapes
 
@@ -228,8 +270,13 @@ parameter). The shape honors `rename`, `rename_all`, `rename_all_fields`,
 A shape is read from source, not from the compiler, so it describes what the
 derive writes: a macro-generated type, a `#[path]` the scan cannot follow, or
 a type shadowing a standard name is reported as `unknown` or under the
-standard name's shape. It is a description for writing the caller, not a
-check: compilation still does not verify a response-field access.
+standard name's shape. `html!` checks a script's direct reads of an awaited
+result against these shapes (see "Response Reads"); everything else about a
+result is described here and checked by nothing.
+
+The shapes `html!` reads are in `.rahti/rpc-shapes.tsv`, written by the build
+before the crate compiles. It is generated beside the manifest: never edit
+it, and a project without it compiles with no response check.
 
 The manifest declares `rpcContractVersion: 1`. MCP requires this contract
 inventory and reports `RAHTI_RPC_CONTRACT_MANIFEST` with a regeneration

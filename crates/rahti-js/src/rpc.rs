@@ -237,7 +237,7 @@ impl<'a> Visit<'a> for Collector {
 }
 
 /// `pp.rpc`, written as a static member of the identifier `pp`.
-fn is_pp_rpc(callee: &Expression<'_>) -> bool {
+pub(crate) fn is_pp_rpc(callee: &Expression<'_>) -> bool {
     match callee {
         Expression::StaticMemberExpression(member) => {
             member.property.name == "rpc"

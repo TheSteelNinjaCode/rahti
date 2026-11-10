@@ -1756,8 +1756,11 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          accesses from the `typescript` shapes. A `schemaStatus` other than\n\
          `resolved` requires reading the Rust/Serde type. Use `pp.rpc` beside\n\
          its `#[rpc]`; run\n\
-         compiler and router/browser checks. Dynamic values and response-field\n\
-         accesses are not proved by compilation. See `docs/conventions/rpc-and-uploads.md`.\n\n",
+         compiler and router/browser checks. `html!` refuses a field read\n\
+         directly off `const x = await pp.rpc(\"name\", …)` that the response\n\
+         does not have; dynamic values, and a result read after it was stored\n\
+         or passed on, are not proved by compilation. See\n\
+         `docs/conventions/rpc-and-uploads.md`.\n\n",
     );
 
     out.push_str(

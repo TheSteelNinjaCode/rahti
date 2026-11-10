@@ -189,6 +189,9 @@ const SCHEMA: i64 = 1;
 const ROUTES_PATH: &str = "src/routes.rs";
 /// Generated, and not checked in: a description of the scan, for tooling.
 const MANIFEST_PATH: &str = ".rahti/manifest.json";
+/// What `html!` checks a read of an rpc's result against. Written before the
+/// crate compiles, which is when its macros run.
+const RPC_SHAPES_PATH: &str = ".rahti/rpc-shapes.tsv";
 /// The standalone CLI release used when `[css] version` says nothing.
 const DEFAULT_TAILWIND: &str = "4.3.3";
 
@@ -288,6 +291,7 @@ pub fn run() {
         &contracts.types,
     );
     write_if_changed(MANIFEST_PATH, &manifest);
+    write_if_changed(RPC_SHAPES_PATH, &contracts.shapes);
 }
 
 fn check_reserved_routes(entries: &[scanner::Entry], mcp: bool) {

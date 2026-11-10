@@ -19,6 +19,7 @@ mod job;
 mod parse;
 mod rpc;
 mod rpc_calls;
+mod rpc_shapes;
 mod socket;
 
 #[cfg(test)]
