@@ -114,6 +114,8 @@ pub struct Scope<'a> {
     arity: HashMap<String, usize>,
     /// Declaration head (`Page<Row>`) to its body.
     pub types: BTreeMap<String, String>,
+    /// A name is being followed to a function rather than to a type.
+    functions: bool,
 }
 
 const MAX_DEPTH: usize = 16;
@@ -141,6 +143,7 @@ impl<'a> Scope<'a> {
             complete: HashMap::new(),
             arity: HashMap::new(),
             types: BTreeMap::new(),
+            functions: false,
         }
     }
 
@@ -238,6 +241,105 @@ impl<'a> Scope<'a> {
         }
     }
 
+    // ----- every struct a generated module can name -----------------------
+
+    /// Each struct of the crate that a module generated inside `crate::routes`
+    /// can name and whose JSON is known, as `(path, type)`:
+    /// `("crate::services::projects::Project", "Project")`.
+    ///
+    /// The path is written into generated code, so a struct that might not
+    /// resolve there is left out: a private one below the crate root or the
+    /// routes module, one inside a module that is not `pub` or `pub(crate)`,
+    /// anything behind a `#[cfg]`, and a generic struct.
+    pub fn reachable(&mut self) -> Vec<(String, String)> {
+        let Some(root) = self.root.clone() else {
+            return Vec::new();
+        };
+        let mut paths = Vec::new();
+        self.walk(&root, &mut Vec::new(), 0, &mut paths);
+        let mut out = Vec::new();
+        for path in paths {
+            let Ok(ty) = syn::parse_str::<Type>(&path) else {
+                continue;
+            };
+            let shape = self.shape(&ty, Direction::Send);
+            if shape.status == Status::Resolved {
+                out.push((path, shape.typescript));
+            }
+        }
+        out
+    }
+
+    fn walk(
+        &mut self,
+        module: &Module,
+        path: &mut Vec<String>,
+        depth: usize,
+        out: &mut Vec<String>,
+    ) {
+        if depth > MAX_DEPTH {
+            return;
+        }
+        // A private item is visible to the modules below the one it is
+        // declared in: the generated module sits below `crate::routes`.
+        let open = path.is_empty() || path.as_slice() == ["routes"];
+        let listed = self.items(module, |items| {
+            let gated = |attrs: &[Attribute]| attrs.iter().any(|attr| attr.path().is_ident("cfg"));
+            let visible = |vis: &syn::Visibility| match vis {
+                syn::Visibility::Public(_) => true,
+                syn::Visibility::Restricted(restricted) => restricted.path.is_ident("crate"),
+                syn::Visibility::Inherited => open,
+            };
+            let mut structs = Vec::new();
+            let mut modules = Vec::new();
+            for item in items {
+                match item {
+                    Item::Struct(item)
+                        if !gated(&item.attrs)
+                            && visible(&item.vis)
+                            && item.generics.params.is_empty()
+                            && matches!(item.fields, syn::Fields::Named(_)) =>
+                    {
+                        structs.push(item.ident.to_string());
+                    }
+                    Item::Mod(item) if !gated(&item.attrs) && visible(&item.vis) => {
+                        modules.push(item.ident.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            (structs, modules)
+        });
+        let Some((structs, modules)) = listed else {
+            return;
+        };
+        let prefix = std::iter::once("crate")
+            .chain(path.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join("::");
+        out.extend(structs.into_iter().map(|name| format!("{prefix}::{name}")));
+        for name in modules {
+            if let Some(child) = self.child(module, &name) {
+                path.push(name);
+                self.walk(&child, path, depth + 1, out);
+                path.pop();
+            }
+        }
+    }
+
+    /// Whether the crate root this scope found declares `mod routes`.
+    pub fn has_routes(&mut self) -> bool {
+        let Some(root) = self.root.clone() else {
+            return false;
+        };
+        self.items(&root, |items| {
+            items
+                .iter()
+                .any(|item| matches!(item, Item::Mod(module) if module.ident == "routes"))
+        })
+        .unwrap_or(false)
+    }
+
     // ----- finding a definition ------------------------------------------
 
     fn items<R>(&mut self, module: &Module, read: impl FnOnce(&[Item]) -> R) -> Option<R> {
@@ -255,18 +357,44 @@ impl<'a> Scope<'a> {
     }
 
     fn definition(&mut self, module: &Module, name: &str) -> Option<Item> {
+        let functions = self.functions;
         self.items(module, |items| {
             items
                 .iter()
                 .find(|item| match item {
-                    Item::Struct(item) => item.ident == name,
-                    Item::Enum(item) => item.ident == name,
-                    Item::Type(item) => item.ident == name,
+                    Item::Fn(item) => functions && item.sig.ident == name,
+                    Item::Struct(item) => !functions && item.ident == name,
+                    Item::Enum(item) => !functions && item.ident == name,
+                    Item::Type(item) => !functions && item.ident == name,
                     _ => false,
                 })
                 .cloned()
         })
         .flatten()
+    }
+
+    /// The file a component is declared in, when `name`, written in this
+    /// scope's file, is a `#[component]` function of this crate: one the
+    /// file declares, or one a `use` brings in.
+    pub fn component_file(&mut self, name: &str) -> Option<PathBuf> {
+        let home = self.home.clone();
+        self.functions = true;
+        let located = self.locate(&home, &[name.to_string()], 0);
+        self.functions = false;
+        match located {
+            Located::Item(module, item) => match *item {
+                Item::Fn(function)
+                    if function
+                        .attrs
+                        .iter()
+                        .any(|attr| attr.path().is_ident("component")) =>
+                {
+                    Some(module.file)
+                }
+                _ => None,
+            },
+            Located::External(_) => None,
+        }
     }
 
     /// The directory a module's file-based children live in.

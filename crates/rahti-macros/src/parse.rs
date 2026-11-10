@@ -86,6 +86,12 @@ pub struct ClientSource {
     /// code can land on the token that wrote it. A script body or a quoted
     /// `pp-for` is one literal, which a span cannot reach inside.
     pub tokens: Option<TokenStream>,
+    /// The `pp-for` directives of the `<template>`s this code sits inside,
+    /// outermost first: the loop variables it can read.
+    pub loops: Vec<String>,
+    /// Written in fragment-rooted children between component tags, which
+    /// read the component's scope rather than this block's.
+    pub foreign: bool,
 }
 
 /// Does this attribute name a native DOM event handler?
@@ -446,6 +452,10 @@ pub struct Parsed {
     /// The name a `#[component]` fn handed down, which beats the one derived
     /// from the file path. See [`component_directive`](Parser::component_directive).
     pub forced_component: Option<String>,
+    /// The attribute names written on the block's root element, when the
+    /// root is an element and no spread can add to them: every prop the
+    /// block can ever be given.
+    pub root_attributes: Option<Vec<String>>,
     /// The single parent element is `<html>`, so this block is a document —
     /// a root layout. Its slot is wrapped rather than its root element
     /// stamped; see `stamp` in `lib.rs`.
@@ -477,7 +487,9 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         root_binding: None,
         root_close_at: None,
         inner_spread: false,
+        root_attributes: None,
         client_code: Vec::new(),
+        loops: Vec::new(),
     };
     let forced_component = parser.component_directive();
     parser.refuse_string_template()?;
@@ -505,6 +517,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         declares_component: parser.declares_component,
         root_owns_events: parser.root_owns_events,
         forced_component,
+        root_attributes: parser.root_attributes,
         renders_document,
         slot_at: parser.slot_at,
         client_code: parser.client_code,
@@ -633,8 +646,12 @@ struct Parser {
     /// A spread sits on an element below the root. What it brings is only
     /// known at render, and may be the caller's `bindings`.
     inner_spread: bool,
+    /// See [`Parsed::root_attributes`].
+    root_attributes: Option<Vec<String>>,
     /// See [`Parsed::client_code`].
     client_code: Vec<ClientSource>,
+    /// The `pp-for` of each `<template>` being parsed, outermost first.
+    loops: Vec<String>,
 }
 
 impl Parser {
@@ -918,7 +935,33 @@ impl Parser {
         // with attributes — a `type`d data block, a `src` — is written as it
         // stands.
         let component_script = name == "script" && attrs.is_empty();
+        // What a `<template pp-for="…">` repeats reads its loop variables.
+        let looped = (name == "template")
+            .then(|| {
+                attrs.iter().find_map(|attr| match attr {
+                    TagAttr::Literal {
+                        name,
+                        value: Some(value),
+                    } if name == "pp-for" => Some(normalize_newlines(value)),
+                    _ => None,
+                })
+            })
+            .flatten();
         if is_root {
+            // The names a root without a spread is written with are all the
+            // props it can have.
+            self.root_attributes = (!attrs.iter().any(|attr| matches!(attr, TagAttr::Spread(_))))
+                .then(|| {
+                    attrs
+                        .iter()
+                        .filter_map(|attr| match attr {
+                            TagAttr::Literal { name, .. } | TagAttr::Value { name, .. } => {
+                                Some(name.clone())
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                });
             self.root_attr_bindings = self.client_bindings - bindings_before;
             self.root_binding = attrs.iter().find_map(|attr| match attr {
                 TagAttr::Literal {
@@ -975,7 +1018,14 @@ impl Parser {
             self.raw_text(&name, ops)?;
         } else {
             self.depth += 1;
-            self.nodes(ops)?;
+            if let Some(directive) = looped {
+                self.loops.push(directive);
+                let nodes = self.nodes(ops);
+                self.loops.pop();
+                nodes?;
+            } else {
+                self.nodes(ops)?;
+            }
             self.depth -= 1;
         }
 
@@ -1116,6 +1166,8 @@ impl Parser {
             source,
             span,
             tokens: None,
+            loops: self.loops.clone(),
+            foreign: false,
         });
         Ok(())
     }
@@ -1145,6 +1197,8 @@ impl Parser {
             source: code,
             span: group.span(),
             tokens: Some(group.stream()),
+            loops: self.loops.clone(),
+            foreign: false,
         });
     }
 
@@ -1329,9 +1383,18 @@ impl Parser {
         let outer_root_binding = self.root_binding.take();
         let outer_root_close_at = self.root_close_at.take();
         let outer_inner_spread = std::mem::replace(&mut self.inner_spread, false);
+        let outer_root_attributes = self.root_attributes.take();
 
         let mut child_ops = Vec::new();
+        let first_child_code = self.client_code.len();
         let children = self.nodes(&mut child_ops);
+        // Fragment-rooted children read the component's scope, not this
+        // block's: their names are not this block's names.
+        if matches!(self.roots.as_slice(), [Root::Fragment(..)]) {
+            for code in &mut self.client_code[first_child_code..] {
+                code.foreign = true;
+            }
+        }
 
         let child_slot = self.component_slot;
         let child_declares = self.declares_component;
@@ -1358,6 +1421,7 @@ impl Parser {
         self.root_binding = outer_root_binding;
         self.root_close_at = outer_root_close_at;
         self.inner_spread = outer_inner_spread;
+        self.root_attributes = outer_root_attributes;
         children?;
 
         if !(self.is_punct(0, '<') && self.is_punct(1, '/')) {
@@ -1705,6 +1769,8 @@ impl Parser {
                             source: collection,
                             span,
                             tokens: None,
+                            loops: self.loops.clone(),
+                            foreign: false,
                         });
                     }
                     if name == COMPONENT_ATTR && !crate::component::is_valid_js_identifier(&value) {

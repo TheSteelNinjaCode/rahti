@@ -703,6 +703,62 @@ pub fn Greeting(user_name: &str) -> Html {
 }
 ```
 
+#### Prop names are checked
+
+Nothing ties the name a caller passes to the name a component reads at
+runtime: a misspelled one is an attribute nobody reads on one side and
+`undefined` on the other. `html!` refuses the two cases it can be certain of.
+
+**A prop the component never reads**, at the tag:
+
+```rust
+html! {
+    <MigrationDialog open={shown} curent={id} />
+    // RAHTI_PROP_NOT_READ: `MigrationDialog` never reads `pp.props.curent`.
+    // It reads `current`, `open`.
+}
+```
+
+A `{…}` prop is refused when the component's file never reads
+`pp.props.<name>`. Its name is compared in camelCase, so `online-now={…}` and
+`onlineNow={…}` both match `pp.props.onlineNow`. These are never refused:
+
+- a name the root element uses for itself: an HTML attribute (`class`,
+  `hidden`, `disabled`, `value`, …), a handler (`onclick`), and anything
+  starting `data-`, `aria-` or `pp-`. To set an attribute of your own on a
+  component's root, name it `data-…`;
+- a prop of a component that reads no prop itself: a wrapper, whose props
+  are for its root;
+- a prop of a component that may read one where the build cannot see it:
+  one that uses `pp.props` whole (`const { open } = pp.props`), forwards its
+  `bindings` to another component, or hands them to a function;
+- a prop of a component from another crate, or one brought in by a glob
+  import.
+
+Read a component's props in the file that declares it. A helper in another
+file that reads `pp.props.current` is not seen, and a caller passing
+`current` to that component is then refused.
+
+**A prop the component can never be given**, in the component:
+
+```rust
+#[component]
+pub fn Greeting(user_name: &str) -> Html {
+    html! {
+        <div user-name=@{user_name}>
+            <b>{pp.props.userNmae}</b>
+            // RAHTI_PROP_NEVER_GIVEN: its root element gives it `userName`.
+        </div>
+    }
+}
+```
+
+A component whose root element takes no spread has exactly the props that
+root is written with. Once the root carries `@{..bindings}` or `@{..attrs}`,
+a caller can pass any prop, and nothing read there is refused. A component
+that uses `pp.props` whole, and one whose root is another component or a
+fragment, is not checked either.
+
 Handlers read the props current when the event fires. Children written
 between component tags read the props of the block that wrote them. Derive
 values from `pp.props` on every render; `pp.state(pp.props.x)` seeds

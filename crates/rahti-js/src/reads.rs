@@ -14,10 +14,24 @@
 //! const { tags } = await pp.rpc("save", { name });   // one read: tags
 //! ```
 //!
+//! So is a result that comes back through a helper of the script's own, a
+//! function that returns what its callback returns (see `helpers`):
+//!
+//! ```text
+//! const result = await act(() => pp.rpc("save", { name }));
+//! result.contactId;                 // one read: contactId
+//! ```
+//!
+//! And so is the first parameter of a `.then` callback written on the call:
+//!
+//! ```text
+//! pp.rpc("save", { name }).then((result) => result.contactId);
+//! ```
+//!
 //! Everything else is left alone, because a wrong "no such field" on correct
 //! code is worse than a missed one: a variable that is assigned again, a
 //! result that is given fields (`result.extra = …`, `Object.assign(result, …)`),
-//! a result handed to `.then`, stored in state, or passed to a function and
+//! a result handed on through a second `.then`, or passed to a function and
 //! read there.
 
 use std::collections::{HashMap, HashSet};
@@ -34,6 +48,7 @@ use oxc_semantic::{Scoping, SemanticBuilder, SymbolId};
 use oxc_span::{SourceType, Span};
 
 use crate::Code;
+use crate::helpers::Helpers;
 
 /// One step from a value to a part of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +69,7 @@ pub struct Read {
 
 /// Every read of a `pp.rpc` result in `source`, in source order.
 pub fn rpc_reads(code: Code, source: &str) -> Vec<Read> {
-    if !source.contains("rpc") || !source.contains("await") {
+    if !source.contains("rpc") {
         return Vec::new();
     }
     // Only a script holds an awaited result in a variable: a binding is one
@@ -71,10 +86,12 @@ pub fn rpc_reads(code: Code, source: &str) -> Vec<Read> {
         return Vec::new();
     }
     let built = SemanticBuilder::new().build(&parsed.program);
+    let scoping = built.semantic.scoping();
     let mut collector = Collector {
         offset: prefix.len(),
         limit: source.len(),
-        scoping: built.semantic.scoping(),
+        scoping,
+        helpers: Helpers::of(&parsed.program, scoping),
         results: HashMap::new(),
         written: HashSet::new(),
         targets: HashSet::new(),
@@ -92,6 +109,8 @@ struct Collector<'s> {
     offset: usize,
     limit: usize,
     scoping: &'s Scoping,
+    /// The script's functions that hand back what a callback returns.
+    helpers: Helpers,
     /// Variables that hold an rpc's result, and which rpc.
     results: HashMap<SymbolId, String>,
     /// Results that are given fields, whose reads then prove nothing.
@@ -164,27 +183,13 @@ impl Collector<'_> {
     }
 }
 
-/// The rpc a `await pp.rpc("name", …)` initializer calls.
-fn awaited_rpc(init: &Expression<'_>) -> Option<String> {
-    let Expression::AwaitExpression(awaited) = init.without_parentheses() else {
-        return None;
-    };
-    let Expression::CallExpression(call) = awaited.argument.without_parentheses() else {
-        return None;
-    };
-    if !crate::rpc::is_pp_rpc(&call.callee) {
-        return None;
-    }
-    match call.arguments.first()? {
-        Argument::StringLiteral(literal) => Some(literal.value.to_string()),
-        Argument::TemplateLiteral(literal) => literal.single_quasi().map(|q| q.to_string()),
-        _ => None,
-    }
-}
-
 impl<'a> Visit<'a> for Collector<'_> {
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
-        if let Some(rpc) = declarator.init.as_ref().and_then(awaited_rpc) {
+        if let Some(rpc) = declarator
+            .init
+            .as_ref()
+            .and_then(|init| self.helpers.awaited_rpc(self.scoping, init))
+        {
             match &declarator.id {
                 BindingPattern::BindingIdentifier(binding) => {
                     if let Some(symbol) = binding.symbol_id.get()
@@ -243,6 +248,12 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        // `pp.rpc("save", …).then((result) => …)`: `result` is the response.
+        if let Some((rpc, callback)) = self.helpers.then(self.scoping, call)
+            && let Some(symbol) = crate::helpers::first_parameter(self.scoping, callback)
+        {
+            self.results.insert(symbol, rpc);
+        }
         // `Object.assign(result, …)` and its relatives give the result fields.
         if let Expression::StaticMemberExpression(callee) = &call.callee
             && matches!(&callee.object, Expression::Identifier(id) if id.name == "Object")

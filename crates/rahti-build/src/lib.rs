@@ -273,7 +273,12 @@ pub fn run() {
         ROUTES_PATH,
         &codegen::routes_rs(&scan.entries, &components.rpcs, &sockets, &config),
     );
-    let contracts = contracts::inventory(&scan.entries, &components.rpcs);
+    let contracts = contracts::inventory(
+        &scan.entries,
+        &components.rpcs,
+        ROUTES_PATH,
+        &components.files,
+    );
     // A response type usually lives outside the app directory, in a file the
     // scan does not watch: the manifest describes it, so it reruns the build.
     for path in &contracts.read {

@@ -471,9 +471,27 @@ The current implementation covers:
 - RPC wire shapes: each `#[rpc]`'s payload and response read from source as
   TypeScript, Serde attributes included, with a status saying how much of
   the shape the source accounted for;
+- payloads followed at compile time: a `pp.rpc` payload a script builds from
+  its own helper function or `const` object is followed to its literals, so
+  a required parameter it no longer sends is refused at the call;
 - response reads checked at compile time: a field a component script reads
-  directly off an awaited `pp.rpc` result is refused when the response's
-  shape does not have it;
+  directly off an awaited `pp.rpc` result, or off one a helper of the script
+  hands back, is refused when the response's shape does not have it;
+- state reads checked at compile time: a state that only ever holds one
+  rpc's response has each field read off it — in the script, in bindings and
+  handlers, and in the rows of a `pp-for` over it or over a list a script
+  function filters or picks from it — refused when the response does not
+  have it. A state that starts from a server value holds that value or the
+  response it is then given, and a field neither has is refused;
+- server value reads checked at compile time: a field read off a script's
+  `const name = @{…}`, or off a row of it, is refused by the compiler when
+  the struct the value is made of has no such field. The build lists every
+  `pub` struct of the application that derives `Serialize`, and
+  `rahti::shapes!()`, written at the end of the generated `src/routes.rs`,
+  gives each a shape the compiler can follow a read through;
+- prop names checked at compile time: a `{…}` prop a component's file never
+  reads as `pp.props.name` is refused at the tag, and a `pp.props.name` a
+  component's root can never be given is refused in the component;
 - an agent apply loop: `cargo rahti restart`, `status` and `stop`, with stale
   source detection, per-boot browser and job reports, and matching MCP tools;
 - optional read-only MCP project inspection over local stdio and secured

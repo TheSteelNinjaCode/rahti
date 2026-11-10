@@ -801,3 +801,42 @@ fn a_document_slot_raises_its_childrens_brace_references() {
     let ops = ops_of(r#"<main><slot /></main>"#, "src/app/dashboard/layout.rs");
     assert!(ops.iter().any(|op| matches!(op, Op::Slot)));
 }
+
+/// A question about a server value is written around that value, where it
+/// is evaluated, and around no other.
+#[test]
+fn a_question_about_a_server_value_wraps_that_value() {
+    let tokens = TokenStream::from_str(
+        "<div><script>r##\"const [a, setA] = pp.state(@{first}); const [b, setB] = pp.state(@{Json(&second)});\"##</script></div>",
+    )
+    .unwrap();
+    let mut parsed = parse::parse(tokens).ok().unwrap();
+    let script = parsed.client_code[0].key.clone();
+    let question = state_types::SeedProbe {
+        script,
+        index: 1,
+        tokens: quote! { question(); },
+    };
+    ask_about_seeds(&mut parsed.ops, &[question]);
+    let values = parsed
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            Op::ScriptData(values) => Some(values),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(values[0].to_string(), "first");
+    assert_eq!(
+        values[1].to_string(),
+        quote! {
+            match ::core::convert::identity(Json(&second)) {
+                __rahti_seed => {
+                    question();
+                    __rahti_seed
+                }
+            }
+        }
+        .to_string()
+    );
+}

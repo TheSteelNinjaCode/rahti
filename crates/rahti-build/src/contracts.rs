@@ -15,13 +15,23 @@ pub struct Inventory {
     /// File to `{ "Name<T>": "body" }`: the declarations a contract in that
     /// file names. A name is unique within its file, not across files.
     pub types: Value,
-    /// The response shapes as `html!` reads them, one line each:
-    /// `R\tfile\trpc\ttype` and `T\tfile\thead\tbody`.
+    /// The shapes as the macros read them, one line each:
+    /// `R\tfile\trpc\ttype` for a response and `T\tfile\thead\tbody` for a
+    /// declaration it names; `C\tfile\tComponent\tprops` for each component a
+    /// file can call, with the props that component reads (see
+    /// [`props_read`]); then, under the file `*`, `G\t*\tpath\ttype` for every
+    /// struct of the crate a generated module can name, and the `T\t*\t…`
+    /// declarations those use.
     pub shapes: String,
     pub read: Vec<String>,
 }
 
-pub fn inventory(entries: &[Entry], components: &[Rpc]) -> Inventory {
+pub fn inventory(
+    entries: &[Entry],
+    components: &[Rpc],
+    routes: &str,
+    templates: &[String],
+) -> Inventory {
     let mut files = BTreeMap::new();
     for entry in entries
         .iter()
@@ -75,11 +85,55 @@ pub fn inventory(entries: &[Entry], components: &[Rpc]) -> Inventory {
             }
             contracts.push(contract);
         }
+        if !shapes.types.is_empty() {
+            types.insert(file.clone(), json!(shapes.types));
+        }
         for (head, body) in &shapes.types {
             lines.push_str(&format!("T\t{file}\t{head}\t{body}\n"));
         }
-        if !shapes.types.is_empty() {
-            types.insert(file, json!(shapes.types));
+    }
+    // Each component a template's file can call, and the props it reads: a
+    // `{…}` prop the component never reads is refused at the tag.
+    let mut read_by: BTreeMap<std::path::PathBuf, Option<String>> = BTreeMap::new();
+    for file in entries
+        .iter()
+        .filter(|entry| entry.kind != Kind::Route)
+        .map(|entry| &entry.file)
+        .chain(templates)
+    {
+        let Some(parsed) = fs::read_to_string(file)
+            .ok()
+            .and_then(|source| syn::parse_file(&source).ok())
+        else {
+            continue;
+        };
+        let mut scope = Scope::new(&mut sources, file);
+        for name in callable(&parsed) {
+            let Some(declared) = scope.component_file(&name) else {
+                continue;
+            };
+            let props = read_by.entry(declared.clone()).or_insert_with(|| {
+                fs::read_to_string(&declared)
+                    .ok()
+                    .and_then(|source| props_read(&source))
+                    .map(|props| props.into_iter().collect::<Vec<_>>().join(" "))
+            });
+            // `*`: the component may read any prop.
+            let props = props.as_deref().unwrap_or("*");
+            lines.push_str(&format!("C\t{file}\t{name}\t{props}\n"));
+        }
+    }
+
+    // Every struct the module generated beside the routes can name, with its
+    // JSON: what `rahti::shapes!` implements `rahti::shape::Shape` for, and
+    // what `html!` checks a server value's reads against.
+    let mut crate_wide = Scope::new(&mut sources, routes);
+    if crate_wide.has_routes() {
+        for (path, shape) in crate_wide.reachable() {
+            lines.push_str(&format!("G\t*\t{path}\t{shape}\n"));
+        }
+        for (head, body) in &crate_wide.types {
+            lines.push_str(&format!("T\t*\t{head}\t{body}\n"));
         }
     }
     Inventory {
@@ -92,6 +146,99 @@ pub fn inventory(entries: &[Entry], components: &[Rpc]) -> Inventory {
             .map(|path| path.to_string_lossy().replace('\\', "/"))
             .collect(),
     }
+}
+
+/// The names a template in this file may call a component by: each
+/// `#[component]` function the file declares at its top level, and each
+/// capitalised name a top-level `use` brings in.
+pub(crate) fn callable(file: &syn::File) -> Vec<String> {
+    fn imported(tree: &syn::UseTree, out: &mut Vec<String>) {
+        match tree {
+            syn::UseTree::Path(path) => imported(&path.tree, out),
+            syn::UseTree::Name(name) => out.push(name.ident.to_string()),
+            syn::UseTree::Rename(rename) => out.push(rename.rename.to_string()),
+            syn::UseTree::Group(group) => group.items.iter().for_each(|tree| imported(tree, out)),
+            syn::UseTree::Glob(_) => {}
+        }
+    }
+    let mut names = Vec::new();
+    for item in &file.items {
+        match item {
+            Item::Fn(function)
+                if function
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.path().is_ident("component")) =>
+            {
+                names.push(function.sig.ident.to_string());
+            }
+            Item::Use(item) => imported(&item.tree, &mut names),
+            _ => {}
+        }
+    }
+    names.retain(|name| name.starts_with(|c: char| c.is_ascii_uppercase()));
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// The props the components of one file read, as `pp.props.name`, or `None`
+/// when a prop could be read some way this cannot see.
+///
+/// The file is read as text, since the reads are in templates and scripts.
+/// It errs towards `None`: `pp.props` used whole, the component's `bindings`
+/// forwarded to another component or used for anything but the declaration
+/// and a spread, all mean a prop may be read somewhere else.
+pub(crate) fn props_read(source: &str) -> Option<std::collections::BTreeSet<String>> {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$';
+    let mut names = std::collections::BTreeSet::new();
+
+    let mut rest = source;
+    while let Some(at) = rest.find("pp.props") {
+        // `app.props` and `pp.propsList` are other names.
+        let before = rest[..at].chars().next_back();
+        let after = &rest[at + "pp.props".len()..];
+        rest = after;
+        if before.is_some_and(word) || after.starts_with(word) {
+            continue;
+        }
+        let member = after.strip_prefix("?.").or_else(|| after.strip_prefix('.'));
+        let name: String = member
+            .map(|member| member.chars().take_while(|c| word(*c)).collect())
+            .unwrap_or_default();
+        if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+        names.insert(name);
+    }
+
+    let mut rest = source;
+    let mut offset = 0;
+    while let Some(at) = rest.find("bindings") {
+        let start = offset + at;
+        let end = start + "bindings".len();
+        offset = end;
+        rest = &source[end..];
+        let before = source[..start].trim_end();
+        let after = source[end..].trim_start();
+        if source[..start].chars().next_back().is_some_and(word) || source[end..].starts_with(word)
+        {
+            continue;
+        }
+        // The parameter's declaration.
+        if after.starts_with(':') && !after.starts_with("::") {
+            continue;
+        }
+        // `@{..bindings}`: a spread, which has to be on a plain element.
+        if before.ends_with("..") && after.starts_with('}') {
+            let tag = source[..start].rfind('<').map(|open| &source[open + 1..]);
+            if tag.is_some_and(|tag| tag.starts_with(|c: char| c.is_ascii_lowercase())) {
+                continue;
+            }
+        }
+        return None;
+    }
+    Some(names)
 }
 
 fn functions_in<'a>(items: &'a [Item], out: &mut Vec<&'a syn::ItemFn>) {

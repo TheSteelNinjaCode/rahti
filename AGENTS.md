@@ -130,7 +130,10 @@ preserve them, and documentation or scaffold changes must teach them.
     and keeps that owner when a component hands them on with `@{children}`.
     Fragment-rooted (`<>…</>`) children and `Html` built in Rust read the
     component's scope instead. `pp.props` works in a component's script,
-    markup, and inline handlers alike. A client `{…}` a component writes on
+    markup, and inline handlers alike. Read a component's props in the file
+    that declares it: `html!` refuses a `{…}` prop that file never reads
+    (`RAHTI_PROP_NOT_READ`), and a `pp.props.name` the component's root can
+    never be given (`RAHTI_PROP_NEVER_GIVEN`). A client `{…}` a component writes on
     its own root is a compile error (root attributes are evaluated in the
     caller's scope; handlers excepted). A script-less component whose own
     markup binds a client value gets an empty `<script></script>` from

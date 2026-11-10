@@ -5,6 +5,23 @@
 //! or a 400 from the server. This module only reads the calls; what they are
 //! checked against lives with the macro.
 //!
+//! A payload is usually an object literal, whose keys are all there to read.
+//! One built elsewhere in the same script is followed back to its literal:
+//!
+//! ```text
+//! function ids() { return { project_id: projectId, service_id: serviceId }; }
+//! const filter = { status: "open" };
+//!
+//! pp.rpc("list_events", { ...ids(), ...filter, page });   // five keys, all known
+//! pp.rpc("load_service", ids());                          // two keys
+//! ```
+//!
+//! A `const` is followed when nothing but payloads, spreads and field reads
+//! ever name it; a function when it is called with no arguments and ends in
+//! its one `return`. A key that arrives this way is marked [`Key::followed`]:
+//! it counts as sent, but it is not held against the rpc as a key written at
+//! the call would be, because one helper often serves several rpcs.
+//!
 //! A call counts when its callee is written exactly `pp.rpc`. `pp["rpc"]`,
 //! `(0, pp.rpc)` and an alias are other ways to reach the same function, and
 //! are left alone: the check is a developer aid for the form the conventions
@@ -13,10 +30,19 @@
 use std::ops::Range;
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{Argument, CallExpression, Expression, ObjectPropertyKind};
+use std::collections::HashSet;
+
+use oxc_ast::AstKind;
+use oxc_ast::ast::{
+    Argument, ArrowFunctionBody, ArrowFunctionExpression, CallExpression, Expression, Function,
+    FunctionBody, IdentifierReference, ObjectExpression, ObjectPropertyKind, ReturnStatement,
+    SimpleAssignmentTarget, Statement, StaticMemberExpression,
+};
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
+use oxc_semantic::{AstNodes, Scoping, SemanticBuilder, SymbolId};
 use oxc_span::{GetSpan, SourceType, Span};
+use oxc_syntax::scope::ScopeFlags;
 
 /// Which kind of client code a source is, which decides how it parses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,15 +79,16 @@ pub enum RpcName {
 pub enum Payload {
     /// `pp.rpc("name")`.
     Missing,
-    /// An object literal. `open` when a spread or a computed key means the
-    /// keys written are not all the keys sent.
+    /// An object literal, or a value followed back to one. `open` when a
+    /// spread that could not be followed, or a computed key, means the keys
+    /// known are not all the keys sent.
     Object {
         keys: Vec<Key>,
         open: bool,
         span: Range<usize>,
     },
     /// Something whose keys are only known at runtime: `FormData`,
-    /// `Object.fromEntries(…)`, a variable, a call.
+    /// `Object.fromEntries(…)`, a variable or a call that is not followed.
     Unchecked,
 }
 
@@ -72,6 +99,9 @@ pub struct Key {
     pub span: Range<usize>,
     pub value: Literal,
     pub value_span: Range<usize>,
+    /// Written in an object the payload spreads or is, rather than in the
+    /// call itself.
+    pub followed: bool,
 }
 
 /// Only syntax that proves a JSON value's shape. Variables and calls remain unknown.
@@ -137,23 +167,206 @@ pub fn rpc_calls(code: Code, source: &str) -> Vec<RpcCall> {
     if parsed.diagnostics.errors().next().is_some() {
         return Vec::new();
     }
+    let built = SemanticBuilder::new()
+        .with_build_nodes(true)
+        .build(&parsed.program);
+    let scoping = built.semantic.scoping();
+    // Objects that something other than a payload may have changed.
+    let mut uses = Uses {
+        scoping,
+        allowed: HashSet::new(),
+        touched: HashSet::new(),
+    };
+    uses.visit_program(&parsed.program);
     let mut collector = Collector {
         offset: prefix.len(),
         limit: source.len(),
+        scoping,
+        nodes: built.semantic.nodes(),
+        touched: uses.touched,
         calls: Vec::new(),
     };
     collector.visit_program(&parsed.program);
     collector.calls
 }
 
-struct Collector {
+/// Finds the variables that are named in any way that could change what they
+/// hold: handed to a function, aliased, given a field. A payload, a spread
+/// and a field read change nothing.
+struct Uses<'s> {
+    scoping: &'s Scoping,
+    /// Identifiers that are a payload, a spread, or read through.
+    allowed: HashSet<Span>,
+    touched: HashSet<SymbolId>,
+}
+
+impl Uses<'_> {
+    fn allow(&mut self, expression: &Expression<'_>) {
+        if let Expression::Identifier(identifier) = expression.without_parentheses() {
+            self.allowed.insert(identifier.span);
+        }
+    }
+}
+
+impl<'a> Visit<'a> for Uses<'_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if is_pp_rpc(&call.callee)
+            && let Some(payload) = call.arguments.get(1).and_then(Argument::as_expression)
+        {
+            self.allow(payload);
+        }
+        walk::walk_call_expression(self, call);
+    }
+
+    fn visit_object_expression(&mut self, object: &ObjectExpression<'a>) {
+        for property in &object.properties {
+            if let ObjectPropertyKind::SpreadProperty(spread) = property {
+                self.allow(&spread.argument);
+            }
+        }
+        walk::walk_object_expression(self, object);
+    }
+
+    fn visit_simple_assignment_target(&mut self, target: &SimpleAssignmentTarget<'a>) {
+        // `filter.status = …`: the object is changed.
+        if let Some(member) = target.as_member_expression()
+            && let Expression::Identifier(identifier) = member.object().without_parentheses()
+            && let Some(symbol) = identifier
+                .reference_id
+                .get()
+                .and_then(|reference| self.scoping.get_reference(reference).symbol_id())
+        {
+            self.touched.insert(symbol);
+        }
+        walk::walk_simple_assignment_target(self, target);
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        self.allow(&member.object);
+        walk::walk_static_member_expression(self, member);
+    }
+
+    fn visit_identifier_reference(&mut self, identifier: &IdentifierReference<'a>) {
+        if !self.allowed.contains(&identifier.span)
+            && let Some(symbol) = identifier
+                .reference_id
+                .get()
+                .and_then(|reference| self.scoping.get_reference(reference).symbol_id())
+        {
+            self.touched.insert(symbol);
+        }
+    }
+}
+
+/// Counts a function's own `return`s, and not those of functions inside it.
+struct OwnReturns(usize);
+
+impl<'a> Visit<'a> for OwnReturns {
+    fn visit_return_statement(&mut self, _: &ReturnStatement<'a>) {
+        self.0 += 1;
+    }
+
+    fn visit_function(&mut self, _: &Function<'a>, _: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _: &ArrowFunctionExpression<'a>) {}
+}
+
+/// What a function called with no arguments returns: the value of its one
+/// `return`, which is its last statement.
+fn returned<'a>(body: &'a FunctionBody<'a>) -> Option<&'a Expression<'a>> {
+    let mut returns = OwnReturns(0);
+    returns.visit_function_body(body);
+    if returns.0 != 1 {
+        return None;
+    }
+    match body.statements.last()? {
+        Statement::ReturnStatement(statement) => statement.argument.as_ref(),
+        _ => None,
+    }
+}
+
+/// How far a payload is followed through `const`s, functions and spreads.
+const MAX_DEPTH: usize = 12;
+
+struct Collector<'s, 'a> {
     /// Where the source starts inside the wrapped text.
     offset: usize,
     limit: usize,
+    scoping: &'s Scoping,
+    nodes: &'s AstNodes<'a>,
+    /// Variables whose object something may have changed.
+    touched: HashSet<SymbolId>,
     calls: Vec<RpcCall>,
 }
 
-impl Collector {
+impl<'a> Collector<'_, 'a> {
+    /// The object literal a value is, when that is certain: the literal
+    /// itself, a `const` nothing else touches, or what a function of this
+    /// code returns when called with no arguments.
+    fn object(&self, value: &'a Expression<'a>, depth: usize) -> Option<&'a ObjectExpression<'a>> {
+        if depth > MAX_DEPTH {
+            return None;
+        }
+        match value.without_parentheses() {
+            Expression::ObjectExpression(object) => Some(object),
+            Expression::Identifier(identifier) => {
+                let symbol = self.symbol(identifier)?;
+                if self.touched.contains(&symbol)
+                    || !self.scoping.symbol_flags(symbol).is_const_variable()
+                {
+                    return None;
+                }
+                let AstKind::VariableDeclarator(declarator) =
+                    self.nodes.kind(self.scoping.symbol_declaration(symbol))
+                else {
+                    return None;
+                };
+                self.object(declarator.init.as_ref()?, depth + 1)
+            }
+            Expression::CallExpression(call) if call.arguments.is_empty() => {
+                let Expression::Identifier(callee) = call.callee.without_parentheses() else {
+                    return None;
+                };
+                let symbol = self.symbol(callee)?;
+                if self.scoping.symbol_is_mutated(symbol) {
+                    return None;
+                }
+                let returned = match self.nodes.kind(self.scoping.symbol_declaration(symbol)) {
+                    AstKind::Function(function) if !function.r#async && !function.generator => {
+                        returned(function.body.as_ref()?)?
+                    }
+                    AstKind::VariableDeclarator(declarator)
+                        if self.scoping.symbol_flags(symbol).is_const_variable() =>
+                    {
+                        match declarator.init.as_ref()?.without_parentheses() {
+                            Expression::ArrowFunctionExpression(arrow) if !arrow.r#async => {
+                                match &arrow.body {
+                                    ArrowFunctionBody::FunctionBody(body) => returned(body)?,
+                                    value => value.as_expression()?,
+                                }
+                            }
+                            Expression::FunctionExpression(function)
+                                if !function.r#async && !function.generator =>
+                            {
+                                returned(function.body.as_ref()?)?
+                            }
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                self.object(returned, depth + 1)
+            }
+            _ => None,
+        }
+    }
+
+    fn symbol(&self, identifier: &IdentifierReference<'_>) -> Option<SymbolId> {
+        self.scoping
+            .get_reference(identifier.reference_id.get()?)
+            .symbol_id()
+    }
+
     /// `span` as a range in the source rather than in the wrapped text.
     fn range(&self, span: Span) -> Range<usize> {
         let at = |position: u32| {
@@ -182,19 +395,47 @@ impl Collector {
         }
     }
 
-    fn payload(&self, call: &CallExpression<'_>) -> Payload {
+    fn payload(&self, call: &'a CallExpression<'a>) -> Payload {
         let Some(argument) = call.arguments.get(1) else {
             return Payload::Missing;
         };
-        let Argument::ObjectExpression(object) = argument else {
+        let Some(value) = argument.as_expression() else {
+            return Payload::Unchecked;
+        };
+        let written = matches!(value.without_parentheses(), Expression::ObjectExpression(_));
+        let Some(object) = self.object(value, 0) else {
             return Payload::Unchecked;
         };
         let mut keys = Vec::new();
         let mut open = false;
+        self.keys(object, !written, 0, &mut keys, &mut open);
+        Payload::Object {
+            keys,
+            open,
+            // A payload built elsewhere is still sent from the call.
+            span: self.range(argument.span()),
+        }
+    }
+
+    /// The keys of `object`, in the order that decides which value wins, with
+    /// each spread that can be followed replaced by the keys it brings.
+    fn keys(
+        &self,
+        object: &'a ObjectExpression<'a>,
+        followed: bool,
+        depth: usize,
+        keys: &mut Vec<Key>,
+        open: &mut bool,
+    ) {
         for property in &object.properties {
             match property {
-                ObjectPropertyKind::SpreadProperty(_) => open = true,
-                ObjectPropertyKind::ObjectProperty(property) if property.computed => open = true,
+                ObjectPropertyKind::SpreadProperty(spread) => {
+                    match self.object(&spread.argument, depth + 1) {
+                        Some(spread) => self.keys(spread, true, depth + 1, keys, open),
+                        None => *open = true,
+                    }
+                }
+                ObjectPropertyKind::ObjectProperty(property) if property.computed => *open = true,
                 ObjectPropertyKind::ObjectProperty(property) => match property.key.static_name() {
                     Some(name) => {
                         // JSON object literals use the final property with a given name.
@@ -210,26 +451,32 @@ impl Collector {
                                 literal(&property.value)
                             },
                             value_span: self.range(property.value.span()),
+                            followed,
                         });
                     }
-                    None => open = true,
+                    None => *open = true,
                 },
             }
-        }
-        Payload::Object {
-            keys,
-            open,
-            span: self.range(object.span),
         }
     }
 }
 
-impl<'a> Visit<'a> for Collector {
+impl<'a> Visit<'a> for Collector<'_, 'a> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if is_pp_rpc(&call.callee) {
+            // The node is the tree's own, so what a payload is followed to
+            // can be read for as long as the tree is.
+            let node = self.nodes.iter().find_map(|node| match node.kind() {
+                AstKind::CallExpression(node) if node.span == call.span => Some(node),
+                _ => None,
+            });
+            let payload = match node {
+                Some(call) => self.payload(call),
+                None => Payload::Unchecked,
+            };
             self.calls.push(RpcCall {
                 name: self.name(call),
-                payload: self.payload(call),
+                payload,
             });
         }
         walk::walk_call_expression(self, call);

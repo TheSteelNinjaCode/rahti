@@ -231,6 +231,132 @@ pub fn rpc_response_field(
     )
 }
 
+/// `domain.nmae` when `domain` is a row of a state that only ever holds an
+/// rpc's response, and the response has no such field. `owner` is the value
+/// read from, as written, and `line` is where, for code a span cannot point
+/// inside.
+pub fn state_field(
+    state: &str,
+    rpc: &str,
+    owner: &str,
+    field: &str,
+    fields: &[String],
+    line: &str,
+) -> String {
+    let has = if fields.is_empty() {
+        "It has no fields".to_string()
+    } else {
+        let names: Vec<String> = fields.iter().map(|field| format!("`{field}`")).collect();
+        format!("Its fields are {}", names.join(", "))
+    };
+    format!(
+        "rahti[RAHTI_STATE_FIELD]: `{owner}` has no field `{field}`{line}: the state `{state}` \
+         only ever holds what `{rpc}` answers.\n  {has}. The shape is the JSON Serde writes, \
+         not the Rust spelling: see that rpc's `response` in `.rahti/manifest.json`.\n  To \
+         keep other fields in `{state}`, give it a value built in the script, as in \
+         `rows.map((row) => ({{ ...row, open: false }}))`, and it is no longer checked."
+    )
+}
+
+/// `project.nmae` when `project` comes from a server value and the struct
+/// that value is made of has no such field: the message, the label on the
+/// field, and a note. The compiler reports these, and shows in place of
+/// `{Self}` the object that lacks the field: a marker whose name is the
+/// struct's followed by its fields.
+pub fn server_value_field(
+    owner: &str,
+    field: &str,
+    from: &crate::state_types::From,
+    line: &str,
+) -> [String; 3] {
+    use crate::state_types::From;
+    let label = "`{Self}` names the struct this is, then its fields".to_string();
+    let serde = "The fields are the JSON Serde writes, not the Rust spelling.";
+    match from {
+        From::Constant(value) => [
+            format!(
+                "rahti[RAHTI_SERVER_VALUE_FIELD]: `{owner}` has no field `{field}`{line}: it \
+                 comes from the server value `{value}`, whose Rust struct has no such field"
+            ),
+            label,
+            format!(
+                "{serde} To read a field the struct does not have, add it to the struct \
+                 `{value}` is rendered from."
+            ),
+        ],
+        From::State(state) => [
+            format!(
+                "rahti[RAHTI_STATE_FIELD]: `{owner}` has no field `{field}`{line}: the state \
+                 `{state}` only ever holds the server value it starts from, whose Rust struct \
+                 has no such field"
+            ),
+            label,
+            format!(
+                "{serde} To keep other fields in `{state}`, give it a value built in the \
+                 script, as in `rows.map((row) => ({{ ...row, open: false }}))`, and it is no \
+                 longer checked."
+            ),
+        ],
+        From::SeededState(state, rpc) => [
+            format!(
+                "rahti[RAHTI_STATE_FIELD]: `{owner}` has no field `{field}`{line}: the state \
+                 `{state}` holds the server value it starts from or what `{rpc}` answers, and \
+                 neither has such a field"
+            ),
+            label,
+            format!(
+                "{serde} See that rpc's `response` in `.rahti/manifest.json`. To keep other \
+                 fields in `{state}`, give it a value built in the script, as in \
+                 `rows.map((row) => ({{ ...row, open: false }}))`, and it is no longer checked."
+            ),
+        ],
+    }
+}
+
+/// `<MigrationDialog curent={id}>`, when the component reads no prop of that
+/// name and it is not an attribute its root element would use.
+pub fn prop_not_read(component: &str, prop: &str, read: &[String]) -> String {
+    let reads = if read.is_empty() {
+        "It reads no props".to_string()
+    } else {
+        let names: Vec<String> = read.iter().map(|name| format!("`{name}`")).collect();
+        format!("It reads {}", names.join(", "))
+    };
+    format!(
+        "rahti[RAHTI_PROP_NOT_READ]: `<{component}>` is passed `{prop}={{…}}`, and \
+         `{component}` never reads `pp.props.{prop}`.\n  {reads}. A `{{…}}` prop reaches the \
+         component as an attribute of its root element, which its code reads as \
+         `pp.props.name`.\n  Pass one of those names; or, to set an attribute the root \
+         element itself uses, write an HTML attribute name or `data-{prop}`."
+    )
+}
+
+/// `pp.props.userNmae` in a component whose root element takes no spread and
+/// is not written with that attribute.
+pub fn prop_never_given(prop: &str, props: &[String], line: &str) -> String {
+    let has = if props.is_empty() {
+        "Its root element is written with no attributes".to_string()
+    } else {
+        let names: Vec<String> = props.iter().map(|name| format!("`{name}`")).collect();
+        format!("Its root element gives it {}", names.join(", "))
+    };
+    // `userName` is written `user-name` on an element.
+    let mut attribute = String::new();
+    for c in prop.chars() {
+        if c.is_ascii_uppercase() {
+            attribute.push('-');
+        }
+        attribute.push(c.to_ascii_lowercase());
+    }
+    format!(
+        "rahti[RAHTI_PROP_NEVER_GIVEN]: this component reads `pp.props.{prop}`{line}, a prop \
+         it is never given.\n  {has}: a component's props are the attributes of its root \
+         element, in camelCase.\n  Write the value on the root, `<div {attribute}=@{{value}}>`; \
+         or take `bindings: Bindings` and spread it on the root, `<div @{{..bindings}}>`, for \
+         the caller to pass `{attribute}={{…}}`."
+    )
+}
+
 /// `pp.rpc()` — a call that names no rpc at all.
 pub fn rpc_name_missing() -> String {
     "rahti[RAHTI_RPC_NAME_MISSING]: `pp.rpc()` names no `#[rpc]`.\n  Write the function's name first, as a string \

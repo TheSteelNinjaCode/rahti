@@ -288,7 +288,7 @@ fn ordinary_reads_of_a_response_are_not_refused() {
         "let r = await pp.rpc(\"save\", { name }); r = shaped(r); use(r.anything);",
         "const r = await pp.rpc(\"save\", { name }); r.local = 1; use(r.local);",
         "const r = await pp.rpc(\"save\", { name }); setSaved(r); render(r);",
-        "pp.rpc(\"save\", { name }).then((r) => use(r.anything));",
+        "pp.rpc(\"save\", { name }).then(pick).then((r) => use(r.anything));",
         // Another value with a field of that name.
         "const r = await pp.rpc(\"save\", { name }); use(other.contact_id, r.contactId);",
     ] {
@@ -306,4 +306,78 @@ fn a_template_with_no_shapes_is_checked_as_before() {
     for code in &parsed.client_code {
         assert!(checks_against(code, &mut next, None).is_ok());
     }
+}
+
+#[test]
+fn a_result_a_helper_hands_back_is_read_like_any_other() {
+    const ACT: &str = "async function act(request) {
+             try { return await request(); } catch (error) { fail(error); return null; }
+         }
+";
+    let message = read_refused(&script(&format!(
+        "{ACT}async function save() {{
+             const result = await act(() => pp.rpc(\"save\", {{ name }}));
+             setId(result.contact_id);
+         }}"
+    )))
+    .expect("a refusal");
+    assert!(
+        message.contains("`save` answers `Saved`, which has no field `contact_id`"),
+        "{message}"
+    );
+
+    // The fields the response has are read without a word.
+    assert_eq!(
+        read_refused(&script(&format!(
+            "{ACT}async function save() {{
+                 const result = await act(() => pp.rpc(\"save\", {{ name }}));
+                 setId(result.contactId); show(result.owner?.name);
+             }}"
+        ))),
+        None
+    );
+
+    // A helper that may return something of its own is not followed: the
+    // field read may be one the fallback has.
+    assert_eq!(
+        read_refused(&script(
+            "async function act(request) {
+                 try { return await request(); } catch { return { contact_id: 0 }; }
+             }
+             async function save() {
+                 const result = await act(() => pp.rpc(\"save\", { name }));
+                 setId(result.contact_id);
+             }"
+        )),
+        None
+    );
+}
+
+/// A payload the script builds elsewhere is followed: the set of keys is
+/// known, so the rpc's required parameters are checked, and a key that
+/// arrived that way is not checked as one written at the call.
+#[test]
+fn a_followed_payload_checks_the_set_but_not_the_keys_it_brings() {
+    let out = checked(&script(
+        "function ids() { return { id: current, team: teamId }; }\n\
+         async function save() { await pp.rpc(\"rename\", { ...ids(), name }); }",
+    ));
+    assert!(
+        out.contains(r#"complete (__RAHTI_RPC_CALL_0 , & ["id" , "team" , "name"] , " (line 0)")"#)
+            || out.contains(r#"complete (__RAHTI_RPC_CALL_0 , & ["id" , "team" , "name"]"#),
+        "{out}"
+    );
+    assert!(out.contains(r#"key (__RAHTI_RPC_CALL_0 , "name""#), "{out}");
+    assert!(!out.contains(r#"key (__RAHTI_RPC_CALL_0 , "id""#), "{out}");
+    assert!(
+        !out.contains(r#"key (__RAHTI_RPC_CALL_0 , "team""#),
+        "{out}"
+    );
+
+    // A spread that cannot be followed still leaves the set unchecked.
+    let out = checked(&script(
+        "async function save() { await pp.rpc(\"rename\", { ...elsewhere(), name }); }",
+    ));
+    assert!(!out.contains("complete ("), "{out}");
+    assert!(out.contains(r#"key (__RAHTI_RPC_CALL_0 , "name""#), "{out}");
 }

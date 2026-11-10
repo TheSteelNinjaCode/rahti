@@ -34,11 +34,18 @@ use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 
+mod derive;
+mod helpers;
+mod props;
 mod reads;
 mod rpc;
+mod state;
 
+pub use derive::{Binding, Derived, derive};
+pub use props::{PropReads, prop_reads};
 pub use reads::{Read, Step, rpc_reads};
 pub use rpc::{Code, Key, Literal, Payload, RpcCall, RpcName, rpc_calls};
+pub use state::{NameUse, Origin, State, StateUses, Use, state_uses};
 
 /// Why a piece of client code could not be compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -9,6 +9,11 @@
 //! const _: () = ::rahti::rpc_check::complete(__RAHTI_RPC_CALL_0, &["name"]);
 //! ```
 //!
+//! A payload the script builds elsewhere — `{ ...ids(), page }`, or `ids()`
+//! itself — is followed to its object literal by `rahti-js`, so `complete`
+//! knows every key that is sent and a required parameter left out of
+//! `ids()` is refused at each call that relies on it.
+//!
 //! What the code then reads off an awaited result — `result.contactId` — is
 //! checked here rather than by rustc, against the response shape the build
 //! wrote for that rpc (see `rpc_shapes`): a field the response does not have
@@ -102,7 +107,10 @@ pub fn checks_against(
             }),
             Payload::Unchecked => {}
             Payload::Object { keys, open, span } => {
-                for key in keys {
+                // A key that arrives through a spread or a variable counts
+                // as sent, below, but is not held against this rpc: the
+                // object it is written in often serves several.
+                for key in keys.iter().filter(|key| !key.followed) {
                     let at = locator.span(&key.span);
                     let name = &key.name;
                     out.extend(quote_spanned! {at=>
@@ -118,8 +126,9 @@ pub fn checks_against(
                         });
                     }
                 }
-                // With a spread or a computed key, more may be sent than is
-                // written: the keys written are checked, the rest are not.
+                // With a spread that could not be followed, or a computed
+                // key, more may be sent than is known: the keys written are
+                // checked, the set is not.
                 if !open {
                     let at = locator.span(span);
                     let names = keys.iter().map(|key| &key.name);
@@ -172,7 +181,7 @@ fn is_rust_identifier(name: &str) -> bool {
 /// body is a single literal, and a span cannot point inside a literal on
 /// stable Rust, so everything in a script lands on the script's first
 /// character, and the message says which line of the file it is about.
-struct Locator {
+pub(crate) struct Locator {
     whole: Span,
     /// The line the source starts on, for code written as one literal.
     literal_line: Option<usize>,
@@ -182,7 +191,7 @@ struct Locator {
 }
 
 impl Locator {
-    fn new(source: &ClientSource) -> Self {
+    pub(crate) fn new(source: &ClientSource) -> Self {
         let mut tokens = Vec::new();
         if let Some(stream) = &source.tokens {
             let mut cursor = 0;
@@ -213,7 +222,7 @@ impl Locator {
         self.line_at(span.start)
     }
 
-    fn line_at(&self, at: usize) -> String {
+    pub(crate) fn line_at(&self, at: usize) -> String {
         match self.literal_line {
             Some(first) => {
                 let before = self.source.get(..at).unwrap_or_default();
@@ -223,7 +232,7 @@ impl Locator {
         }
     }
 
-    fn span(&self, range: &Range<usize>) -> Span {
+    pub(crate) fn span(&self, range: &Range<usize>) -> Span {
         self.tokens
             .iter()
             .find(|(at, _)| at == range)

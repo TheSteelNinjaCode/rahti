@@ -17,10 +17,12 @@ mod authoring;
 mod component;
 mod job;
 mod parse;
+mod props;
 mod rpc;
 mod rpc_calls;
 mod rpc_shapes;
 mod socket;
+mod state_types;
 
 #[cfg(test)]
 #[path = "tests/emit.rs"]
@@ -109,10 +111,48 @@ pub fn html(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 Ok(registrations) => registrations,
                 Err(error) => return error.into(),
             };
+            match state_types::check(&sources) {
+                Ok(probes) => ask_about_seeds(&mut parsed.ops, &probes),
+                Err(error) => return error.to_compile_error().into(),
+            }
+            // A prop a component is passed and never reads, and a prop a
+            // component reads and can never be given.
+            if let Some(shapes) = rpc_shapes::Shapes::current()
+                && let Err(error) = props::check_passed(&parsed.ops, &shapes)
+            {
+                return error.to_compile_error().into();
+            }
+            let root = parsed
+                .forced_component
+                .is_some()
+                .then_some(parsed.root_attributes.as_deref())
+                .flatten();
+            if let Err(error) = props::check_read(&sources, root, |source, span| {
+                let locator = rpc_calls::Locator::new(source);
+                (locator.span(span), locator.line_at(span.start))
+            }) {
+                return error.to_compile_error().into();
+            }
+            state_types::report(&sources);
             let block = emit(stamp(parsed, &file));
             quote! {{ #registrations #block }}.into()
         }
         Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// The shape of every struct of the application a generated module can
+/// name, as types the compiler follows a read through.
+///
+/// `rahti-build` writes one call to this at the end of the generated
+/// `src/routes.rs`. It expands to a module implementing `rahti::shape::Shape`
+/// for each struct the build listed, which is what lets `html!` have a field
+/// read off a server value checked against that value's own Rust type.
+#[proc_macro]
+pub fn shapes(_input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    match rpc_shapes::Shapes::crate_wide() {
+        Some(shapes) if shapes.has_structs() => state_types::crate_shapes(&shapes).into(),
+        _ => proc_macro::TokenStream::new(),
     }
 }
 
@@ -641,6 +681,59 @@ fn emit(ops: Vec<Op>) -> TokenStream {
         #body
         ::rahti::Html::from_raw(__rahti)
     }}
+}
+
+/// Writes each question about a server value around that value, where it is
+/// evaluated: `expr` becomes `match expr { seed => { question; seed } }`, so
+/// the value is still produced once and the compiler sees its type.
+fn ask_about_seeds(ops: &mut [parse::Op], probes: &[state_types::SeedProbe]) {
+    if probes.is_empty() {
+        return;
+    }
+    let seed = state_types::seed_ident();
+    for at in 0..ops.len() {
+        let (before, rest) = ops.split_at_mut(at);
+        match &mut rest[0] {
+            parse::Op::Component(call) => {
+                if let Some(children) = &mut call.children {
+                    ask_about_seeds(&mut children.ops, probes);
+                }
+            }
+            // A script's values follow the tag that carries its key.
+            parse::Op::ScriptData(values) => {
+                let Some(parse::Op::Static(tag)) = before.last() else {
+                    continue;
+                };
+                for (index, value) in values.iter_mut().enumerate() {
+                    let questions: Vec<&TokenStream> = probes
+                        .iter()
+                        .filter(|probe| {
+                            probe.index == index
+                                && tag.ends_with(&format!(
+                                    " {}=\"{}\"",
+                                    parse::SCRIPT_ATTR,
+                                    probe.script
+                                ))
+                        })
+                        .map(|probe| &probe.tokens)
+                        .collect();
+                    if questions.is_empty() {
+                        continue;
+                    }
+                    let expr = std::mem::take(value);
+                    *value = quote! {
+                        match ::core::convert::identity(#expr) {
+                            #seed => {
+                                #(#questions)*
+                                #seed
+                            }
+                        }
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Move accumulated static markup into one `push_str`. Returns its length.

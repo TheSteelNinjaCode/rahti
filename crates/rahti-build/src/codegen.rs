@@ -903,6 +903,9 @@ pub fn routes_rs(
     );
 
     out.push_str("}\n");
+    // The shape of each struct the application renders, for `html!` to check
+    // a server value's reads against. See `rahti::shape`.
+    out.push_str("\n::rahti::shapes!();\n");
     out
 }
 
