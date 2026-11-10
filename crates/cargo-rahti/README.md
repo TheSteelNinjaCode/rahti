@@ -54,8 +54,9 @@ changes nothing.
 
 ## `cargo rahti restart`, `status`, `stop`
 
-The apply step for coding agents. `restart` type-checks while the old server
-stays up, stops it gracefully, builds, and starts a detached server. `status`
+The apply step for coding agents. `restart` builds while the old server stays
+up, stops it gracefully, starts a detached server from its own copy of the
+binary, and prints how long each part took. `status`
 says whether that server is running the current source, which routes loaded with
 what browser errors, and how jobs are doing.
 

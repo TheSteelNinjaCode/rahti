@@ -293,6 +293,20 @@ tower-http = {{ version = "0.7", features = ["catch-panic", "fs"] }}
 {dev}
 [build-dependencies]
 rahti-build = {build}
+
+# A development build keeps file and line numbers for this crate's backtraces
+# and no debug info for its dependencies, which is most of what the linker
+# otherwise carries: a smaller `target/` and a faster link on every restart.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Build scripts and proc macros (rahti-build, `html!`, derives) run on every
+# build, so optimizing them makes the compile itself faster.
+[profile.dev.build-override]
+opt-level = 3
 "#,
         // Cargo's own rule for a library target's name: the package name with
         // its hyphens turned into underscores, because a crate name is a Rust

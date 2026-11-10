@@ -233,9 +233,10 @@ health. `cargo rahti status` and the MCP tools both go through it.
   source-sensitive bare text untouched. Ordinary Rust uses `cargo fmt`.
 
 - `cargo rahti restart`, `stop` and `status` are the agent's apply step:
-  type-check beside the running server, stop it gracefully, build, start a
-  detached server, and report whether it runs the current source. On Windows
-  the server is created through WMI so it outlives an agent's job object.
+  build beside the running server, stop it gracefully, start a detached
+  server from its own copy of the binary, print how long each phase took, and
+  report whether it runs the current source. On Windows the server is created
+  through WMI so it outlives an agent's job object.
 - `cargo rahti generate job` adds a `#[job]` to `src/jobs.rs`, declares the
   module, and installs the queue. `cargo rahti generate job-store` adds the
   application-owned SeaORM adapter, entity, and migration from

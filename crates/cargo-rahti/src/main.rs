@@ -124,10 +124,11 @@ FMT:
     --check           Report differences without writing; fail if any differ.
 
 RESTART, STOP, STATUS:
-    Apply an edit to the running development server. Restart checks the
-    source while the old server stays up, so a compile error costs nothing,
-    then stops it gracefully, builds, starts a detached server with its output
-    in .rahti/dev-server.log, and prints the URL once it answers.
+    Apply an edit to the running development server. Restart builds while
+    the old server stays up, so a compile error costs nothing, then stops it
+    gracefully, starts a detached server with its output in
+    .rahti/dev-server.log, and prints the URL once it answers, with how long
+    the compile, link, stop and boot took.
 
     Status says whether the server is running the current source, which routes
     loaded under this boot with their browser errors, and how jobs are doing.

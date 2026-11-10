@@ -5,10 +5,18 @@
 //! real until the running server is replaced, so this does the whole of that
 //! and answers with one line it can act on.
 //!
-//! Order is what makes a failed edit safe: the source is type-checked while
-//! the old server still runs, so a compile error costs nothing and is reported
-//! as "still running old code". Only then is the server stopped, because
-//! Windows refuses to overwrite a running executable.
+//! Order is what makes a failed edit safe: the project is built while the old
+//! server still runs, so a compile error costs nothing and is reported as
+//! "still running old code", and the server is down only for as long as one
+//! process takes to stop and the next to boot.
+//!
+//! Windows refuses to overwrite a running executable, so the server never
+//! runs the file cargo writes. Each start copies the built binary to
+//! `.rahti/dev-server/` and runs the copy, which leaves `target/` free for
+//! the next build — this command's, or a plain `cargo build` beside it. A
+//! server started some other way still holds cargo's file, and for that one
+//! start the source is type-checked first and the server stopped before the
+//! build.
 //!
 //! The new server has to outlive this command, and the shell that ran it.
 //! On Windows an agent's tool runs each command inside a job object that kills
@@ -26,6 +34,10 @@ use std::time::{Duration, Instant};
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 const LAUNCH_SPEC: &str = ".rahti/dev-launch.json";
 const LAUNCHED_PID: &str = ".rahti/dev-launch.pid";
+/// Where the running server's own copy of the binary lives.
+const STAGED_DIR: &str = ".rahti/dev-server";
+/// The pid of the server started from that copy.
+const STAGED_PID: &str = ".rahti/dev-server/pid";
 const POLL: Duration = Duration::from_millis(100);
 
 fn say(message: &str) {
@@ -65,27 +77,65 @@ pub fn run_restart(args: &[&str]) -> Result<(), String> {
     let timeout = timeout_from(args)?;
     let root = project_root()?;
     let running = running_server(&root);
+    let began = Instant::now();
+    let mut phases = Phases::default();
+    let old_code = |info: &ServerInfo| {
+        format!(
+            "the source does not compile. {} is still running the old code.",
+            info.url
+        )
+    };
+
+    let built = match &running {
+        // Nothing holds cargo's file, so the build can run beside the server.
+        Some(info) if !holds_cargo_binary(&root, info.pid) => {
+            say("Building while the running server stays up.");
+            match build(&root, &mut phases)? {
+                Some(executable) => Some(executable),
+                // A failed build is a compile error, unless the server holds
+                // some other file the linker writes. A type check tells the
+                // two apart, and only the second is worth stopping for.
+                None if cargo(&root, &["check"])? => None,
+                None => return Err(old_code(info)),
+            }
+        }
+        Some(info) => {
+            say("Checking the source while the running server stays up.");
+            let check = Instant::now();
+            if !cargo(&root, &["check"])? {
+                return Err(old_code(info));
+            }
+            phases.check = Some(check.elapsed());
+            None
+        }
+        None => None,
+    };
 
     if let Some(info) = &running {
-        say("Checking the source while the running server stays up.");
-        if !cargo(&root, &["check"])? {
-            return Err(format!(
-                "the source does not compile. {} is still running the old code.",
-                info.url
-            ));
-        }
+        let stop = Instant::now();
         stop_server(&root, info, timeout)?;
+        phases.stop = Some(stop.elapsed());
     }
+    let built = match built {
+        Some(executable) => executable,
+        None => {
+            say("Building.");
+            build(&root, &mut phases)?.ok_or("the build failed, and no server is running now.")?
+        }
+    };
 
-    say("Building.");
-    let executable = build(&root)?;
+    let boot = Instant::now();
+    let executable = stage(&root, &built)?;
     let previous = dev_server::read_info(&root).map(|info| info.boot);
     let info = start(&root, &executable, previous.as_deref(), timeout)?;
+    let _ = fs::write(root.join(STAGED_PID), info.pid.to_string());
+    phases.boot = Some(boot.elapsed());
 
     say(&format!(
         "Ready at {} (pid {}, boot {}, output in {SERVER_LOG_PATH})",
         info.url, info.pid, info.boot
     ));
+    say(&format!("Took {}", phases.describe(began.elapsed())));
     say(&format!(
         "Next: load {}<route> for each affected route, exercise the change, then run \
          `cargo rahti status`.",
@@ -348,7 +398,9 @@ fn stop_server(root: &Path, info: &ServerInfo, timeout: Duration) -> Result<(), 
 
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if dev_server::live_status(info).is_none() && process_gone(info.pid) {
+        // The process, not the address: a connection to a port nobody
+        // listens on takes Windows two seconds to refuse.
+        if process_gone(info.pid) {
             // A crash leaves this file behind, and the next start reads it
             // to tell its own boot from the last one.
             let _ = fs::remove_file(root.join(dev_server::INFO_PATH));
@@ -365,6 +417,90 @@ fn stop_server(root: &Path, info: &ServerInfo, timeout: Duration) -> Result<(), 
     ))
 }
 
+/// How long each part of a restart took, for the line that says so.
+#[derive(Default)]
+pub(crate) struct Phases {
+    pub check: Option<Duration>,
+    /// Up to the application's library: the code an edit changes.
+    pub compile: Option<Duration>,
+    /// From the library to the executable.
+    pub link: Option<Duration>,
+    pub stop: Option<Duration>,
+    /// Copying the binary and waiting for the new server to answer.
+    pub boot: Option<Duration>,
+}
+
+impl Phases {
+    pub(crate) fn describe(&self, total: Duration) -> String {
+        let seconds = |duration: Duration| format!("{:.1}s", duration.as_secs_f64());
+        let parts = [
+            ("check", self.check),
+            ("compile", self.compile),
+            ("link", self.link),
+            ("stop", self.stop),
+            ("boot", self.boot),
+        ]
+        .into_iter()
+        .filter_map(|(name, duration)| Some(format!("{name} {}", seconds(duration?))))
+        .collect::<Vec<_>>();
+        format!("{}: {}.", seconds(total), parts.join(", "))
+    }
+}
+
+/// Whether a running server is the file cargo writes, which Windows then
+/// refuses to replace. Only a server this command started from its own copy
+/// is known not to be.
+fn holds_cargo_binary(root: &Path, pid: u64) -> bool {
+    let staged = fs::read_to_string(root.join(STAGED_PID))
+        .ok()
+        .and_then(|pid| pid.trim().parse::<u64>().ok());
+    cfg!(windows) && staged != Some(pid)
+}
+
+/// Copy the built binary to where the server runs it from.
+///
+/// Each start gets a directory of its own. Windows keeps a stopped process's
+/// executable locked for a moment after the process is gone, so a copy over
+/// the last server's file can be refused; a new path is never held. The
+/// copies of earlier starts are removed once nothing holds them.
+fn stage(root: &Path, built: &Path) -> Result<PathBuf, String> {
+    let name = built.file_name().ok_or("the built binary has no name")?;
+    let home = root.join(STAGED_DIR);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis());
+    let directory = home.join(format!("{stamp:x}-{:x}", std::process::id()));
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let staged = directory.join(name);
+
+    // A virus scanner can hold the file cargo just wrote for a moment too.
+    let mut copied = fs::copy(built, &staged);
+    for _ in 0..30 {
+        if copied.is_ok() {
+            break;
+        }
+        std::thread::sleep(POLL);
+        copied = fs::copy(built, &staged);
+    }
+    copied.map_err(|error| {
+        format!(
+            "cannot copy {} to {}: {error}",
+            built.display(),
+            staged.display()
+        )
+    })?;
+
+    for entry in fs::read_dir(&home).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() && path != directory {
+            // Refused while the last server is still letting go of its file;
+            // the start after this one removes it.
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+    Ok(staged)
+}
+
 fn cargo(root: &Path, args: &[&str]) -> Result<bool, String> {
     let status = Command::new(cargo_program())
         .args(args)
@@ -378,12 +514,14 @@ fn cargo_program() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
-/// Build the project's binary and return the path cargo reports for it.
+/// Build the project's binary and return the path cargo reports for it, or
+/// `None` when the build fails.
 ///
 /// Rendered diagnostics go to standard error as usual, and standard output
 /// carries the JSON that names the artifact, so a compile error reads the same
 /// as `cargo build` while the path is never guessed.
-fn build(root: &Path) -> Result<PathBuf, String> {
+fn build(root: &Path, phases: &mut Phases) -> Result<Option<PathBuf>, String> {
+    let began = Instant::now();
     let mut child = Command::new(cargo_program())
         .args(["build", "--message-format=json-render-diagnostics"])
         .current_dir(root)
@@ -393,17 +531,27 @@ fn build(root: &Path) -> Result<PathBuf, String> {
 
     let stdout = child.stdout.take().ok_or("cargo gave no output stream")?;
     let mut executable = None;
+    // When the artifact before the executable was reported: everything up to
+    // it is compiling, and what follows is the executable being linked.
+    let mut compiled = began.elapsed();
+    let mut linked = compiled;
     for line in BufReader::new(stdout).lines().map_while(Result::ok) {
         if let Some(path) = artifact_executable(&line) {
             executable = Some(path);
+            linked = began.elapsed();
+        } else if line.contains("\"compiler-artifact\"") {
+            compiled = began.elapsed();
         }
     }
 
     let status = child.wait().map_err(|error| error.to_string())?;
     if !status.success() {
-        return Err("the build failed, and no server is running now.".to_string());
+        return Ok(None);
     }
-    executable.ok_or_else(|| "cargo built no executable: is this a binary project?".to_string())
+    let executable = executable.ok_or("cargo built no executable: is this a binary project?")?;
+    phases.compile = Some(compiled);
+    phases.link = Some(linked.saturating_sub(compiled));
+    Ok(Some(executable))
 }
 
 fn artifact_executable(line: &str) -> Option<PathBuf> {

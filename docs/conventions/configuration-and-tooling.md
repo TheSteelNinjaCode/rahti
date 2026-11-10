@@ -383,11 +383,54 @@ and has to know when its edit is live, so it owns the step:
 cargo rahti restart
 ```
 
-Restart type-checks the source while the old server stays up, so a compile
-error costs nothing and is reported as "still running the old code". It then
-stops the server the way Ctrl+C does, builds, starts a detached server with its
-output in `.rahti/dev-server.log`, waits for that boot to answer, and prints the
-URL. `--timeout <seconds>` bounds each wait and defaults to 60.
+Restart builds the project while the old server stays up, so a compile error
+costs nothing and is reported as "still running the old code". It then stops
+the server the way Ctrl+C does, starts a detached server with its output in
+`.rahti/dev-server.log`, waits for that boot to answer, and prints the URL.
+The server is down only between that stop and that boot. `--timeout <seconds>`
+bounds each wait and defaults to 60.
+
+The server runs a copy of the built binary under `.rahti/dev-server/`, never
+the file in `target/`. Windows refuses to replace a running executable, and
+the copy is what lets this build, a plain `cargo build`, or `cargo test` run
+beside the server. A server started another way — `cargo run`, `cargo dev` —
+holds the file in `target/`; for that one restart the source is type-checked
+first and the server is stopped before the build.
+
+Restart ends by saying where its time went:
+
+```text
+[rahti] Took 6.1s: compile 1.9s, link 2.4s, stop 0.3s, boot 1.5s.
+```
+
+`compile` runs up to the application's library, `link` from there to the
+executable, `stop` is the old server's graceful shutdown, and `boot` is
+copying the binary and waiting for the new server to answer. Read it before
+changing anything to make the loop faster: it names the part that is slow.
+
+### Development build profile
+
+A scaffolded `Cargo.toml` ends with the profile that keeps `link` short:
+
+```toml
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.dev.build-override]
+opt-level = 3
+```
+
+Backtraces keep this crate's file and line numbers; dependencies carry no
+debug info, which is most of what a linker otherwise copies into every build
+and most of what fills `target/`. Build scripts and proc macros — `rahti-build`,
+`html!`, the derives — run on every build, so they are optimized. `Cargo.toml`
+is the application's own file: add these three tables to a project that does
+not have them, and expect one full rebuild when a profile changes. Remove
+`debug = false` for the session in which a debugger has to step into a
+dependency.
 
 ```bash
 cargo rahti status
