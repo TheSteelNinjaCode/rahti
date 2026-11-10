@@ -146,16 +146,90 @@ every payload, and the handler validates business rules before side effects
    `list_rpcs`. Match the RPC's `file`, `scope`, and `urls`, not its name alone:
    separate page URLs may use the same name. A component RPC has no fixed URL;
    it is called from the page rendering that component.
-3. Read `parameters` (`name`, `rustType`, `required`, `transport`) and
-   `response` (`rustType`, `fallible`, `transport`). `line` and `column` locate
-   the declaration. `rustType` is the authored Rust spelling, not a resolved
-   JSON schema: `schemaStatus: "unresolved"` means inspect the type and its
-   Serde representation before using fields. `checks` names the checking limits.
+3. Read `parameters` (`name`, `rustType`, `required`, `transport`,
+   `typescript`) and `response` (`rustType`, `fallible`, `transport`,
+   `typescript`). `line` and `column` locate the declaration. `typescript` is
+   the JSON the browser sends or reads, and `payload.typescript` is the whole
+   object a call passes; write the caller's keys and field accesses from them
+   (see "Wire Shapes"). `schemaStatus` says how far to trust a shape: anything
+   but `resolved` means inspect the type and its Serde representation before
+   using fields. `checks` names the checking limits.
 4. Keep the caller and `#[rpc]` together and use the existing
    `pp.rpc("name", { ... })` shape. Prefer explicit object keys when the data
    is already available; submit forms with the documented `FormData` pattern.
 5. Run `cargo check` and then the relevant router/browser tests. Compilation
    does not prove that a dynamic payload or response-field access is correct.
+
+## Wire Shapes
+
+The build reads each `#[rpc]`'s parameter and return types from source and
+writes the JSON they become as TypeScript. Given
+
+```rust
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Saved {
+    pub contact_id: i32,
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[rpc]
+pub async fn save(name: String, note: Option<String>) -> Result<Saved> {
+    // ...
+}
+```
+
+the contract for `save` carries
+
+```json
+"payload": { "typescript": "{ name: string; note?: string | null }", "schemaStatus": "resolved" },
+"response": { "rustType": "Saved", "typescript": "Saved", "schemaStatus": "resolved" }
+```
+
+and the manifest's `rpcTypes`, keyed by the file the rpc is written in, holds
+the declaration: `"Saved": "{ contactId: number; tags: string[]; note?: string | null }"`.
+The caller reads `result.contactId`, not `result.contact_id`. A type name is
+unique within its file, not across files; MCP `list_rpcs` puts the
+declarations a contract names under that contract's `types`.
+
+A type is followed through the file's own items, its `use` declarations,
+`crate::`/`self::`/`super::` paths, and `mod` files, to a `struct`, `enum` or
+`type` alias that derives `Serialize` (a response) or `Deserialize` (a
+parameter). The shape honors `rename`, `rename_all`, `rename_all_fields`,
+`skip`, `skip_serializing`, `skip_deserializing`, `skip_serializing_if`,
+`default`, `flatten`, `transparent`, `tag`, `content`, `untagged`, `other`,
+`into`, `from` and `try_from`. Generic types keep their parameters:
+`Page<Hit>` names `"Page<Row>": "{ rows: Row[]; total: number }"`.
+
+| Rust | TypeScript |
+| --- | --- |
+| `String`, `&str`, `char`, dates and times, `Uuid`, `Decimal` | `string` |
+| integers, floats | `number` |
+| `bool` | `boolean` |
+| `()` | `null` |
+| `Option<T>` | `T \| null` |
+| `Vec<T>`, arrays, sets | `T[]` |
+| `HashMap<K, V>`, `BTreeMap<K, V>` | `Record<string, V>` |
+| tuples | `[A, B]` |
+| `serde_json::Value` | `unknown` |
+| `RpcFile`, `RpcUpload` | `File` |
+
+`schemaStatus` is one of:
+
+- `resolved` — every part was followed to a definition or a known type.
+- `partial` — some part is `unknown`: a type from another crate, a
+  hand-written `Serialize` or `Deserialize`, or a `with = "…"` field.
+- `unresolved` — nothing about the type could be read.
+- `dynamic` — JSON of any shape, such as `serde_json::Value`.
+- `stream` — an `RpcStream`, whose events no type declares.
+
+A shape is read from source, not from the compiler, so it describes what the
+derive writes: a macro-generated type, a `#[path]` the scan cannot follow, or
+a type shadowing a standard name is reported as `unknown` or under the
+standard name's shape. It is a description for writing the caller, not a
+check: compilation still does not verify a response-field access.
 
 The manifest declares `rpcContractVersion: 1`. MCP requires this contract
 inventory and reports `RAHTI_RPC_CONTRACT_MANIFEST` with a regeneration

@@ -915,6 +915,7 @@ pub fn manifest_json(
     database: Option<&crate::db::Scan>,
     config: &Config,
     contracts: &serde_json::Value,
+    rpc_types: &serde_json::Value,
 ) -> String {
     let mut out = String::new();
     let has_components = !component_rpcs.is_empty();
@@ -1137,7 +1138,8 @@ pub fn manifest_json(
     }
 
     out.push_str("  \"rpcContractVersion\": 1,\n");
-    out.push_str(&format!("  \"rpcContracts\": {}\n", contracts));
+    out.push_str(&format!("  \"rpcContracts\": {},\n", contracts));
+    out.push_str(&format!("  \"rpcTypes\": {}\n", rpc_types));
     out.push_str("}\n");
     out
 }

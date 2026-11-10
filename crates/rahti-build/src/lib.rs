@@ -20,6 +20,7 @@ mod jobs;
 mod route;
 mod scanner;
 pub mod sha256;
+mod shapes;
 
 // Tests live in `src/tests/`, one file per module — see `tests/README.md`
 // for why they are declared from here rather than compiled on their own.
@@ -269,6 +270,12 @@ pub fn run() {
         ROUTES_PATH,
         &codegen::routes_rs(&scan.entries, &components.rpcs, &sockets, &config),
     );
+    let contracts = contracts::inventory(&scan.entries, &components.rpcs);
+    // A response type usually lives outside the app directory, in a file the
+    // scan does not watch: the manifest describes it, so it reruns the build.
+    for path in &contracts.read {
+        println!("cargo:rerun-if-changed={path}");
+    }
     let manifest = codegen::manifest_json(
         &scan.entries,
         &components.files,
@@ -277,7 +284,8 @@ pub fn run() {
         &jobs.jobs,
         database.as_ref(),
         &config,
-        &contracts::inventory(&scan.entries, &components.rpcs),
+        &contracts.contracts,
+        &contracts.types,
     );
     write_if_changed(MANIFEST_PATH, &manifest);
 }

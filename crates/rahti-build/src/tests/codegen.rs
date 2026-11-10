@@ -176,6 +176,7 @@ fn gen_manifest(
         database,
         config,
         &serde_json::json!([]),
+        &serde_json::json!({}),
     )
 }
 
@@ -1459,6 +1460,7 @@ fn the_manifest_lists_the_sockets() {
         None,
         &config(),
         &serde_json::json!([]),
+        &serde_json::json!({}),
     );
     assert!(
         out.contains("{ \"name\": \"chat\", \"file\": \"src/app/page.rs\", \"auth\": false },"),
@@ -1485,6 +1487,7 @@ fn the_manifest_marks_authenticated_sockets() {
         None,
         &config(),
         &serde_json::json!([]),
+        &serde_json::json!({}),
     );
     assert!(
         out.contains(

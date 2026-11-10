@@ -317,8 +317,11 @@ preserve them, and documentation or scaffold changes must teach them.
 
 44. `html!` checks literal `pp.rpc` calls against the `#[rpc]` declaration
     in the same module. Inspect `rpcContracts` in `.rahti/manifest.json`
-    after changing a declaration. Dynamic payloads and response field access
-    require checking the Rust/Serde types. See `rpc-and-uploads.md`.
+    after changing a declaration, and write payload keys and response-field
+    accesses from its `typescript` shapes. A `schemaStatus` other than
+    `resolved` requires checking the Rust/Serde types; compilation does not
+    check dynamic payloads or response field access. See
+    `rpc-and-uploads.md`.
 
 45. Tailwind class conflict resolution uses the scaffold's existing browser
     `twMerge`, not a Rust dependency or `pp.twMerge`. Check `css.engine`,

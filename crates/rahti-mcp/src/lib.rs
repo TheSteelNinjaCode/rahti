@@ -71,7 +71,7 @@ impl RahtiMcp {
     }
 
     #[tool(
-        description = "Read RPC contracts: parameters, Rust response types, source locations, auth requirements, transports, and explicit checking limits"
+        description = "Read RPC contracts: parameters, the TypeScript shape of each payload and response, source locations, auth requirements, transports, and explicit checking limits"
     )]
     fn list_rpcs(&self) -> Result<Json<Value>, ErrorData> {
         Self::tool_result(self.project.rpcs())

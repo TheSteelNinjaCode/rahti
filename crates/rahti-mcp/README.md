@@ -17,9 +17,12 @@ privacy remains a runtime application policy.
 
 `list_rpcs` reads the generated `rpcContracts` inventory. It includes parameter
 and success-response Rust types, required arguments, source locations, scoped
-URLs, transports, and checking limits. A Rust type spelling is not a JSON
-schema: unresolved representations require inspecting the declaration and
-Serde behavior. Run `cargo check` to regenerate a missing contract inventory.
+URLs, transports, and checking limits. Each contract also carries the
+TypeScript shape of its payload and response, and under `types` the
+declarations those shapes name. `schemaStatus` says how much of a shape the
+source accounted for: a `partial` or `unresolved` one requires inspecting the
+declaration and its Serde behavior. Run `cargo check` to regenerate a missing
+contract inventory.
 
 Projects created or upgraded with `--mcp` also enable Rahti's optional `mcp`
 feature. Their generated application router exposes Streamable HTTP at

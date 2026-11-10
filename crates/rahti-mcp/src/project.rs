@@ -109,7 +109,12 @@ impl Project {
 
     pub fn rpcs(&self) -> Result<Value, String> {
         let manifest = self.manifest()?;
-        Ok(Value::Array(rpc_contracts(&manifest)?.to_vec()))
+        Ok(Value::Array(
+            rpc_contracts(&manifest)?
+                .iter()
+                .map(|contract| with_types(contract, &manifest["rpcTypes"]))
+                .collect(),
+        ))
     }
 
     pub fn sockets(&self) -> Result<Value, String> {
@@ -310,6 +315,43 @@ fn rpc_contracts(manifest: &Value) -> Result<&Vec<Value>, String> {
         "rahti[RAHTI_RPC_CONTRACT_MANIFEST]: rpcContracts must be an array. Run cargo check to regenerate .rahti/manifest.json.".into())
 }
 
+/// A contract with the declarations its shapes name, so one entry can be
+/// read alone. The manifest keeps one copy per file; a contract names only
+/// some of them, and a declaration may name others.
+fn with_types(contract: &Value, rpc_types: &Value) -> Value {
+    let mut contract = contract.clone();
+    let declared = contract["file"]
+        .as_str()
+        .and_then(|file| rpc_types.get(file))
+        .and_then(Value::as_object);
+    let Some(declared) = declared else {
+        return contract;
+    };
+    // `Page<Row>` is declared under that head and named as `Page`.
+    let name = |head: &str| head.split('<').next().unwrap_or(head).to_string();
+    let mut pending: Vec<String> = [&contract["payload"], &contract["response"]]
+        .iter()
+        .filter_map(|part| part["typescript"].as_str())
+        .map(str::to_string)
+        .collect();
+    let mut types = serde_json::Map::new();
+    while let Some(text) = pending.pop() {
+        for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$')) {
+            let found = declared
+                .iter()
+                .find(|(head, _)| name(head) == word && !types.contains_key(*head));
+            if let Some((head, body)) = found {
+                types.insert(head.clone(), body.clone());
+                pending.extend(body.as_str().map(str::to_string));
+            }
+        }
+    }
+    if !types.is_empty() {
+        contract["types"] = Value::Object(types);
+    }
+    contract
+}
+
 fn redact_secrets(value: &mut Value) {
     match value {
         Value::Object(object) => {
@@ -388,10 +430,14 @@ pub(crate) fn test_project() -> TestProject {
   "rpcContracts": [{
     "name": "rename", "scope": "page", "authRequired": true,
     "file": "src/app/account/page.rs", "line": 10,
-    "parameters": [{"name": "name", "rustType": "String"}],
-    "response": {"schemaStatus": "unresolved"},
+    "parameters": [{"name": "name", "rustType": "String", "typescript": "string"}],
+    "payload": {"typescript": "{ name: string }", "schemaStatus": "resolved"},
+    "response": {"schemaStatus": "resolved", "typescript": "Public"},
     "checks": {"dynamicValues": "server"}
   }],
+  "rpcTypes": {"src/app/account/page.rs": {
+    "Public": "{ id: number; email: string; name: string }"
+  }},
   "appDir": "src/app",
   "routes": [{
     "url": "/account",
@@ -441,7 +487,13 @@ mod tests {
             .find(|parameter| parameter["name"] == "name")
             .unwrap();
         assert_eq!(name["rustType"], "String");
-        assert_eq!(rename["response"]["schemaStatus"], "unresolved");
+        assert_eq!(name["typescript"], "string");
+        assert_eq!(rename["response"]["schemaStatus"], "resolved");
+        assert_eq!(rename["response"]["typescript"], "Public");
+        assert_eq!(
+            rename["types"]["Public"],
+            "{ id: number; email: string; name: string }"
+        );
         assert_eq!(rename["checks"]["dynamicValues"], "server");
         assert_eq!(
             project.summary().unwrap()["authentication"]["browserSessionUsed"],
@@ -474,6 +526,41 @@ mod tests {
             project.recent_diagnostics(Some(usize::MAX)).unwrap()["limit"],
             MAX_DIAGNOSTICS
         );
+    }
+
+    #[test]
+    fn a_listed_rpc_carries_the_declarations_it_names() {
+        let types = json!({
+            "src/app/page.rs": {
+                "Page<Row>": "{ rows: Row[]; next: Cursor | null }",
+                "Cursor": "{ after: string }",
+                "Hit": "{ url: string }",
+                "Unused": "{ id: number }",
+            },
+            "src/app/other/page.rs": { "Hit": "{ id: number }" },
+        });
+        let contract = json!({
+            "file": "src/app/page.rs",
+            "payload": { "typescript": "{ query: string }" },
+            "response": { "typescript": "Page<Hit>" },
+        });
+        assert_eq!(
+            with_types(&contract, &types)["types"],
+            json!({
+                "Page<Row>": "{ rows: Row[]; next: Cursor | null }",
+                "Cursor": "{ after: string }",
+                "Hit": "{ url: string }",
+            })
+        );
+        let plain = json!({
+            "file": "src/app/page.rs",
+            "payload": { "typescript": "{ id: number }" },
+            "response": { "typescript": "null" },
+        });
+        assert!(with_types(&plain, &types).get("types").is_none());
+        // A stream has no response shape, and a manifest may list no types.
+        let stream = json!({ "file": "x", "payload": {}, "response": { "typescript": null } });
+        assert_eq!(with_types(&stream, &Value::Null), stream);
     }
 
     #[test]

@@ -619,9 +619,10 @@ security model: `native-packaging.md`.
   socket entries carry an `auth` boolean. The `db` section names the backend,
   entities, and migrations.
   `rpcContractVersion` and `rpcContracts` describe scoped RPC declarations for
-  agents, including parameter/response Rust spellings, source locations, auth,
-  transports, and checking limits. Rust spellings are not JSON schemas; see
-  `rpc-and-uploads.md` for the agent workflow.
+  agents, including parameter/response Rust spellings, the TypeScript shape
+  of each payload and response, source locations, auth, transports, and
+  checking limits. `rpcTypes` holds, per file, the type declarations those
+  shapes name. See `rpc-and-uploads.md` for the agent workflow.
 - `public/css/styles.css` - generated/copied but intentionally checked in.
 
 Run a Cargo build after changing route/component/configuration inputs and

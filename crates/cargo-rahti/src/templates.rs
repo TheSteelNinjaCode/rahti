@@ -1738,8 +1738,10 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          Run `cargo check` after changing RPC declarations. Read `rpcContracts`\n\
          in `.rahti/manifest.json`, or optional MCP `list_rpcs`, before writing\n\
          the caller. Match scope, file and URLs; inspect parameters, response\n\
-         types and checking limits. `schemaStatus: \"unresolved\"` requires\n\
-         reading the Rust/Serde type. Use `pp.rpc` beside its `#[rpc]`; run\n\
+         types and checking limits, and write payload keys and response-field\n\
+         accesses from the `typescript` shapes. A `schemaStatus` other than\n\
+         `resolved` requires reading the Rust/Serde type. Use `pp.rpc` beside\n\
+         its `#[rpc]`; run\n\
          compiler and router/browser checks. Dynamic values and response-field\n\
          accesses are not proved by compilation. See `docs/conventions/rpc-and-uploads.md`.\n\n",
     );

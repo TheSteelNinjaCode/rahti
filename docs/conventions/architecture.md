@@ -207,7 +207,9 @@ On every relevant Cargo build it:
 - validates route, RPC, and socket-name conflicts;
 - parses RPC declarations into the versioned `rpcContracts` agent inventory: source
   locations, scoped URLs, parameters, response types, auth, transports, and
-  explicit unresolved-schema/checking limits;
+  explicit checking limits; and follows each parameter and response type
+  through `use` declarations and module files to write its JSON as a
+  TypeScript shape, with the named declarations in `rpcTypes` per file;
 - reads `src/jobs.rs` and `src/jobs/` into the manifest's `jobs` inventory and
   refuses two jobs sharing a stored name;
 - generates routes, modules, and `.rahti/manifest.json`;
@@ -465,6 +467,9 @@ The current implementation covers:
   separation from absolute expiration and duration clocks;
 - generated manifest metadata for routes, layouts, errors, loading regions,
   components, RPCs, sockets, jobs, and the database;
+- RPC wire shapes: each `#[rpc]`'s payload and response read from source as
+  TypeScript, Serde attributes included, with a status saying how much of
+  the shape the source accounted for;
 - an agent apply loop: `cargo rahti restart`, `status` and `stop`, with stale
   source detection, per-boot browser and job reports, and matching MCP tools;
 - optional read-only MCP project inspection over local stdio and secured
