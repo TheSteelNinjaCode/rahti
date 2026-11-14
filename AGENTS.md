@@ -137,7 +137,13 @@ preserve them, and documentation or scaffold changes must teach them.
     its own root is a compile error (root attributes are evaluated in the
     caller's scope; handlers excepted). A script-less component whose own
     markup binds a client value gets an empty `<script></script>` from
-    `html!`, so that markup reads its own scope.
+    `html!`, so that markup reads its own scope. A name client code reads
+    comes from the block's own script, an enclosing `pp-for`, `pp`, a
+    handler's event, or the window; `html!` refuses any other
+    (`RAHTI_UNKNOWN_NAME`) in a script and in the bindings and handlers of a
+    block with one script. Pass a value from the block around as a prop, and
+    read a lower-case global another script published as `window.name`. See
+    "Names a Block Can Read" in `docs/conventions/pulsepoint.md`.
 11. A page-owned `#[rpc]` sits beside its caller in that `page.rs`; a
     component-owned `#[rpc]` sits in the component file. Component RPC names
     are application-wide; the same page RPC name may exist on different page

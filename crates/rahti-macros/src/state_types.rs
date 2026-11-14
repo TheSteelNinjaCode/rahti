@@ -46,6 +46,7 @@
 //! D  file  rpc                   known|open|missing   (a read straight off a result)
 //! P  file  none|written|followed|open|unknown          (a `pp.rpc` payload's keys)
 //! V  file  place  expression     server constant        (a read the compiler decides)
+//! N  file  place  name           the line it is on      (a name nothing supplies)
 //! ```
 
 use std::collections::HashMap;
@@ -357,6 +358,21 @@ pub fn report(sources: &[ClientSource]) {
     };
     let findings = analyze(sources, &shapes);
     let mut text = String::new();
+    // Each name the block's code reads that nothing supplies.
+    for unknown in crate::names::unknown(sources) {
+        let source = &sources[unknown.source];
+        let at = match source.kind {
+            ClientKind::Script => crate::rpc_calls::Locator::new(source)
+                .line_at(unknown.span.start)
+                .trim()
+                .to_string(),
+            _ => source.source.replace(['\t', '\n', '\r'], " "),
+        };
+        text.push_str(&format!(
+            "N\t{file}\t{}\t{}\t{at}\n",
+            unknown.place, unknown.name
+        ));
+    }
     // Each `pp.rpc` payload: whether every key it sends is known.
     for source in sources {
         let code = match source.kind {

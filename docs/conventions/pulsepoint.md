@@ -293,6 +293,62 @@ of one component on a page are separate scopes even though they share a
 name: the runtime derives a unique identity per instance, which is why two
 copies of the same counter count independently.
 
+## Names a Block Can Read
+
+A block's client code reads names, and `html!` knows where each one can come
+from. A name that comes from nowhere is a compile error,
+`RAHTI_UNKNOWN_NAME`, on the name:
+
+```rust
+html! {
+    <section>
+        <p hidden={domians.length > 0}>"No domains yet."</p>   // no `domians`
+        <button onclick={laod()}>"Reload"</button>             // no `laod`
+        <script>r##"
+            const [domains, setDomains] = pp.state([]);
+            async function load() {
+                setDomians(await pp.rpc("list_domains", {}));  // no `setDomians`
+            }
+        "##</script>
+    </section>
+}
+```
+
+```text
+error: rahti[RAHTI_UNKNOWN_NAME]: this binding reads `domians`, a name nothing gives it.
+       Did you mean `domains`?
+```
+
+What each kind of code can read:
+
+| Code | Names it can read |
+| --- | --- |
+| A `<script>` | what it declares, `pp`, and the window |
+| A `{…}` binding, a `pp-for` collection | what the block's script declares at its top level, the rows and indexes of the `pp-for`s it is written in, `pp`, and the window |
+| A handler | the same, and its event: `event`, `e`, `$event`, `target`, `currentTarget`, `el` |
+
+The window is the language's and the browser's own names — `document`,
+`fetch`, `setTimeout`, `localStorage` — and any name that starts with a
+capital letter: `Math`, `JSON`, `IntersectionObserver`, and a class a vendored
+library publishes, such as `Chart`. A lower-case name another script put on
+the window is read through it, `window.gtag(…)`, and `typeof name` asks
+whether a name exists without reading it.
+
+A value from the block around this one is not a name here. Pass it as a prop
+and read `pp.props.name` (see "`pp.props`").
+
+Bindings and handlers are checked in a block that has one `<script>` of its
+own. These are not checked, because their names belong to another block:
+
+- a block with no `<script>`, which renders in the scope of the block around
+  it;
+- fragment-rooted (`<>…</>`) children written between component tags, which
+  read the component they are passed to.
+
+A script is always checked. What is read *off* a name — `pp.sate(…)`,
+`domain.nmae` — is not a name; see "State Reads" in `rpc-and-uploads.md` for
+the fields that are checked.
+
 ## First-Party UI Is PulsePoint From the Start
 
 PulsePoint is the event, state and reactivity model for a block's own UI, not

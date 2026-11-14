@@ -36,12 +36,14 @@ use oxc_span::SourceType;
 
 mod derive;
 mod helpers;
+mod names;
 mod props;
 mod reads;
 mod rpc;
 mod state;
 
 pub use derive::{Binding, Derived, derive};
+pub use names::{free_names, is_global};
 pub use props::{PropReads, prop_reads};
 pub use reads::{Read, Step, rpc_reads};
 pub use rpc::{Code, Key, Literal, Payload, RpcCall, RpcName, rpc_calls};

@@ -16,6 +16,7 @@ mod attribute;
 mod authoring;
 mod component;
 mod job;
+mod names;
 mod parse;
 mod props;
 mod rpc;
@@ -27,6 +28,10 @@ mod state_types;
 #[cfg(test)]
 #[path = "tests/emit.rs"]
 mod lib_tests;
+
+#[cfg(test)]
+#[path = "tests/agent_mistakes.rs"]
+mod agent_mistakes;
 
 use parse::{COMPONENT_ATTR, EVENT_OWNER_ATTR, OWNER_ATTR, Op, Parsed, SlotKind, TagAttr};
 use proc_macro2::TokenStream;
@@ -111,6 +116,10 @@ pub fn html(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 Ok(registrations) => registrations,
                 Err(error) => return error.into(),
             };
+            // A name the block's code reads and nothing supplies.
+            if let Err(error) = names::check(&sources) {
+                return error.to_compile_error().into();
+            }
             match state_types::check(&sources) {
                 Ok(probes) => ask_about_seeds(&mut parsed.ops, &probes),
                 Err(error) => return error.to_compile_error().into(),

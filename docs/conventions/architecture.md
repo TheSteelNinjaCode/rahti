@@ -172,6 +172,10 @@ The server runtime exports:
   an unknown key, a missing required parameter, and a name that is not a
   string literal are compile errors on the template. Nothing reaches the
   client registry or the runtime.
+- `html!` refuses a name client code reads that nothing supplies
+  (`names.rs`): a script's own declarations, `pp` and the window for a
+  script; the block's script, the enclosing `pp-for` rows, `pp`, the event
+  and the window for a binding or handler in a block with one script.
 - `#[component]` validates a PascalCase function, stamps its returned root,
   and generates the hidden named-props companion the tag form calls through.
 - `#[rpc]` preserves the Rust function and generates its request shim,
@@ -195,7 +199,9 @@ returns the registry function — `(scope) => value`, `function (scope,
 event)`, or `function (pp, __pp_server)` returning the script's top-level
 bindings. `rpc_calls` lists the `pp.rpc` calls in a piece of client code —
 the name, the payload's keys and conservative literal shapes, and their byte
-spans — for `html!` to check.
+spans — for `html!` to check. `free_names` lists the names a piece of client
+code reads without declaring, and `is_global` says which of them the window
+supplies.
 Used at compile time only; `rahti` does not depend on it.
 
 ### `rahti-build`
@@ -492,6 +498,10 @@ The current implementation covers:
 - prop names checked at compile time: a `{…}` prop a component's file never
   reads as `pp.props.name` is refused at the tag, and a `pp.props.name` a
   component's root can never be given is refused in the component;
+- names checked at compile time: a name a script, a binding or a handler
+  reads that the block's script does not declare, no enclosing `pp-for`
+  supplies, and the window does not have is refused on the name, with the
+  nearest declared name when there is one;
 - an agent apply loop: `cargo rahti restart`, `status` and `stop`, with stale
   source detection, per-boot browser and job reports, and matching MCP tools;
 - optional read-only MCP project inspection over local stdio and secured

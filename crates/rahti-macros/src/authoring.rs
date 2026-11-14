@@ -363,3 +363,92 @@ pub fn rpc_name_missing() -> String {
      literal: `pp.rpc(\"save\", { … })`."
         .to_string()
 }
+
+/// `{domians.length}` when the block's script declares `domains` and nothing
+/// declares `domians`. `place` is `script`, `binding` or `handler`, `known`
+/// is what that code could have read, and `line` is where, for code a span
+/// cannot point inside.
+pub fn unknown_name(place: &str, name: &str, known: &[String], line: &str) -> String {
+    let meant = closest(name, known)
+        .map(|known| format!(" Did you mean `{known}`?"))
+        .unwrap_or_default();
+    let reads = match place {
+        "script" => "A script reads what it declares, `pp`, and the window".to_string(),
+        _ => {
+            let from = "what the block's own `<script>` declares at its top level, the rows of \
+                        the `pp-for` it is written in, `pp`, and the window";
+            // The names are worth listing when none of them was meant, and
+            // while they still fit on a line or two.
+            if known.is_empty() || !meant.is_empty() {
+                format!("A {place} reads {from}")
+            } else {
+                let mut names: Vec<String> = known
+                    .iter()
+                    .take(KNOWN_SHOWN)
+                    .map(|name| format!("`{name}`"))
+                    .collect();
+                if known.len() > KNOWN_SHOWN {
+                    names.push(format!("and {} more", known.len() - KNOWN_SHOWN));
+                }
+                format!("A {place} reads {from}. Here that is {}", names.join(", "))
+            }
+        }
+    };
+    format!(
+        "rahti[RAHTI_UNKNOWN_NAME]: this {place} reads `{name}`{line}, a name nothing gives \
+         it.{meant}\n  {reads}.\n  Declare `{name}` in the block's script. A value another \
+         script put on the window is read as `window.{name}`, and a value from the block \
+         around this one arrives as a prop, `pp.props.{name}`."
+    )
+}
+
+/// How many of a block's names an unknown-name refusal lists.
+const KNOWN_SHOWN: usize = 12;
+
+/// The known name one or two edits from `name`, when there is exactly one
+/// nearest.
+fn closest<'a>(name: &str, known: &'a [String]) -> Option<&'a str> {
+    let mut best: Option<(usize, &str)> = None;
+    let mut tied = false;
+    for candidate in known {
+        let distance = edits(name, candidate);
+        if distance > 2 || distance >= name.len() {
+            continue;
+        }
+        match best {
+            Some((least, _)) if distance > least => {}
+            Some((least, _)) if distance == least => tied = true,
+            _ => {
+                best = Some((distance, candidate));
+                tied = false;
+            }
+        }
+    }
+    best.filter(|_| !tied).map(|(_, candidate)| candidate)
+}
+
+/// How many characters are added, dropped, swapped or changed between two
+/// names.
+fn edits(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut rows = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in rows.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        rows[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let change = usize::from(a[i - 1] != b[j - 1]);
+            let mut least = (rows[i - 1][j] + 1)
+                .min(rows[i][j - 1] + 1)
+                .min(rows[i - 1][j - 1] + change);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                least = least.min(rows[i - 2][j - 2] + 1);
+            }
+            rows[i][j] = least;
+        }
+    }
+    rows[a.len()][b.len()]
+}
