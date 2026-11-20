@@ -67,9 +67,9 @@ To exempt one more path, add it with `exempt`, which keeps the defaults:
 rate_limit::configure(RateLimit::default().exempt("/api/hooks"));
 ```
 
-Assigning `exempt_paths` *replaces* the list, so `/health`, `/ready`, and the
-development tooling start spending the budget; use `exempt` unless replacing
-the list is the point.
+Assigning `exempt_paths` *replaces* the list, so the development tooling
+starts spending the budget; `/health` and `/ready` stay exempt regardless.
+Use `exempt` unless replacing the list is the point.
 
 The default budget is 200 requests per minute in production and 2,000 in
 development mode (`RAHTI_DEV`, or a debug build when it is unset). Everything

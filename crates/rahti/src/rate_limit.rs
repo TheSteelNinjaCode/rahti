@@ -79,8 +79,8 @@ impl RateLimit {
     /// Exempt one more route subtree, keeping the exemptions already there.
     ///
     /// Prefer this to assigning `exempt_paths`: assigning replaces the
-    /// defaults, and `/health`, `/ready` and the development tooling start
-    /// spending the budget.
+    /// defaults, and the development tooling starts spending the budget.
+    /// `/health` and `/ready` stay exempt regardless.
     ///
     /// ```
     /// let policy = rahti::rate_limit::RateLimit::default().exempt("/api/hooks");

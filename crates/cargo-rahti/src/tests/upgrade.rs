@@ -79,8 +79,8 @@ fn the_application_is_under_src_and_main_is_not() {
         "src/app/layout.rs",
         "src/app/globals.css",
         "src/db.rs",
-        "src/models/todo.rs",
-        "src/migrations/m20260101_000001_create_todo.rs",
+        "src/models/invoice.rs",
+        "src/migrations/m20260101_000001_create_invoice.rs",
     ] {
         assert!(authored(path), "{path} is the author's");
     }
@@ -114,7 +114,7 @@ fn a_bare_force_takes_the_framework_and_leaves_the_app() {
     assert!(options.forces("src/main.rs"));
     assert!(options.forces("docs/conventions/routing.md"));
     assert!(!options.forces("src/app/page.rs"));
-    assert!(!options.forces("src/models/todo.rs"));
+    assert!(!options.forces("src/models/invoice.rs"));
 }
 
 /// Named paths take exactly what they name, application file or not: that is

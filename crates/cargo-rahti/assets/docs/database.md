@@ -31,8 +31,8 @@ its word.
 cargo rahti upgrade --db sqlite
 ```
 
-It writes `src/db.rs`, the first entity and its migration, records the backend
-in `rahti.config.json`, and then finishes the job in the two files it never
+It writes `src/db.rs` and no table, records the backend in
+`rahti.config.json`, and then finishes the job in the two files it never
 regenerates: `sea-orm` and `sea-orm-migration` are appended to
 `[dependencies]`, pinned to major version 2 with the feature for your backend
 (`sqlx-sqlite`, `sqlx-postgres`, `sqlx-mysql`), and a `DATABASE_URL` is added
@@ -65,12 +65,16 @@ src/
 ├── db.rs                                  the connection — yours
 ├── models/
 │   ├── mod.rs                             generated — do not edit
-│   └── todo.rs                            one file per table — yours
+│   └── invoice.rs                         one file per table — yours
 └── migrations/
     ├── mod.rs                             generated — do not edit
-    └── m20260101_000001_create_todo.rs    one file per change — yours
+    └── m20260101_000001_create_invoice.rs one file per change — yours
 .env                                       DATABASE_URL — gitignored
 ```
+
+A new project has `src/db.rs` and no tables: the scaffold writes no entity and
+no migration, so `invoice.rs` above stands for the first table you add. The
+build creates both directories and their `mod.rs` files.
 
 Both directories are **flat**. A table name is a flat namespace — there is no
 `users::billing` table — and a subdirectory is refused by the build rather
@@ -94,7 +98,7 @@ pub struct Migrator;
 impl ::sea_orm_migration::MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn ::sea_orm_migration::MigrationTrait>> {
         vec![
-            Box::new(m20260101_000001_create_todo::Migration),
+            Box::new(m20260101_000001_create_invoice::Migration),
         ]
     }
 }
@@ -106,18 +110,20 @@ quietest failure available: the file is there, the table is not, and nothing
 anywhere says why. Generated from the directory, that state cannot be reached.
 
 Order is filename order, and filename order is application order. **Name a
-migration for the moment it was written** — `m20260101_000001_create_todo.rs`
+migration for the moment it was written** —
+`m20260101_000001_create_invoice.rs`
 — so the two agree.
 
-Both directories are created if missing, because `main.rs` declares the
+Both directories are created if missing, because `src/lib.rs` declares the
 modules unconditionally once a project has a database.
 
 ## Reaching the Connection
 
 ```rust
 use crate::db::db;
+use crate::models::invoice;
 
-let rows = todo::Entity::find().all(db()).await?;
+let rows = invoice::Entity::find().all(db()).await?;
 ```
 
 `db()` is a process-wide `OnceLock<DatabaseConnection>`, installed by
@@ -139,9 +145,8 @@ there.
 
 ## Adding a Table
 
-Four steps, always the same. Copy `src/models/todo.rs` and
-`src/migrations/m20260101_000001_create_todo.rs` rather than writing from
-memory; they are commented as the worked example.
+Four steps, always the same. Copy the two files below rather than writing
+from memory; they are the complete worked example.
 
 **1. The migration**, in `src/migrations/mYYYYMMDD_NNNNNN_<what>.rs`:
 
@@ -229,11 +234,13 @@ migration is the schema; the entity is how Rust talks to it.
 A framework that changes your schema because you started the server is the
 same class of surprise as one that downloads a compiler you did not ask for,
 and the production version of that surprise is much worse. Call it
-deliberately — from a `main` branch behind an argument, or from a test.
+deliberately — from `initialize_application` behind an argument or an
+environment check, or from a test.
 
 The one defensible exception is a demo whose database is a throwaway SQLite
 file a fresh clone does not have — where the point is that `cargo run` works
-on the first try — and its `main` should say so in a comment.
+on the first try — and its `initialize_application` should say so in a
+comment.
 
 ## Errors
 
@@ -241,22 +248,23 @@ on the first try — and its `main` should say so in a comment.
 
 ```rust
 #[rpc]
-pub async fn list() -> Result<Vec<todo::Model>> {
-    Ok(todo::Entity::find().all(db()).await?)
+pub async fn list() -> Result<Vec<invoice::Model>> {
+    Ok(invoice::Entity::find().all(db()).await?)
 }
 ```
 
-`rahti::Error` implements `From<E>` for every `E: std::error::Error`, so a
+`rahti::Error` implements `From<E>` for every
+`E: std::error::Error + Send + Sync + 'static`, so a
 database failure becomes a 500 carrying its message the moment it is
 returned. Nothing was written to make this work.
 
 Use a real status where you have one. A missing row is a 404, not a 500:
 
 ```rust
-let existing = todo::Entity::find_by_id(id)
+let existing = invoice::Entity::find_by_id(id)
     .one(db())
     .await?
-    .ok_or_else(|| Error::new(StatusCode::NOT_FOUND, "no todo with that id"))?;
+    .ok_or_else(|| Error::new(StatusCode::NOT_FOUND, "no invoice with that id"))?;
 ```
 
 A `page()` returning `Html` has no way to report a failure. Either return
@@ -287,7 +295,7 @@ async fn database() {
 
             let url = format!("sqlite://{}?mode=rwc", path.display());
             crate::db::connect_to(&url).await.expect("a test database");
-            crate::db::migrate().await;
+            crate::db::migrate().await.expect("the migrations");
         })
         .await;
 }
@@ -309,6 +317,37 @@ reliable teardown, and starting from nothing is what makes a run repeatable.
 Call the setup from the request helpers rather than from each test — pages
 that touch the database are reached by tests that are not about the database
 at all.
+
+With each table, add a round-trip test: insert through the entity and read
+the row back. An entity that disagrees with its migration fails here, on the
+first query, instead of in a page.
+
+```rust
+#[tokio::test]
+async fn the_invoice_table_round_trips() {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+
+    use crate::models::invoice;
+
+    database().await;
+
+    let saved = invoice::ActiveModel {
+        reference: Set("INV-1".to_string()),
+        ..Default::default()
+    }
+    .insert(crate::db::db())
+    .await
+    .expect("the insert");
+
+    let found = invoice::Entity::find_by_id(saved.id)
+        .one(crate::db::db())
+        .await
+        .expect("the query")
+        .expect("the row");
+
+    assert_eq!(found.reference, "INV-1");
+}
+```
 
 ## Security
 
@@ -334,8 +373,8 @@ at all.
 ```json
 "db": {
   "backend": "sqlite",
-  "models": ["src/models/todo.rs"],
-  "migrations": ["src/migrations/m20260101_000001_create_todo.rs"]
+  "models": ["src/models/invoice.rs"],
+  "migrations": ["src/migrations/m20260101_000001_create_invoice.rs"]
 }
 ```
 

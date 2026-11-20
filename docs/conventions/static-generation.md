@@ -106,7 +106,8 @@ existing directory it does not own. It also refuses the project root, a
 filesystem root, any output nested inside the public directory, any public
 directory nested inside the output, and symlinked public assets.
 
-If `src/main.rs` predates static generation, the command stops before running
-the application. Use `cargo rahti upgrade --force src/main.rs` to adopt the
-current scaffold handoff, reviewing the forced replacement first with
-`--dry-run` when that file contains application changes.
+The command needs the scaffold's static-export handoff in `src/main.rs` and
+stops before running the application when it is absent.
+`cargo rahti upgrade --force src/main.rs` writes the scaffold file; review the
+replacement first with `--dry-run` when that file contains application
+changes.

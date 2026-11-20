@@ -96,7 +96,7 @@ shapes an adapter must translate. `clear()` means clearing only the namespace
 or database that adapter was configured to own; it must not flush unrelated
 applications on a shared server.
 
-Rahti currently ships the store contract and memory implementation. It does
+Rahti ships the store contract and memory implementation. It does
 not ship a Redis client or create cache configuration in
 `rahti.config.json`. An application that adds an external adapter owns its
 dependency, credentials, connection policy, and startup failure behavior.
@@ -149,7 +149,8 @@ path separates `/en/products` from `/es/products`. An unprefixed i18n request
 whose locale came from `Accept-Language` bypasses page caching; redirect it to
 the explicit locale URL first. See `localization.md`.
 
-`X-Rahti-Cache` reports `MISS` when Rahti rendered and stored a page, `HIT`
+`X-Rahti-Cache` reports `MISS` when Rahti rendered a page because no entry
+existed, `HIT`
 when it reused one, and `BYPASS` when a declared cache policy was unsafe or
 unavailable for that request or response. A `HEAD` request can reuse an
 existing `GET` entry without sending its body; a `HEAD` miss is not stored.

@@ -401,15 +401,10 @@ fn a_database_project_gets_the_files_that_wire_one_up() {
     let tree = Tree::new("with-db");
     scaffold_with(&tree, true, Some(Backend::Sqlite));
 
-    // The worked example everything else is copied from.
-    assert!(
-        tree.read("src/models/todo.rs")
-            .contains("DeriveEntityModel")
-    );
-    assert!(
-        tree.read("src/migrations/m20260101_000001_create_todo.rs")
-            .contains("create_table")
-    );
+    // The database starts with no tables: the scaffold writes no entity and
+    // no migration, so nothing has to be deleted before the first real one.
+    assert!(!tree.0.join("src/models").exists());
+    assert!(!tree.0.join("src/migrations").exists());
     // The connection, reached the only way a stateless handler can reach one.
     assert!(tree.read("src/db.rs").contains("OnceLock"));
 
@@ -820,7 +815,7 @@ fn the_suite_tests_against_the_database_only_when_there_is_one() {
     assert!(with.read("src/tests/mod.rs").contains("mod database;"));
     assert!(
         with.read("src/tests/database.rs")
-            .contains("the_todo_table_round_trips")
+            .contains("the_database_connects_and_migrates")
     );
 
     let without = Tree::new("suite-no-db");

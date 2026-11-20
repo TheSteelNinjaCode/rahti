@@ -442,6 +442,9 @@ html! {
 - Refs attach before layout effects and passive effects run, and detach with
   `null` (or the callback's returned cleanup) when the element unmounts.
 - Ref bindings survive re-renders, including re-renders that change nothing.
+- A `pp-ref={name}` in children handed to a component —
+  `<Panel><input pp-ref={nameInput} /></Panel>` — binds the ref of the block
+  that wrote it, not one of `Panel`'s.
 - The runtime writes `data-pp-ref` internally; never author it.
 
 ```rust

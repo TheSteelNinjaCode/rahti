@@ -11,8 +11,8 @@ tools that can read the workspace but cannot see browser DevTools:
 
 The file is newline-delimited JSON (JSONL): one complete JSON object per line.
 It is truncated when a new development server process initializes, so it
-describes the current server session. `/.rahti` is gitignored in both this
-repository and newly scaffolded applications.
+describes the current server session. The scaffold's `.gitignore` ignores
+`/.rahti`.
 
 Browser diagnostics are also mirrored in concise form to the server terminal.
 
@@ -65,7 +65,7 @@ separate contract in `production-observability.md`.
 Example:
 
 ```json
-{"kind":"browser","receivedAtMs":1785300000000,"boot":"...","level":"error","message":"[PP-ERROR] Handler failed: ...","stack":"Error: console.error\n ...","url":"http://127.0.0.1:3000/counter","source":"http://127.0.0.1:3000/counter","line":42,"column":17,"component":"page_7db1cef0 (section)","timestamp":"2026-07-29T12:00:00.000Z"}
+{"kind":"browser","receivedAtMs":1785300000000,"boot":"...","level":"error","message":"[PP-ERROR] Handler failed: ...","stack":"Error: console.error\n ...","url":"http://127.0.0.1:3000/dashboard","source":"http://127.0.0.1:3000/dashboard","line":42,"column":17,"component":"page_7db1cef0 (section)","timestamp":"2026-07-29T12:00:00.000Z"}
 ```
 
 Fields:
@@ -82,7 +82,7 @@ Fields:
 - `component`: best-effort active `pp-component` boundary;
 - `file`: the application file that boundary comes from (`src/app/page.rs`),
   when the build manifest knows it — resolved from `component`, or from a
-  `pp://component/<id>.js` frame in the stack;
+  `/_rahti/client.js` frame in the stack;
 - `timestamp`: browser capture time.
 
 Console APIs do not expose their call-site filename separately. Their captured
@@ -91,10 +91,10 @@ minified and without a source map, so a stack that lands inside it gives a
 bundle line/column and nothing more readable. Identify such a record by its
 message text and by the `component` boundary it came from.
 
-Code that runs in a component's own `<script>` is different: PulsePoint
-compiles each one under the name `pp://component/<id>.js`, so its frames read
-`at walkIn (pp://component/page_33bf1147.js:12:7)` — the function, the
-component, and the line within that script.
+Code that runs in a component's own `<script>` is different: it runs as a
+function in `/_rahti/client.js` named after its boundary, so its frames read
+`at page_33bf1147 (…/_rahti/client.js:12:5)` — the component boundary and
+the position inside the client registry.
 
 ## Server Record
 
@@ -131,8 +131,8 @@ network failure can lose its final batch.
 4. Group records by `boot`, URL, component, and message.
 5. Open the record's `file` when present — it is the page, layout, error
    boundary or loading region the failure came from. Use `source`/line/column
-   when present; otherwise inspect `stack`, where a `pp://component/` frame
-   names the component script and the line inside it.
+   when present; otherwise inspect `stack`, where a `/_rahti/client.js` frame
+   names the component boundary.
 6. A message from the runtime itself names the condition it detected — read
    it against the markup and script of the reported `component`.
 7. Fix the smallest owning block and rerun the reproduction.

@@ -2,12 +2,12 @@
 
 ## Configuration Source
 
-`rahti.config.json` is the project configuration and scaffold ledger.
-`rahti.schema.json` documents and validates its shape.
+`rahti.config.json` is the project configuration and scaffold ledger. The
+schema its `$schema` key names documents and validates its shape.
 
 ```json
 {
-  "$schema": "./rahti.schema.json",
+  "$schema": "https://rahti.tsnc.tech/schema/1.json",
   "schema": 1,
   "createdWith": "0.0.19",
   "app": {
@@ -52,8 +52,7 @@
   see `localization.md`.
 - The active Rahti version comes from `Cargo.toml`.
 
-All operational keys default, but keep the file valid JSON and update the
-schema whenever adding a key.
+All operational keys default, but keep the file valid JSON.
 
 `server.host` and `server.port` are where the server binds. A deployment can
 name its own address instead: `PORT` overrides the configured port, `HOST`
@@ -83,10 +82,7 @@ that bound. `0.0.0.0` and `[::]` mean "every interface on this machine" — a
 sentence about listening, not a destination — and a browser handed one refuses
 it outright. So a wildcard bind prints as `localhost`, the same server named
 the way this machine reaches it; any other address prints as it is. That is
-`rahti::local_url(&listener)`, which the scaffold's `main.rs` calls. A project
-whose `main.rs` predates it prints the bind address verbatim and shows an
-unclickable `http://0.0.0.0:3000`; `cargo rahti upgrade --force src/main.rs`
-takes the current one.
+`rahti::local_url(&listener)`, which the scaffold's `main.rs` calls.
 
 In development a busy port is not fatal: the server increments from the port it
 was given until it finds a free one and prints the address it actually bound —
@@ -168,7 +164,7 @@ environment and must never be bundled into an application's `.env`.
 
 `rahti::load_env()` is the one `.env` reader for the process. It is called by
 `AppTime::from_env`, `AuthSettings::from_env`, and the application's
-`db::connect`, is idempotent, and never overwrites a variable the environment
+`db::connect_if_configured`, is idempotent, and never overwrites a variable the environment
 already carries.
 
 Explicit application routes win. Public files are the router fallback, and
@@ -605,9 +601,6 @@ the render contract and output safety rules.
   and the `scaffold` ledger. Everything else — the port, the app directory,
   any CSS setting — stays exactly as you wrote it.
 
-Studio is a local database editor. Do not run it against a production database
-unless you intend to inspect or modify that database directly.
-
 When changing scaffold behavior, update templates/assets, hash-ledger behavior,
 tests, and this document together.
 
@@ -620,10 +613,11 @@ project that never runs it compiles, downloads and depends on no part of it.
 cargo install cargo-rahti-native
 
 cargo rahti native init --identifier com.example.myapp --windows --android
-cargo rahti native doctor [--target windows|android] [--release]
+cargo rahti native doctor [--target windows|android] [--release] [--json]
+cargo rahti native icon  <image> [--background <colour>]
 cargo rahti native dev   --target windows|android [--device <name>]
 cargo rahti native build --target windows
-cargo rahti native build --target android [--format apk|aab] [--debug]
+cargo rahti native build --target android [--format apk|aab] [--debug] [--abi <abi>] [--device <serial>]
 ```
 
 `cargo rahti native …` is forwarded by `cargo-rahti` to the installed helper;

@@ -132,7 +132,7 @@ and only when the project gains a database. That is what protects your
 credentials from an upgrade.
 
 `.env` is read by `rahti::load_env()`, which both `AuthSettings::from_env` and
-the application's `db::connect` call. It is idempotent, so neither has to know
+the application's `db::connect_if_configured` call. It is idempotent, so neither has to know
 which ran first, and a project without a database still reaches its variables.
 
 ## The policy
@@ -287,7 +287,7 @@ current, and call `sign_in` again after changing anything the payload carries.
 
 ```rust
 #[rpc(auth)]
-pub async fn rename(name: String) -> rahti::Result<user::Public> { … }
+pub async fn rename(name: String) -> rahti::Result<SessionUser> { … }
 ```
 
 `auth` is the only argument `#[rpc]` accepts. The check runs before the payload
@@ -303,8 +303,9 @@ The identity comes from the session, never from the payload:
 
 ```rust
 #[rpc(auth)]
-pub async fn rename(name: String) -> Result<user::Public> {
-    let signed_in = auth::current().expect("`#[rpc(auth)]` answered");
+pub async fn rename(name: String) -> rahti::Result<SessionUser> {
+    // `SessionUser` is the application's own type: what `sign_in` was given.
+    let signed_in = rahti::auth::user::<SessionUser>().expect("`#[rpc(auth)]` answered");
     // …operate on signed_in.id. An `id` parameter would let anyone
     // rename anyone.
 }
@@ -377,15 +378,17 @@ Application-owned, in `src/auth.rs`. What a sound implementation looks like:
 - Emails normalized before they are stored or looked up, with a unique index in
   the migration — the application's duplicate check is for the readable error;
   the constraint is what makes it true under a race.
-- A wire type (`user::Public`) with no field for the hash, so what may leave the
+- A wire type (a `SessionUser`) with no field for the hash, so what may leave the
   server is answered by a type rather than by care.
 
 ## Testing
 
-The application test harness installs the same policy `main` does:
+The application test harness installs the same policy
+`initialize_application` does:
 
 ```rust
 rahti::auth::configure(crate::auth::settings());
+rahti::authorization::configure(crate::auth::authorization());
 ```
 
 Without it a suite exercises private routes that nothing protects. A suite
@@ -396,9 +399,10 @@ way a browser would.
 ## What is not here
 
 - **OAuth providers.** No Google, no GitHub, no provider abstraction.
-- **Roles and permissions.** A call is from a session or it is not. Anything
-  finer is a question about your users; answer it in your own code, in the rpc
-  body, where the row is in hand.
+- **Built-in roles or a permissions table.** `rahti::auth` only knows whether
+  a call has a session. Anything finer is a named ability or resource policy
+  the application defines through `rahti::authorization`; see
+  `authorization.md`.
 - **Server-side revocation.** The session is stateless. Sign-out clears the
   cookie; it does not invalidate one already copied elsewhere.
 - **Remember-me, refresh tokens, device lists, MFA.**

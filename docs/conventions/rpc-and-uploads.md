@@ -655,14 +655,15 @@ types without echoing payload values.
 
 ## Database Errors
 
-`rahti::Error` implements `From<E>` for every `E: std::error::Error`, so
+`rahti::Error` implements `From<E>` for every
+`E: std::error::Error + Send + Sync + 'static`, so
 `sea_orm::DbErr` works with `?` inside `rahti::Result<T>` with no conversion
 written anywhere:
 
 ```rust
 #[rpc]
-pub async fn list() -> Result<Vec<todo::Model>> {
-    Ok(todo::Entity::find().all(db()).await?)
+pub async fn list() -> Result<Vec<invoice::Model>> {
+    Ok(invoice::Entity::find().all(db()).await?)
 }
 ```
 

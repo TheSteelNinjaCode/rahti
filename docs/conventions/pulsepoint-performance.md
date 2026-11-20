@@ -176,8 +176,13 @@ long list costs about what those rows cost. A row participates when:
 - the loop body renders **exactly one root element** per row;
 - that element has a non-empty, unique `key`;
 - the loop is not nested inside another `pp-for`;
-- the row contains no nested component boundary, owned slot content or
-  context provider.
+- outside the components in it, the row contains no context provider, ref
+  or managed form control.
+
+A component in a row takes part: its props are on its tag, so an identical
+row means identical props, and children handed to it are part of the row.
+A row that only moved — reordered, or shifted by an inserted or removed
+row — renders the same markup and is reused too.
 
 A keyed list of simple rows that closes and reopens (an accordion, a filter
 that matched nothing) revives the same rows — same nodes, same identities —
@@ -238,7 +243,7 @@ html! { <themecontext.provider value={themeValue}>"…"</themecontext.provider> 
 | A fast control owns a large list, provider or dialog | Boundary | Move the state into a smaller component |
 | A child re-renders though its props look unchanged | Authoring | A bound value is a new identity each render — memoize it |
 | Every context consumer re-renders with the provider | Authoring | The provided value is rebuilt each render — memoize it |
-| One changed row costs as much as all rows | Authoring | Key the row, single-root it, keep boundaries out of it |
+| One changed row costs as much as all rows | Authoring | Key the row, single-root it, keep providers and refs out of it |
 | Byte-identical output still reconciles a large subtree | Possibly runtime | Capture `pp.getPerfStats()` and report it with the shape |
 
 Measure only while profiling, around one reproduced interaction:

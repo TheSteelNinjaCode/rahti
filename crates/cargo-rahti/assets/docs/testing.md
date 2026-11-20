@@ -156,18 +156,21 @@ per suite is plenty.
 
 ## Testing Auth
 
-The guard the generated router installs reads the policy installed by
-`rahti::auth::configure(...)`. `initialize_application` installs it in the
-running application; the test suite must install it too, once, from
-`setup()`:
+This section applies once the application has a `src/auth.rs` and
+`initialize_application` installs its policy; `authentication.md` and
+`authorization.md` show both. The guard the generated router installs reads
+the policy installed by `rahti::auth::configure(...)`, and handlers read the
+abilities installed by `rahti::authorization::configure(...)`. The test suite
+must install the same two, once, from `setup()`:
 
 ```rust
 rahti::auth::configure(crate::auth::settings());
+rahti::authorization::configure(crate::auth::authorization());
 ```
 
-A suite that skips this line exercises private routes that nothing
+A suite that skips these lines exercises private routes that nothing
 protects — every test passes, and the protection was never tested. The
-scaffolded `setup()` marks where the line goes.
+scaffolded `setup()` marks where the lines go.
 
 With the policy installed, a private route with no session answers
 `StatusCode::SEE_OTHER` with a `location` header pointing at the sign-in
@@ -176,16 +179,30 @@ page and carrying the original destination:
 ```rust
 #[tokio::test]
 async fn a_private_route_redirects_a_signed_out_visitor() {
-    let (status, body) = get("/account").await;
+    let (status, body) = get("/profile").await;
 
     assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
 }
 ```
 
 An `#[rpc(auth)]` with no session is refused with
-`StatusCode::UNAUTHORIZED`. Test both halves for anything private: the
-guard decides who may load the page, the attribute decides who may make
-the call, and neither substitutes for the other.
+`StatusCode::UNAUTHORIZED`. That redirect carries no CSRF token, so `rpc`
+cannot take one from a private page and panics there. `rpc_from` takes the
+token from a page anyone may load and posts to the private URL, so what is
+refused is the missing session rather than a missing token:
+
+```rust
+#[tokio::test]
+async fn an_authed_rpc_is_refused_without_a_session() {
+    let (status, body) = rpc_from("/", "/profile", "rename", r#"{"name":"Ada"}"#).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+}
+```
+
+Test both halves for anything private: the guard decides who may load the
+page, the attribute decides who may make the call, and neither substitutes
+for the other.
 
 ## Testing Against the Database
 
@@ -234,6 +251,9 @@ WebDriver, Node, or browser download. Turn it on for tests only:
 [dev-dependencies]
 rahti = { version = "…", features = ["browser-test"] }
 ```
+
+This example drives a page at `/` whose button increments the number in its
+first `<p>`; point the selectors at the page under test.
 
 ```rust
 use rahti::browser::{Browser, serve};

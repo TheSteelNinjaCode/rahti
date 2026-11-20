@@ -7,7 +7,9 @@ counterpart is `testing.md`, which teaches a scaffolded application's suite.
 ## Test Locations
 
 - `crates/<crate>/src/tests/*.rs` - unit and module-level behavior, included
-  from the crate/module using `#[path = "tests/..."]`.
+  from the crate/module using `#[path = "tests/..."]`. `rahti-js` keeps its
+  tests in `src/tests.rs`, and `rahti-mcp` keeps them inline in
+  `#[cfg(test)] mod tests`.
 - `crates/rahti/tests/router.rs` - the framework end to end, through a
   router built by hand the way codegen builds one, using only the public
   API.
@@ -30,8 +32,9 @@ cargo run -p cargo-rahti -- new smoke --local <path-to-this-checkout>
 ```
 
 A suite that drives a generated router must install the auth policy the way
-an application's `main` does — `rahti::auth::configure(...)` — or it
-exercises private routes that nothing protects.
+an application's `initialize_application` does —
+`rahti::auth::configure(...)` and `rahti::authorization::configure(...)` — or
+it exercises private routes that nothing protects.
 
 ## Verification by Change Type
 

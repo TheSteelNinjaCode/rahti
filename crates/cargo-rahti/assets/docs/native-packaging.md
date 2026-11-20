@@ -59,8 +59,7 @@ used. One that does not is passed over, for the build's process only, in favour
 of a suitable JDK already on the machine, and the build prints which.
 
 The generated `native/build.rs` links the Android library for 16 KB memory
-pages, which Google Play requires of current apps. A shell generated before this
-picks it up from `cargo rahti native init`, unless its `build.rs` was edited.
+pages, which Google Play requires of current apps.
 
 ## The commands
 
@@ -125,11 +124,6 @@ The application is outside `native/`'s deliberately separate Cargo workspace.
 Tauri CLI 2.8 introduced the additional watch folders needed to observe it;
 `doctor` refuses an older CLI and prints the upgrade command.
 
-An existing project gets this behavior after updating `cargo-rahti-native` and
-running `cargo rahti native init` again. Untouched generated shell files are
-updated; an application-owned file you edited remains yours and is reported,
-as usual.
-
 ## Your application has to expose its startup
 
 The native shell starts the same application the web binary starts, by calling
@@ -147,9 +141,8 @@ framework's — which migrations run and when is a decision your `src/lib.rs`
 makes.
 
 The split exists because Android has no `main`: the operating system loads a
-library and calls into it. A project whose startup is still inside
-`fn main()` cannot be packaged, and `doctor` says so with the command that
-fixes it.
+library and calls into it. Startup written inside `fn main()` cannot be
+packaged, and `doctor` says so with the command that fixes it.
 
 **Startup returns its errors rather than exiting on them.** A packaged process
 that calls `std::process::exit` during startup is, from the user's side, a

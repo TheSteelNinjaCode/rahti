@@ -1,9 +1,10 @@
 # Native Web APIs
 
-A component's `<script>` is plain browser JavaScript, evaluated as a function
-body in the page's own global scope. It is not a sandbox and no build step
-rewrites it: `window`, `document`, and `navigator` are the objects every other
-script on the page sees, and DevTools debug the script as written. Every web
+A component's `<script>` is plain browser JavaScript. `html!` wraps it,
+unchanged apart from its `@{…}` values, in a function in `/_rahti/client.js`
+that runs in the page's own global scope. It is not a sandbox: `window`,
+`document`, and `navigator` are the objects every other script on the page
+sees, and DevTools show the script inside that function. Every web
 API the browser ships is therefore available to a component directly:
 
 - **WebGPU** (`navigator.gpu`) — GPU rendering and compute: large charts,
@@ -93,10 +94,13 @@ pub async fn page() -> Html {
                     setSeries(values);
                 }
 
-                // initGpu, drawGpu, and draw2d are plain WebGPU and Canvas code:
-                // navigator.gpu.requestAdapter(), adapter.requestDevice(),
-                // canvas.getContext("webgpu"), a render pipeline,
-                // device.queue.writeBuffer(...), a render pass.
+                // Plain WebGPU and Canvas code, declared in this script so the
+                // names above resolve: navigator.gpu.requestAdapter(),
+                // adapter.requestDevice(), canvas.getContext("webgpu"), a render
+                // pipeline, device.queue.writeBuffer(...), a render pass.
+                async function initGpu(canvas) { /* returns { device, … } or null */ }
+                function drawGpu(g, values) { /* … */ }
+                function draw2d(canvas, values) { /* … */ }
             "##</script>
         </section>
     }

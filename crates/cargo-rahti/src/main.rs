@@ -101,8 +101,8 @@ NEW:
     --tailwind         Add Tailwind CSS. Without it, plain CSS.
     --db [backend]     Add a database — sqlite, postgres or mysql. Bare
                        `--db` is sqlite, the one that needs no server.
-                       Writes src/models/ and src/migrations/, and adds
-                       SeaORM to Cargo.toml.
+                       Writes src/db.rs and adds SeaORM to Cargo.toml.
+                       The database starts with no tables.
     --ws               Add WebSockets: the `ws` feature on the rahti
                        dependency, which compiles `rahti::ws` and the
                        `#[socket]` attribute.

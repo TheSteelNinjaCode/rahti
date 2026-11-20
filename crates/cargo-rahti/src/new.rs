@@ -209,12 +209,9 @@ pub fn project_files(
             "docs/conventions/database.md".into(),
             t::DOC_DATABASE.into(),
         ));
+        // No entity and no migration: a new project's database starts with
+        // no tables, and `rahti-build` creates both directories.
         files.push(("src/db.rs".into(), t::DB_RS.into()));
-        files.push(("src/models/todo.rs".into(), t::MODEL_TODO_RS.into()));
-        files.push((
-            "src/migrations/m20260101_000001_create_todo.rs".into(),
-            t::MIGRATION_TODO.into(),
-        ));
     }
 
     // `.env` is deliberately not here — see `UNTRACKED`.
@@ -541,10 +538,10 @@ fn report(name: &str, tailwind: bool, db: Option<Backend>, ws: bool, mcp: bool) 
     }
 
     if db.is_some() {
-        println!("  The database is in src/models/ — one file per table — with the");
-        println!("  migrations that create them in src/migrations/. Both are wired up");
-        println!("  from their contents, so adding a file is the whole of adding a");
-        println!("  table. See docs/conventions/database.md.\n");
+        println!("  The database starts with no tables. A table is one file in");
+        println!("  src/models/ and the migration that creates it in src/migrations/.");
+        println!("  Both are wired up from their contents, so adding the files is the");
+        println!("  whole of adding a table. See docs/conventions/database.md.\n");
     }
     if mcp {
         println!("  MCP is optional and enabled for this project. The app serves");

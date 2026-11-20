@@ -1096,111 +1096,6 @@ pub async fn migrate() -> Result<(), String> {
 }
 "#;
 
-/// The one entity a new project has: the table its `/todo` page reads.
-///
-/// Written out in full rather than generated from the database, because the
-/// point of the file is to be the worked example everything else — including
-/// an agent asked to add a table — is copied from. Every derive it carries is
-/// there for a reason the comments name.
-pub const MODEL_TODO_RS: &str = r#"//! The `todo` table.
-//!
-//! One file per table, named after it in snake_case. `src/models/mod.rs` is
-//! generated from this directory, so saving the file is the whole of adding
-//! the entity — there is no list to register it in.
-//!
-//! Copy this file to add a table. The four pieces are always the same:
-//!
-//! 1. `Model` — the columns, as ordinary Rust fields.
-//! 2. `Relation` — what this table points at. Empty is fine and common.
-//! 3. `ActiveModelBehavior` — hooks. The empty impl is required.
-//! 4. a migration in `src/migrations/`, which is what actually creates it.
-//!
-//! The struct does not create the table. Nothing here is read at startup and
-//! nothing is checked against the database: an entity that disagrees with the
-//! schema compiles fine and fails on the first query. The migration is the
-//! schema; this is how Rust talks to it.
-
-use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
-
-/// `Serialize` so an `#[rpc]` can return a row as it stands, and the page can
-/// seed a list into its script with `Json(&todos)`. `Deserialize` so the same
-/// shape round-trips back.
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "todo")]
-pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i32,
-    pub text: String,
-    pub done: bool,
-}
-
-/// What this table points at. A table with no foreign keys has none, and the
-/// empty enum is how that is written.
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
-
-/// Hooks for insert and update. Required even when empty — this is where a
-/// `created_at` would be filled in.
-impl ActiveModelBehavior for ActiveModel {}
-"#;
-
-/// The migration that creates that table.
-///
-/// Named for the moment it was written, because `src/migrations/mod.rs` lists
-/// this directory in filename order and that order is the order they are
-/// applied.
-pub const MIGRATION_TODO: &str = r#"//! Create the `todo` table.
-//!
-//! The file name is the version: `src/migrations/mod.rs` is generated from
-//! this directory in filename order, and that is the order migrations are
-//! applied. So a new migration is named for the moment it was written, and
-//! adding the file is the whole of adding the migration.
-//!
-//! `up` makes the change and `down` undoes it. Write both — a `down` you
-//! never run costs a minute, and the one time you need it you need it badly.
-
-use sea_orm_migration::{prelude::*, schema::*};
-
-#[derive(DeriveMigrationName)]
-pub struct Migration;
-
-#[async_trait::async_trait]
-impl MigrationTrait for Migration {
-    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .create_table(
-                Table::create()
-                    .table(Todo::Table)
-                    .if_not_exists()
-                    .col(pk_auto(Todo::Id))
-                    .col(string(Todo::Text))
-                    .col(boolean(Todo::Done).default(false))
-                    .to_owned(),
-            )
-            .await
-    }
-
-    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .drop_table(Table::drop().table(Todo::Table).to_owned())
-            .await
-    }
-}
-
-/// The column names, as the query builder needs them. Kept beside the
-/// migration rather than shared with the entity on purpose: this describes the
-/// table as it was at this version, and a later migration that renames a
-/// column must not change what an earlier one did.
-#[derive(DeriveIden)]
-enum Todo {
-    Table,
-    Id,
-    Text,
-    Done,
-}
-"#;
-
 pub fn layout_rs(title: &str) -> String {
     format!(
         r###"use crate::rahti::{{Html, Metadata, html}};
@@ -1408,6 +1303,18 @@ pub(super) async fn rpc(
     name: &str,
     payload: &str,
 ) -> (StatusCode, String) {
+    rpc_from(url, url, name, payload).await
+}
+
+/// The same call with the CSRF token taken from `token_url`. A private page
+/// answers a signed-out GET with a redirect that carries no token, so a test
+/// of a signed-out `#[rpc(auth)]` takes its token from a public page.
+pub(super) async fn rpc_from(
+    token_url: &str,
+    url: &str,
+    name: &str,
+    payload: &str,
+) -> (StatusCode, String) {
     setup().await;
 
     let router = crate::routes::router();
@@ -1416,7 +1323,7 @@ pub(super) async fn rpc(
         .clone()
         .oneshot(
             Request::builder()
-                .uri(url)
+                .uri(token_url)
                 .header("host", "127.0.0.1:3000")
                 .body(Body::empty())
                 .unwrap(),
@@ -1427,7 +1334,7 @@ pub(super) async fn rpc(
     let cookie = visit
         .headers()
         .get(axum::http::header::SET_COOKIE)
-        .expect("the page hands out a csrf token")
+        .expect("the page hands out a csrf token; a private page does not — use rpc_from")
         .to_str()
         .unwrap()
         .split(';')
@@ -1517,31 +1424,22 @@ pub fn database_tests_rs() -> String {
     String::from(
         r#"use super::*;
 
-/// The migrations that ran in `setup` created a real schema: a row goes in
-/// through the entity and comes back. A disagreement between the entity and
-/// its migration fails here, on the first query.
+/// `setup` connected a real database and ran this application's migrations.
+/// A new project has no tables. With each table you add, add a round-trip
+/// test here — insert through the entity, read the row back — so an entity
+/// that disagrees with its migration fails on the first query.
+/// docs/conventions/database.md shows one.
 #[tokio::test]
-async fn the_todo_table_round_trips() {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+async fn the_database_connects_and_migrates() {
+    use sea_orm::ConnectionTrait;
 
     setup().await;
 
-    let saved = crate::models::todo::ActiveModel {
-        text: Set("write a test".to_string()),
-        done: Set(false),
-        ..Default::default()
-    }
-    .insert(crate::db::db())
-    .await
-    .expect("the insert");
-
-    let found = crate::models::todo::Entity::find_by_id(saved.id)
-        .one(crate::db::db())
+    assert!(crate::db::is_connected());
+    crate::db::db()
+        .execute_unprepared("SELECT 1")
         .await
-        .expect("the query")
-        .expect("the row");
-
-    assert_eq!(found.text, "write a test");
+        .expect("a query");
 }
 "#,
     )
@@ -1732,7 +1630,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             server is running the current source, which routes loaded under this\n\
             boot with their browser errors, and how background jobs are doing. A\n\
             route it does not list was never opened, so it proves nothing.\n\n\
-         End with what you applied: \"Restarted, loaded `/todo`, saved a row;\n\
+         End with what you applied: \"Restarted, loaded `/dashboard`, saved a row;\n\
          browser clean.\" If you have no browser, say so and give the exact URL.\n\n",
     );
 
@@ -1758,8 +1656,9 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          its `#[rpc]`; run\n\
          compiler and router/browser checks. `html!` refuses a field read\n\
          directly off `const x = await pp.rpc(\"name\", …)` that the response\n\
-         does not have; dynamic values, and a result read after it was stored\n\
-         or passed on, are not proved by compilation. See\n\
+         does not have, and a field read off a state that only ever holds\n\
+         that response (`RAHTI_STATE_FIELD`); dynamic values and a result\n\
+         passed on to other code are not proved by compilation. See\n\
          `docs/conventions/rpc-and-uploads.md`.\n\n",
     );
 
@@ -1936,7 +1835,11 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          handler is a binding, `onclick={save()}`; a server value is\n\
          `href=@{url}`. A binding is JavaScript the Rust lexer must accept —\n\
          double-quoted strings, no template literals — so longer logic is a\n\
-         named function in the script. Compute values in Rust above the\n\
+         named function in the script. Template literals belong in the\n\
+         script, where they are preferred to `+` chains; in markup write\n\
+         `\"Hello \"{name}` as text and `title={\"Hello \" + name}` in an\n\
+         attribute (a backtick there is rustc's `unknown start of token`).\n\
+         Compute values in Rust above the\n\
          template and interpolate names. `html!` has one authored root: a\n\
          literal element, a single component tag, or a `<>…</>` fragment. The\n\
          root layout is the exception: it writes a literal `<html>` root,\n\
@@ -2067,12 +1970,16 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
-        "Background jobs are typed, named application work running on Rahti's\n\
-         bounded process-local queue. Keep a `JobQueue` handle in application-owned\n\
-         state, enqueue only after the authoritative transaction commits, and\n\
-         make retryable handlers idempotent. Payloads are neither durable nor\n\
-         encrypted; use an external broker when losing queued work on process\n\
-         failure is unacceptable. Every host calls\n\
+        "A background job is a `#[job]` function in `src/jobs.rs` or under\n\
+         `src/jobs/`, enqueued as `crate::jobs::name::enqueue(args).await`, so a\n\
+         wrong name or argument is a compile error. `initialize_application`\n\
+         calls `rahti::jobs::Jobs::new().install()` once. Enqueue only after the\n\
+         authoritative transaction commits, and make retryable handlers\n\
+         idempotent: delivery is at least once. Payloads are ids, never\n\
+         secrets, and are not encrypted. The memory queue loses work on a\n\
+         crash; `cargo rahti generate job-store` keeps jobs in the\n\
+         application's database. Pin `name = \"…\"` before renaming a durable\n\
+         job. Every host calls\n\
          `rahti::jobs::finish_shutdown()` after HTTP graceful shutdown."
             .to_string(),
     );
@@ -2161,7 +2068,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          interpolated. A function handed to a library or a long-lived listener is\n\
          wrapped in `pp.event(…)` so it reads current state, never a\n\
          hand-kept \"latest\" ref. A library mounts into an empty element of its\n\
-         own, `<div pp-ref=\"{host}\"></div>`; re-renders leave its children and the\n\
+         own, `<div pp-ref={host}></div>`; re-renders leave its children and the\n\
          attributes it sets alone."
             .to_string(),
     );

@@ -172,7 +172,7 @@ Keep `public/js/main.js` when customizing client startup, or preserve its
 client registry import and its metadata synchronization. A full browser load needs no JavaScript for SEO:
 the same tags are already rendered directly in the server response's head.
 
-Crossing into a different root layout performs a full load as before. Each
+Crossing into a different root layout performs a full load. Each
 root layout resolves only the metadata inside its own document tree.
 
 ## Boundaries

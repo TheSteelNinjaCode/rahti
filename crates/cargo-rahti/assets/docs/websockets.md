@@ -9,7 +9,8 @@ exist only when the application's `rahti` dependency enables the `ws` cargo
 feature:
 
 ```toml
-rahti = { version = "0.1", features = ["ws"] }
+# Keep the version already in Cargo.toml; add the feature.
+rahti = { version = "…", features = ["ws"] }
 ```
 
 `cargo rahti new --ws` (or answering yes to "Use WebSockets?") writes that

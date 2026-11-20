@@ -367,8 +367,7 @@ pub struct ComponentCall {
     /// the whole surface with one parameter instead of naming forty events.
     pub bindings: Vec<(String, String)>,
     /// `None` for `<Card />`: nothing is passed, so a component that takes
-    /// `children` fails with "missing field" until the caller writes
-    /// `<Card></Card>` — or passes some.
+    /// `children` receives its `Default`, `Html::empty()`.
     pub children: Option<ChildBlock>,
 }
 

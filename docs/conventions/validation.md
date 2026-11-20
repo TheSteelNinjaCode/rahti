@@ -100,8 +100,9 @@ impl Validate for ProfileInput {
 }
 ```
 
-`Validator::validated(value)` is the compact alternative when validation and
-construction happen together. `ValidationErrors` can also be built directly;
+`validator.validated(value)` is the compact alternative when validation and
+construction happen together: it consumes the validator and returns
+`Ok(value)` when no rule failed. `ValidationErrors` can also be built directly;
 it provides `add`, `has`, `field`, `first`, `fields`, `len`, `is_empty`, and
 `into_result`.
 

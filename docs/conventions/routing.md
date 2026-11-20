@@ -387,14 +387,15 @@ the runtime falls back to swapping the whole `<body>`.
 
 The browser chooses. At the start of a navigation it takes the path in the
 address bar and walks it up one segment at a time, taking the first region it
-finds — so `/slow/report` tries `/slow/report`, then `/slow`, then `/`.
+finds — so `/reports/monthly` tries `/reports/monthly`, then `/reports`, then
+`/`.
 
 The path in the address bar at that moment is the page being **left**, not the
 one being loaded: history is updated after the response arrives. A link from
-`/` to `/slow` therefore shows `app/loading.rs`, and a link from `/slow` to
-anywhere shows `app/slow/loading.rs`. In practice this means a region belongs
-to the section a reader is navigating *within*, and a root `app/loading.rs` is
-what covers arrivals from elsewhere.
+`/` to `/reports` therefore shows `src/app/loading.rs`, and a link from
+`/reports` to anywhere shows `src/app/reports/loading.rs`. In practice this
+means a region belongs to the section a reader is navigating *within*, and a
+root `src/app/loading.rs` is what covers arrivals from elsewhere.
 
 A region covers every URL below it, including URLs that do not exist yet and
 dynamic segments below a static ancestor. There is no chain and no nesting:
@@ -436,7 +437,7 @@ Transitions path: the runtime uses the loading region instead. An app with no
 Explicit routes are matched first. Unclaimed paths fall through to the
 configured public directory. If no public file exists, the root
 `not-found.rs` is rendered with HTTP 404 and wrapped by the root layout.
-Nested `not-found.rs` files are not currently routed.
+Only the root `not-found.rs` is routed; a nested one is ignored.
 
 ## Generated Router
 
@@ -452,7 +453,8 @@ application convention file resolving to either exact URL is a build error.
 It also installs the auth guard as the outermost layer of every group and of
 the RPC router — but not over the static fallback, so `public/` is served
 without a session. Which routes that guard protects is not a property of the
-file tree: it is the policy the application installs from `main`. See
+file tree: it is the policy `initialize_application` installs in
+`src/lib.rs`. See
 `authentication.md`.
 
 Never modify `src/routes.rs`. Change the convention files or build generator

@@ -50,7 +50,11 @@ dialects stand out from the HTML:
 - **A binding is JavaScript the Rust lexer reads as tokens**, then copies
   through exactly as written. Use double-quoted strings inside one, `"a"`; a
   multi-character `'…'` string or a template literal does not lex, so logic
-  that needs them belongs in the script as a named function.
+  that needs them belongs in the script as a named function. A backtick in
+  a binding is rustc's ``unknown start of token: ` ``; write
+  `"Hello "{name}` as text, `title={"Hello " + name}` in an attribute, and
+  the template literal itself in the script (see "Template Literals" in
+  `pulsepoint.md`).
 - **`<script>` and `<style>`** bodies are always written `r##"…"##` and reach
   the browser exactly as written — quotes, `"#fff"`, `querySelector("#id")`,
   template literals and comments included. Two `#`s is the one spelling:
@@ -112,7 +116,7 @@ An `@{…}` value decides whether its attribute appears at all.
 ```rust
 <a href=@{maybe_url}>"Profile"</a>       // no href when None
 <input disabled=@{is_locked} />          // no disabled when false
-<span aria-hidden=@{decorative}>…</span> // aria-hidden="false" when false
+<span aria-hidden=@{decorative}>"…"</span> // aria-hidden="false" when false
 ```
 
 A *boolean attribute* is one HTML reads by presence, and which one that is
@@ -193,7 +197,7 @@ pub fn Button(bindings: Bindings, children: Html) -> Html {
 }
 
 // <Button onclick={save()} title={label}>"Save"</Button>
-// renders <button class="btn" onclick={save()} title={label}>Save</button>
+// renders <button class="btn" pp-onclick="save()" title="{label}">Save</button>
 ```
 
 Client binding names may contain hyphens or namespace separators, just as
@@ -353,9 +357,10 @@ parameters:
 
 A prop value is a Rust expression: a literal as written (`title="Profile"`,
 `count=3`), or `@{expr}` for anything computed. A bare prop is the boolean
-shorthand — `<Card wide>` passes `wide: true`. A client `{…}` binding is not
-a prop value and fails to compile: a component runs at render, and there is
-nothing of the browser in it.
+shorthand — `<Card wide>` passes `wide: true`. A client `{…}` on a component
+tag is not a typed prop: it arrives in the component's `bindings: Bindings`
+parameter (see "Client Props"), and is a compile error — no field
+`bindings` — on a component that declares none.
 
 The tag form is compile-time sugar over the function call. `Card` is still an
 ordinary function, and the call form is what expression contexts use — a
@@ -365,9 +370,11 @@ loop, a condition, a `map`:
 @{Html::concat(users.iter().map(|user| Card(user, Html::empty())))}
 ```
 
-Prop mistakes fail with rustc's ordinary struct-literal errors: a missing
-prop is "missing field", an unknown one is "no field named", a doubled one is
-"specified more than once". Behind the tag, `#[component]` generates a hidden
+An omitted prop takes its type's `Default` — `""`, `false`, `0`, `None`,
+`Html::empty()` — so a forgotten prop compiles and renders that default; a
+prop whose type has no `Default` is an unsatisfied trait bound at the tag.
+The other prop mistakes fail with rustc's ordinary struct-literal errors: an
+unknown one is "no field named", a doubled one is "specified more than once". Behind the tag, `#[component]` generates a hidden
 props struct sharing the function's name; the one `use` that imports the
 component imports both, and an aliased import
 (`use lib::Button as Installed;` → `<Installed … />`) carries the pair along.
@@ -435,7 +442,7 @@ A block that renders siblings may root itself in `<>…</>`:
 
 ```rust
 #[component]
-pub fn Pair(label: &str) -> Html {
+pub fn Pair(label: &str, children: Html) -> Html {
     html! {
         <>
             <dt>@{label}</dt>
@@ -496,8 +503,8 @@ siblings, joined in order:
 
 An empty tag pair — `<Card title="…"></Card>` — passes `Html::empty()`. A
 self-closing tag passes no `children` argument at all: it is the form for a
-component that declares none, and calling a component that does declare one
-self-closing fails with "missing field `children`".
+component that declares none, and a component that does declare one receives
+`Html::empty()`.
 
 Children built in Rust are handed in with `@{…}`, or passed positionally
 through the call form. For repeated children:

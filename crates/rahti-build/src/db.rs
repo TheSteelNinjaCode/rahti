@@ -6,8 +6,8 @@
 //! it chose. What the build contributes is the wiring, which is the part
 //! nobody enjoys keeping in step:
 //!
-//! - a `models/mod.rs` declaring every entity file, so saving `todo.rs` is
-//!   enough to write `use crate::models::todo` in a page;
+//! - a `models/mod.rs` declaring every entity file, so saving `invoice.rs` is
+//!   enough to write `use crate::models::invoice` in a page;
 //! - a `migrations/mod.rs` declaring every migration file *and* the `Migrator`
 //!   that lists them in order.
 //!
@@ -223,7 +223,7 @@ fn check_module_name(name: &str, path: &Path, label: &str) -> String {
             "Name a migration `mYYYYMMDD_NNNNNN_<what>.rs`, so filename order is \
              the order it is applied."
         } else {
-            "Name an entity file in snake_case after its table — `todo.rs`, \
+            "Name an entity file in snake_case after its table — `invoice.rs`, \
              `order_line.rs`."
         };
         panic!(

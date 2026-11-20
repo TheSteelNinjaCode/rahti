@@ -81,6 +81,21 @@ fn a_store_writes_its_table_and_points_the_queue_at_it() {
     assert!(message.contains("already exists"), "{message}");
 }
 
+/// A new database project has no table, so neither directory exists until
+/// its first build. The job table may be the first one.
+#[test]
+fn a_store_is_the_first_table_of_a_project_with_none() {
+    let root = project("store-first", r#"{"db":{"backend":"sqlite"}}"#);
+    fs::remove_dir_all(root.join("src/migrations")).unwrap();
+    fs::remove_dir_all(root.join("src/models")).unwrap();
+
+    job_store(&root).unwrap();
+
+    assert!(root.join("src/models/job.rs").is_file());
+    let migrations = fs::read_dir(root.join("src/migrations")).unwrap().count();
+    assert_eq!(migrations, 1);
+}
+
 #[test]
 fn a_store_replaces_nothing_a_project_already_chose() {
     let chosen = "rahti::jobs::Jobs::new().store(MyStore).install();";

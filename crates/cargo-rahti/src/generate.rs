@@ -109,8 +109,10 @@ fn job_store(root: &Path) -> Result<(), String> {
     let migrations = root.join("src/migrations");
     let (year, month, day) = civil_date(now_seconds());
     let migration = format!("src/migrations/m{year:04}{month:02}{day:02}_000001_create_job.rs");
-    if !migrations.is_dir() {
-        return Err("src/migrations/ does not exist".to_string());
+    // A project with a database and no table yet has neither directory until
+    // its first build; the job table may be the first one.
+    for dir in [migrations.clone(), root.join("src/models")] {
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     }
     if root.join(&migration).exists() {
         return Err(format!("{migration} already exists"));

@@ -123,6 +123,50 @@ braced form to write.
 The one-line test: *would this markup be valid HTML if every `{…}` were
 deleted?* If not, it is JSX, and it will not work.
 
+## Template Literals
+
+A JavaScript template literal, `` `Hello ${name}` ``, is written in the
+`<script>` body and nowhere else. The script is a raw string, so it reaches
+the browser exactly as written. A `{…}` binding is Rust tokens, and Rust has
+no backtick token, so a backtick in a binding or handler stops the build
+before `html!` reads the template.
+
+| Where the string is built | Backticks | Write |
+| --- | --- | --- |
+| `<script>` body | yes — prefer them to `+` chains | ``const label = `Item ${index + 1}`;`` |
+| text between tags | no | `<h1>"Hello "{name}</h1>` — quoted text beside a binding |
+| an attribute binding | no | `title={"Hello " + name}` |
+| a handler | no | `onclick={open("/users/" + user.id)}` |
+| anything longer, in markup | no | `{greeting()}`, with `greeting` a script function that returns a template literal |
+
+```rust
+html! {
+    <section>
+        <h1>"Hello "{name}</h1>
+        <p title={"Signed in as " + name}>{summary()}</p>
+        <script>r##"
+            const [name, setName] = pp.state("Jefferson");
+            const [unread, setUnread] = pp.state(3);
+            function summary() {
+                return `${name} has ${unread} unread ${unread === 1 ? "message" : "messages"}`;
+            }
+        "##</script>
+    </section>
+}
+```
+
+`summary()` re-evaluates whenever a state it reads changes, like any other
+binding. The JSX form ``<h1>{`Hello ${name}`}</h1>`` fails with rustc's own
+error, not one of `html!`'s:
+
+```text
+error: unknown start of token: `
+help: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not
+```
+
+Do not take that help: a multi-character `'…'` string does not lex either.
+Use one of the rows above. Inside a binding a string is double-quoted.
+
 ## Server Values and Client Code
 
 A server value never goes inside client code. HTML escaping is not
@@ -170,7 +214,7 @@ do not infer it from React, Vue, Alpine or another runtime.
 | `{expression}` | text, and attribute values | reactive text or attribute value |
 | `on…={…}` (any native event: `onclick`, `oninput`, `onsubmit`, …) | any element | event handler |
 | `pp-for="item in items"` / `"(item, index) in items"` | **`<template>` only** | keyed list |
-| `key={expression}` | the repeated element inside `pp-for` | row identity |
+| `key={expression}` | the repeated element inside `pp-for`; a component tag | row identity; a new key mounts a fresh component |
 | `pp-ref={ref}` | elements | element handle (`pp.ref`) or callback ref |
 | `defaultvalue={expression}` | `<input>`, `<textarea>`, `<select>` | seed an **uncontrolled** field once |
 | `defaultchecked={expression}` | checkbox, radio | seed an **uncontrolled** control once |
@@ -271,7 +315,7 @@ and never by hand:
 
 The runtime renders a boundary that has no `<script>` in its parent's
 scope. That is what lets a script-less component take expressions from the
-page that renders it, the way rahti-ui's parts do. A `#[component]` whose own
+page that renders it. A `#[component]` whose own
 markup below the root writes a client `{…}` binding and has no script is
 rendered in its own scope instead: `html!` adds an empty `<script></script>`
 before the root closes, so `<p>{pp.props.label}</p>` reads that component's
@@ -417,14 +461,14 @@ The boolean row is the one that costs time. A value seeded from Rust as
 correctly and then renders as an empty span:
 
 ```rust
-<p>Admin: <span>{admin}</span></p>   // admin === false → renders nothing
+<p>"Admin: "<span>{admin}</span></p>   // admin === false → renders nothing
 ```
 
 Spell the display out in the expression instead of binding the raw value:
 
 ```rust
-<p>Admin: <span>{admin ? "yes" : "no"}</span></p>
-<p>Role: <span>{role ? role : "none"}</span></p>
+<p>"Admin: "<span>{admin ? "yes" : "no"}</span></p>
+<p>"Role: "<span>{role ? role : "none"}</span></p>
 ```
 
 The same rule is why the React `&&` idiom leaks a zero. `{items.length && "…"}`
@@ -543,7 +587,7 @@ component writes there can never read the component's own state or
 
 ```rust
 <section hidden={!open}>              // compile error in a component
-<section><div hidden={!open}>…</div>  // bind an element inside the root
+<section><div hidden={!open}>"…"</div>  // bind an element inside the root
 ```
 
 A value the caller passes as a `{…}` prop and the component writes on its
@@ -553,9 +597,9 @@ compile as usual. Page and layout roots are not checked.
 
 A handler in children written between component tags runs in the scope of
 the block that **wrote** it, not the component it renders inside, so the
-function it calls must be declared in that block's script. `ReferenceError: fn
-is not defined` from a handler that clearly fired means the function lives in
-the wrong script — moving the element into a wrapper component does not
+function it calls must be declared in that block's script.
+`[PP-ERROR] Handler failed: TypeError: fn is not a function` from a handler
+that clearly fired means the function lives in the wrong script — moving the element into a wrapper component does not
 change its owner, and neither does `pp.portal`.
 
 ### Forms
@@ -655,7 +699,7 @@ There is no conditional directive. In order of preference:
 
 ```rust
 <template pp-for="item in selected ? [selected] : []">
-    <section key={item.id}>…</section>
+    <section key={item.id}>"…"</section>
 </template>
 ```
 
@@ -665,7 +709,7 @@ An empty state is a `hidden` placeholder beside the list, not a branch:
 <tbody>
     <tr hidden={rows.length !== 0}><td colspan="5">"No rows."</td></tr>
     <template pp-for="row in rows">
-        <tr key={row.id}>…</tr>
+        <tr key={row.id}>"…"</tr>
     </template>
 </tbody>
 ```
@@ -720,6 +764,30 @@ though the page never defines it.
 - Keys must be unique among siblings; duplicates warn and weaken diffing.
   Keyed rows that render identically are reused without being re-parsed —
   see "Keyed Rows Are Reconciled Per Row" in `pulsepoint-performance.md`.
+- A component in a row is given that row's current values on every render
+  of the loop's owner, even when its row is reused: a changed object prop
+  (`item={photo}`) re-renders that child, and a callback prop
+  (`on-remove={…}`) reaches the child as one stable function that calls the
+  callback of the latest render, so the child never holds a stale closure.
+- A `pp-ref={…}` in children handed to a component binds the writing
+  block's ref, in a row as anywhere else.
+
+### Resetting a Component with `key`
+
+A bound `key` on a component tag is the component's identity, as in React.
+While the key stays the same, the component keeps its state across every
+re-render of its owner; when the key changes, the old component is disposed
+— effects cleaned up, state dropped — and a fresh one mounts in its place:
+
+```rust
+// In a page whose script has `const [draftId, setDraftId] = pp.state(1);`
+<Draft key={draftId} />
+<button onclick={setDraftId(draftId + 1)}>"New draft"</button>
+```
+
+Use it to reset a form or an editor when the record it edits changes,
+instead of an effect that clears each field. The key travels with the tag's
+other `{…}` bindings, so the component forwards `bindings` onto its root.
 
 ## Hooks
 
@@ -776,8 +844,10 @@ html! {
 ```
 
 A `{…}` prop is refused when the component's file never reads
-`pp.props.<name>`. Its name is compared in camelCase, so `online-now={…}` and
-`onlineNow={…}` both match `pp.props.onlineNow`. These are never refused:
+`pp.props.<name>`. Write the prop in kebab-case: `online-now={…}` is read as
+`pp.props.onlineNow`. An unhyphenated name that starts with `on` (`onlineNow`,
+`onPick`) is written as a native event handler and never becomes a prop;
+write a callback prop as `on-pick={…}`. These are never refused:
 
 - a name the root element uses for itself: an HTML attribute (`class`,
   `hidden`, `disabled`, `value`, …), a handler (`onclick`), and anything

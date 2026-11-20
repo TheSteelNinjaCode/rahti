@@ -88,7 +88,10 @@ preserve them, and documentation or scaffold changes must teach them.
    `class="card"`; a binding is braced, `hidden={!open}`; a handler is a
    binding, `onclick={save()}`; a server value is `href=@{url}`. A binding is
    JavaScript the Rust lexer must accept — double-quoted strings, no template
-   literals — so longer logic is a named function in the script. Rust tooling
+   literals — so longer logic is a named function in the script. Template
+   literals belong in the script, where they are preferred to `+` chains; in
+   markup write `"Hello "{name}` as text and `title={"Hello " + name}` in an
+   attribute (a backtick there is rustc's `unknown start of token`). Rust tooling
    reads every token: errors land on the token that caused them, and
    `macro_rules!` variables substitute into markup. `html!` has one authored
    root: a literal element, a single component tag, or a `<>…</>` fragment.
