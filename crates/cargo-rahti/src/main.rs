@@ -131,8 +131,11 @@ RESTART, STOP, STATUS:
     the compile, link, stop and boot took.
 
     Status says whether the server is running the current source, which routes
-    loaded under this boot with their browser errors, and how jobs are doing.
-    It exits non-zero unless the server is up and current.
+    loaded under this boot with their browser errors, how jobs are doing, and
+    the type errors `tsc -p jsconfig.json` finds in public/js. It exits
+    non-zero unless the server is up and current and the scripts type-check.
+    Restart runs the same script check once the server is up, and fails on a
+    type error. Without TypeScript installed the check is skipped.
 
     --timeout <seconds>  How long to wait at each step. Defaults to 60.
     --json               Print the status report as JSON.

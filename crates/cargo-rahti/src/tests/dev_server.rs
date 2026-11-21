@@ -11,6 +11,43 @@ fn a_stopped_server_says_what_to_do_next() {
 }
 
 #[test]
+fn script_type_errors_are_listed_as_editor_links() {
+    let out = describe(&json!({
+        "running": false,
+        "scripts": {
+            "status": "failed",
+            "stale": false,
+            "errorCount": 2,
+            "errors": [{
+                "file": "public/js/drive-store.js",
+                "line": 10,
+                "column": 48,
+                "code": "TS2300",
+                "message": "Duplicate identifier 'Storage'.",
+            }],
+        },
+        "next": "Start the server.",
+    }));
+    assert!(out.contains("Scripts: 2 type error(s)"), "{out}");
+    assert!(
+        out.contains("public/js/drive-store.js:10:48 TS2300 Duplicate identifier 'Storage'."),
+        "{out}"
+    );
+    assert!(out.contains("and 1 more"), "{out}");
+}
+
+#[test]
+fn a_skipped_script_check_says_how_to_install_typescript() {
+    let out = describe_scripts(&json!({
+        "status": "skipped",
+        "stale": false,
+        "reason": "TypeScript is not installed. Install it with `npm install --global typescript`.",
+    }));
+    assert!(out.starts_with("Scripts: not checked."), "{out}");
+    assert!(out.contains("npm install"), "{out}");
+}
+
+#[test]
 fn a_stale_server_names_the_files_that_changed() {
     let out = describe(&json!({
         "running": true,

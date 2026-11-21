@@ -19,6 +19,7 @@ mod i18n;
 mod jobs;
 mod route;
 mod scanner;
+pub mod script_check;
 pub mod sha256;
 mod shapes;
 

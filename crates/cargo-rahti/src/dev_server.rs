@@ -24,6 +24,7 @@
 //! created through WMI, which puts it in no job.
 
 use rahti_build::dev_server::{self, SERVER_LOG_PATH, ServerInfo};
+use rahti_build::script_check;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -136,6 +137,20 @@ pub fn run_restart(args: &[&str]) -> Result<(), String> {
         info.url, info.pid, info.boot
     ));
     say(&format!("Took {}", phases.describe(began.elapsed())));
+
+    // The Rust side is applied whatever this finds: the scripts are static
+    // files, and a type error in one does not stop the server serving it.
+    // It still fails the command, because an agent reads the exit code.
+    let scripts = script_check::run(&root);
+    print!("{}", describe_scripts(&scripts));
+    if scripts["status"] == "failed" {
+        return Err(format!(
+            "{} is running the current source, but public/js has {} type error(s), \
+             listed above. Fix them; scripts are served live, so `cargo rahti status` \
+             checks again without a restart.",
+            info.url, scripts["errorCount"]
+        ));
+    }
     say(&format!(
         "Next: load {}<route> for each affected route, exercise the change, then run \
          `cargo rahti status`.",
@@ -166,6 +181,11 @@ pub fn run_status(args: &[&str]) -> Result<(), String> {
         [other, ..] => return Err(format!("unknown option `{other}`")),
     };
 
+    // Scripts are served live, so a changed one is checked here rather than
+    // waiting for a restart it does not need.
+    if script_check::needs_run(&root) {
+        script_check::run(&root);
+    }
     let mut report = dev_server::status(&root);
     report["mcpMissing"] = json!(missing_mcp_commands(&root));
     if json_output {
@@ -173,7 +193,10 @@ pub fn run_status(args: &[&str]) -> Result<(), String> {
     } else {
         print!("{}", describe(&report));
     }
-    if report["running"] == true && report["stale"] == false {
+    if report["running"] == true
+        && report["stale"] == false
+        && report["scripts"]["status"] != "failed"
+    {
         Ok(())
     } else {
         std::process::exit(1)
@@ -190,6 +213,7 @@ pub(crate) fn describe(report: &Value) -> String {
 
     if report["running"] != true {
         line(&mut out, "Server: not running".to_string());
+        out.push_str(&describe_scripts(&report["scripts"]));
         mcp_line(&mut out, report);
         line(&mut out, format!("Next: {}", text(report, "next")));
         return out;
@@ -299,8 +323,52 @@ pub(crate) fn describe(report: &Value) -> String {
         }
     }
 
+    out.push_str(&describe_scripts(&report["scripts"]));
     mcp_line(&mut out, report);
     line(&mut out, format!("Next: {}", text(report, "next")));
+    out
+}
+
+/// The `Scripts:` line and one line per type error, each written the way an
+/// editor links it: `file:line:column`.
+pub(crate) fn describe_scripts(scripts: &Value) -> String {
+    let mut out = String::new();
+    match scripts["status"].as_str() {
+        Some("passed") => out.push_str("Scripts: type-check clean\n"),
+        Some("failed") => {
+            out.push_str(&format!(
+                "Scripts: {} type error(s) in public/js\n",
+                scripts["errorCount"]
+            ));
+            for error in scripts["errors"].as_array().into_iter().flatten() {
+                let message = text(error, "message").replace('\n', "\n      ");
+                let code = text(error, "code");
+                out.push_str(&format!(
+                    "  {}:{}:{} {}{}{}\n",
+                    text(error, "file"),
+                    error["line"],
+                    error["column"],
+                    code,
+                    if code.is_empty() { "" } else { " " },
+                    message
+                ));
+            }
+            let listed = scripts["errors"].as_array().map_or(0, Vec::len);
+            let total = scripts["errorCount"].as_u64().unwrap_or(0) as usize;
+            if total > listed {
+                out.push_str(&format!("  … and {} more\n", total - listed));
+            }
+        }
+        Some("skipped") => out.push_str(&format!(
+            "Scripts: not checked. {}\n",
+            text(scripts, "reason")
+        )),
+        Some("unchecked") => out.push_str("Scripts: not checked yet\n"),
+        _ => {}
+    }
+    if scripts["stale"] == true && scripts["status"] != "unchecked" {
+        out.push_str("  (a script changed after this check)\n");
+    }
     out
 }
 

@@ -914,7 +914,8 @@ and `jsconfig.json` at the project root makes `public/js/` a checkable
 JavaScript project: `/js/…` imports resolve to the served files and
 `pp.d.ts` is in scope. Nothing is compiled. A module opts in with
 `// @ts-check` on its first line; editors check it as you type, and
-`npx tsc -p jsconfig.json` checks it from a terminal. `pp.d.ts` is generated
+`cargo rahti restart` and `cargo rahti status` check it with `tsc` and fail on
+a type error (see `diagnostics.md`). `pp.d.ts` is generated
 from the same build as the runtime bundle and is replaced with it by
 `cargo rahti upgrade`; never hand-edit it.
 

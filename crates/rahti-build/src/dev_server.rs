@@ -242,17 +242,27 @@ fn route_of(url: &str) -> &str {
 pub fn status(root: &Path) -> Value {
     let info = read_info(root);
     let live = info.as_ref().and_then(live_status);
+    let scripts = crate::script_check::report(root);
     let Some((info, live)) = info.zip(live) else {
         return json!({
             "running": false,
             "stale": false,
             "changedFiles": [],
+            "scripts": scripts,
             "next": "Start the server with `cargo rahti restart`.",
         });
     };
 
     let changed = changed_since(root, info.started_at_ms);
     let stale = !changed.is_empty();
+    let next = if stale {
+        "The server is running old code. Run `cargo rahti restart`, then load the affected routes."
+    } else if scripts["status"] == "failed" {
+        "The server is running the current source, but the scripts have type errors (see \
+         `scripts`). Fix them, then run `cargo rahti status` again."
+    } else {
+        "The server is running the current source. Load the affected routes to verify them."
+    };
     json!({
         "running": true,
         "url": info.url,
@@ -263,11 +273,8 @@ pub fn status(root: &Path) -> Value {
         "changedFiles": changed,
         "browser": browser_report(root, Some(&info.boot)),
         "jobs": live.get("jobs"),
-        "next": if stale {
-            "The server is running old code. Run `cargo rahti restart`, then load the affected routes."
-        } else {
-            "The server is running the current source. Load the affected routes to verify them."
-        },
+        "scripts": scripts,
+        "next": next,
     })
 }
 

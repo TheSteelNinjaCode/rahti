@@ -29,8 +29,8 @@ pub const PP_TYPES: &str = include_str!("../assets/js/pp.d.ts");
 
 /// Makes `public/js/` a checkable JavaScript project: `/js/…` imports resolve
 /// to the files the server serves, `pp.d.ts` is in scope, and a module opts
-/// in with `// @ts-check` (editors do it live; `npx tsc -p jsconfig.json`
-/// checks from a terminal). Nothing is compiled or emitted — there is no
+/// in with `// @ts-check` (editors do it live; `cargo rahti restart` and
+/// `status` run `tsc -p jsconfig.json` and fail on a type error). Nothing is compiled or emitted — there is no
 /// JavaScript build step.
 pub const JSCONFIG: &str = r#"{
   "compilerOptions": {
@@ -1628,8 +1628,9 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             exercise what changed.\n\
          3. `cargo rahti status`, or MCP `server_status`. It says whether the\n\
             server is running the current source, which routes loaded under this\n\
-            boot with their browser errors, and how background jobs are doing. A\n\
-            route it does not list was never opened, so it proves nothing.\n\n\
+            boot with their browser errors, how background jobs are doing, and the\n\
+            type errors in `// @ts-check` scripts under `public/js/`. A route it\n\
+            does not list was never opened, so it proves nothing.\n\n\
          End with what you applied: \"Restarted, loaded `/dashboard`, saved a row;\n\
          browser clean.\" If you have no browser, say so and give the exact URL.\n\n",
     );

@@ -26,9 +26,28 @@ cargo rahti status
 
 It reports whether the server is running, whether source files changed since it
 booted, which routes really loaded under this boot with their browser errors
-and warnings, and how background jobs are doing, then says what to do next. It
-exits non-zero unless the server is up and current, and `--json` prints the same
-report as JSON. MCP `server_status` and `browser_status` return it too.
+and warnings, how background jobs are doing, and whether the scripts in
+`public/js/` type-check, then says what to do next. It exits non-zero unless
+the server is up and current and the scripts have no type errors, and `--json`
+prints the same report as JSON. MCP `server_status` and `browser_status` return
+it too.
+
+### Script Type Errors
+
+A script that starts with `// @ts-check` is checked against `jsconfig.json`
+by an editor as it is typed. Those errors never reach the browser, so they
+never reach `.rahti/dev.log`. `cargo rahti restart` therefore runs the
+TypeScript compiler (`tsc -p jsconfig.json`) once the server is up and exits
+non-zero when it reports an error; the server still runs the new Rust code,
+because scripts are static files. `cargo rahti status` checks again whenever
+a script or `jsconfig.json` changed after the last check, so a script fix
+needs no restart. Each error is listed as `file:line:column TScode message`
+under `Scripts:`, and the result is kept in `.rahti/script-check.json`, which
+MCP `server_status` and `validate_project` read without running anything.
+
+The compiler is the project's `node_modules/.bin/tsc`, otherwise a `tsc` on
+`PATH`; Rahti never downloads it. Without one the check is skipped and the
+report says how to install it (`npm install --global typescript`).
 
 Only entries from the current boot count, so an old error cannot fail a new
 server and an old page load cannot prove one. The injected client records each

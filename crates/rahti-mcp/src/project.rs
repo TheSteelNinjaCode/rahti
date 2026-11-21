@@ -183,6 +183,31 @@ impl Project {
                 "{DIAGNOSTICS_FILE} is absent; it is created during development"
             ));
         }
+        // Read only: the check itself runs from `cargo rahti restart`/`status`.
+        let scripts = rahti_build::script_check::report(&self.root);
+        for error in array(&scripts, "errors") {
+            errors.push(format!(
+                "{}:{}:{} {} {}",
+                error["file"].as_str().unwrap_or(""),
+                error["line"],
+                error["column"],
+                error["code"].as_str().unwrap_or(""),
+                error["message"].as_str().unwrap_or("")
+            ));
+        }
+        match scripts["status"].as_str() {
+            Some("skipped") => warnings.push(format!(
+                "scripts not type-checked: {}",
+                scripts["reason"].as_str().unwrap_or("")
+            )),
+            Some("unchecked") => {
+                warnings.push("scripts not type-checked yet; run `cargo rahti status`".to_string())
+            }
+            _ if scripts["stale"] == true => warnings.push(
+                "a script changed after the last type check; run `cargo rahti status`".to_string(),
+            ),
+            _ => {}
+        }
 
         Ok(json!({
             "valid": errors.is_empty(),
