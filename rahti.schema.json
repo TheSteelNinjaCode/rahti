@@ -60,7 +60,7 @@
         "engine": {
           "enum": ["tailwind", "plain", "none"],
           "default": "tailwind",
-          "description": "How `entry` becomes `output`. \"tailwind\" compiles it with the Tailwind standalone CLI. \"plain\" copies it as it is — no CLI, no download, no network. \"none\" leaves `output` alone so you manage the public directory yourself. Under every engine you edit `entry` and the browser is served `output`, so switching is one word, not a migration."
+          "description": "How `entry` becomes `output`. \"tailwind\" compiles it with the Tailwind standalone CLI. \"plain\" copies it as it is — no CLI, no download, no network. \"none\" leaves `output` alone so you manage the public directory yourself. Under every engine you edit `entry` and the browser is served `output`. \"plain\" refuses an entry that contains Tailwind directives."
         },
         "entry": {
           "type": "string",
@@ -167,12 +167,12 @@
         "models": {
           "type": "string",
           "default": "src/models",
-          "description": "Where the entities live, relative to the crate root. A flat directory: one file per table, named after it in snake_case. `mod.rs` is generated from the contents — the entities themselves are yours, and Rahti neither writes nor reads SeaORM code."
+          "description": "Where the entities live, relative to the crate root. A flat directory: one file per table, named after it in snake_case. `src/models/mod.rs` is generated from the contents and reaches a directory other than the default by itself, so `crate::models::<file>` is the path wherever the files are kept — the entities themselves are yours, and Rahti neither writes nor reads SeaORM code."
         },
         "migrations": {
           "type": "string",
           "default": "src/migrations",
-          "description": "Where the migrations live, relative to the crate root. `mod.rs` is generated and carries the `Migrator`, which lists every file here in filename order — so name a migration mYYYYMMDD_NNNNNN_<what>.rs and adding the file is the whole of adding the migration. A migration written but never pushed into a hand-maintained list is the quietest failure there is: the file exists, the table does not, and nothing says why."
+          "description": "Where the migrations live, relative to the crate root. `src/migrations/mod.rs` is generated, reaches a directory other than the default by itself, and carries the `Migrator`, which lists every file here in filename order — so name a migration mYYYYMMDD_NNNNNN_<what>.rs and adding the file is the whole of adding the migration. A migration written but never pushed into a hand-maintained list is the quietest failure there is: the file exists, the table does not, and nothing says why."
         }
       },
       "additionalProperties": false

@@ -281,7 +281,7 @@ async fn the_counter_counts() {
   click position. `click_at` uses the exact coordinates supplied by the test.
 - `eval::<T>(js)` reads a value back; `wait_for(js)` polls a condition for up
   to 30 seconds and, when it gives up, names the condition and any page
-  errors.
+  errors. `wait_for_within(js, timeout)` takes its own limit.
 - `errors()` is every console error, uncaught exception and Content Security
   Policy violation so far. End a journey by asserting it is empty: a script or
   handler the page's policy blocked fails the test there.

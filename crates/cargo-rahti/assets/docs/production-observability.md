@@ -9,9 +9,15 @@ off. Records are newline-delimited JSON written to stderr, which container
 runtimes and process supervisors can collect without access to the application
 filesystem.
 
+In development mode the default policy is disabled: responses carry no
+`X-Request-Id`, `request_id()` returns `None`, no request records or metrics
+are produced, and `record` and `record_with` write nothing. `.enabled(true)`
+turns the policy on there.
+
 ## Request Correlation
 
-Every response receives `X-Request-Id`. A valid incoming value is preserved by
+While the policy is enabled, every response receives `X-Request-Id`. A valid
+incoming value is preserved by
 default so a trusted gateway and Rahti can share one correlation id. Accepted
 values contain 1–128 ASCII letters, numbers, `-`, `_`, `.`, or `:`. Missing or
 invalid values are replaced with a random 128-bit lowercase hexadecimal id.
@@ -75,8 +81,10 @@ let router = routes::router();
 
 Without a service-name override, generated code uses the application's Cargo
 package name. `.request_logs(false)` keeps ids, probes, and metrics but turns
-off request JSON. `.enabled(false)` turns off correlation, lifecycle logs, and
-metrics; the health endpoints remain available.
+off request JSON. `.enabled(false)` turns off correlation, lifecycle logs,
+application events, and metrics; the health endpoints remain available.
+`configure` panics on a service name longer than 128 bytes, and
+`.slow_request` and `.readiness_timeout` panic on a zero duration.
 
 The generated router snapshots the policy. Configure it before
 `routes::router()` and do not attempt runtime policy mutation.
@@ -95,6 +103,10 @@ rahti::observability::record_with(
     json!({ "orderId": order.id }),
 );
 ```
+
+`record(level, target, message)` is the same call without fields. An event
+record carries `kind: "event"`, `timestampMs`, `level`, `service`, `target`,
+`message`, `requestId` inside a request, and `fields` when supplied.
 
 Inside a request, the current `requestId` is added automatically. Structured
 fields are nested under `fields`, so application data cannot overwrite the
@@ -122,13 +134,16 @@ stable schedule and target job, but never its payload. See
 
 ## Process Metrics
 
-`rahti::observability::metrics()` returns a label-free snapshot:
+`rahti::observability::metrics()` returns a label-free `MetricsSnapshot` of
+`u64` fields, serialized in camelCase:
 
-- completed observed requests;
-- currently active observed requests;
-- 4xx and 5xx totals;
-- slow-request total;
-- cumulative and maximum response-production duration in microseconds.
+- `requests`: completed observed requests;
+- `active_requests`: currently active observed requests, a gauge that rises
+  and falls;
+- `client_errors` and `server_errors`: 4xx and 5xx totals;
+- `slow_requests`: slow-request total;
+- `duration_micros` and `max_duration_micros`: cumulative and maximum
+  response-production duration in microseconds.
 
 The counters are atomic, process-local, monotonic until restart, and have no
 route, user, tenant, request-id, or status-code labels. That fixed cardinality
@@ -146,6 +161,14 @@ Rahti reserves two public framework routes:
 - `GET /health` returns HTTP 200 when the process can serve HTTP;
 - `GET /ready` runs every configured dependency check concurrently and returns
   HTTP 200 only when all pass, otherwise HTTP 503.
+
+```json
+{"status":"ok","service":"shop"}
+{"status":"ready","service":"shop","checks":[{"name":"database","status":"ok"}]}
+```
+
+The first line is the `/health` body and the second the `/ready` body; a 503
+carries `"status":"not_ready"`.
 
 Both responses are JSON, carry `Cache-Control: no-store`, receive security
 headers, and bypass sessions, application middleware, and page rendering.
@@ -168,11 +191,13 @@ let policy = Observability::default()
 observability::configure(policy);
 ```
 
-Check names use 1–64 ASCII letters, numbers, `-`, or `_` and must be unique.
+Check names use 1–64 ASCII letters, numbers, `-`, or `_` and must be unique;
+`with_readiness` panics on any other name.
 Checks have a two-second default timeout and run concurrently, so one stalled
 dependency cannot stall the probe indefinitely or multiply the total timeout.
 The public response includes each check name and `ok`, `failed`, or `timeout`,
-but not its error detail. The detail is written to the structured event stream.
+but not its error detail. The detail is written to the structured event stream
+as a `warn` event with `target: "readiness"`.
 
 A readiness check must be side-effect free and cheap. It may verify a database
 or required service, but it must not migrate schemas, create records, consume

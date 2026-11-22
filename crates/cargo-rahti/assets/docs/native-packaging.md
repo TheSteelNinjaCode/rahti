@@ -53,7 +53,7 @@ targets. `cargo rahti native doctor` names each missing one and the command
 that supplies it. It installs nothing itself.
 
 The JDK has to start and has to be one the generated project's Gradle can run:
-Java 17 to 24 on Gradle 8.14, which is what Tauri generates today. Android
+Java 17 to 24 on Gradle 8.14, which is what Tauri generates. Android
 Studio's bundled `jbr` can be newer than that. A `JAVA_HOME` that fits is always
 used. One that does not is passed over, for the build's process only, in favour
 of a suitable JDK already on the machine, and the build prints which.
@@ -121,7 +121,7 @@ the package boundary, so the automatic loop takes as long as an incremental
 Android build and deployment.
 
 The application is outside `native/`'s deliberately separate Cargo workspace.
-Tauri CLI 2.8 introduced the additional watch folders needed to observe it;
+Observing it needs the additional watch folders of Tauri CLI 2.8 or later;
 `doctor` refuses an older CLI and prints the upgrade command.
 
 ## Your application has to expose its startup
@@ -336,9 +336,9 @@ a public address.
 `rahti::auth` signs its session cookie with `AUTH_SECRET`. A packaged
 application has no `.env` to read one from, and must not have one: a key
 shipped inside an installer is a key every installation can forge every other
-installation's sessions with. Going without is not an option either —
-`rahti::auth` invents one per process, so everyone is signed out at every
-restart.
+installation's sessions with. Going without is not an option either — in a
+release build `rahti::auth` refuses to start without one, and in development
+mode it invents one per process, so everyone is signed out at every restart.
 
 So the key is generated **on the device at first launch** and kept in
 application storage, per installation.
@@ -456,8 +456,7 @@ breaks on. Every use is a capability check with a web fallback.
 
 ### Why a global and not `pp.native`
 
-Because a reactive block cannot see `pp.native`, and that was measured rather
-than assumed.
+Because a reactive block cannot see `pp.native`.
 
 A component script runs as the function the client registry compiled for it,
 and PulsePoint supplies the `pp` visible inside it. That `pp` is not
@@ -467,8 +466,7 @@ and PulsePoint supplies the `pp` visible inside it. That `pp` is not
 
 Making `pp.native` work would mean changing the runtime bundle, which Rahti
 does not do. `window` *is* reachable from inside a component script, so the
-bridge is a global. The shell still attaches `pp.native` where it can, and
-nothing is documented as depending on it.
+bridge is a global.
 
 The bridge is a framework-owned script the shell injects before any page script
 runs. PulsePoint's bundle is not edited, patched or wrapped.

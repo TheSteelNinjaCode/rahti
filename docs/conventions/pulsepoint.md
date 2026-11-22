@@ -112,13 +112,20 @@ first; a `{…}` binding is evaluated to a value and written as text.
 | `style={{color: 'red'}}` | an object is not CSS text | `pp-style={"color: " + color}` — a string |
 | `dangerouslySetInnerHTML` | does not exist | `@{Html::from_raw(…)}` on the server, for trusted markup only |
 
-`html!` refuses every row of this table at compile time, with the form to
-write instead, and so does every directive that does not exist (`pp-if`,
+On an HTML element `html!` refuses every row of this table at compile time,
+with the form to write instead, and so does every directive that does not
+exist (`pp-if`,
 `pp-show`, `pp-else`, `pp-model`, `pp-bind`, `pp-class`, `pp-text`,
 `pp-html`, `pp-on`, `pp-key`, `pp-context`) and `pp-for` on anything but a
 `<template>`. An attribute binding is a braced expression, `class={expr}`,
 and so is a handler, `onclick={save()}`; a quoted handler is refused with the
 braced form to write.
+
+A component tag is checked the same way: `<Card className="x">`,
+`<Label htmlFor="email">` and `<Card onClick={save()}>` are refused with the
+name to write, and so are markup in a binding, a style object, a quoted
+handler, and a directive that does not exist. A camelCase callback such as
+`onRowPick={…}` is refused with its kebab-case form, `on-row-pick={…}`.
 
 The one-line test: *would this markup be valid HTML if every `{…}` were
 deleted?* If not, it is JSX, and it will not work.
@@ -192,7 +199,7 @@ fix:
 
 | Written | Refused because |
 | --- | --- |
-| `onclick=@{handler}` | a server value would run as a handler |
+| `onclick=@{handler}` on an element | a server value would run as a handler |
 | `title="Hi @{name}"` | `@{…}` in a quoted value is text, never interpolated |
 | `onclick="save()"` | a handler is client code, written as a binding: `onclick={save()}` |
 | `{greet(@{name})}`, `title={label + @{suffix}}` | a `{…}` binding is browser source, copied through as written |
@@ -230,7 +237,9 @@ do not infer it from React, Vue, Alpine or another runtime.
 `pp-style` is rewritten to the native `style` attribute and merged with a
 static `style` on the same element. `pp-spread` omits nullish values, writes
 HTML booleans bare when `true` and drops them when `false`, and keeps
-`aria-*`/`data-*` booleans as `"true"`/`"false"`.
+`aria-*`/`data-*` booleans as `"true"`/`"false"`. It writes attributes only:
+a key that starts with `on` is dropped, so a handler is always written as
+`on…={…}` on the element.
 
 ### Hooks
 
@@ -251,18 +260,28 @@ Tailwind projects also expose the scaffold's browser helper `twMerge(classes)`.
 It is a global function, not a `pp.*` API. Call it explicitly in a compiled
 class binding or component script when utilities conflict; static class
 attributes are not automatically merged. The plain CSS scaffold does not
-supply it. Read "Tailwind class merging: agent contract" in
+supply it: when `css.engine` is `plain` or `none`, `html!` refuses a bare
+`twMerge` as a name nothing gives (`RAHTI_UNKNOWN_NAME`), and a merge helper
+the application publishes itself is read as `window.twMerge`. Read "Tailwind class merging: agent contract" in
 `configuration-and-tooling.md` before adding class composition helpers or
 changing CSS engines. This frontend behavior needs no Rust merger dependency.
 
 ### Runtime-managed — never author
 
-`pp-component`, `pp-owner`, `pp-event-owner`, `pp-ref-owner`,
-`pp-ref-forward`, `pp-script`, `pp-data`, `pp-loop-scope`,
+`pp-owner`, `pp-event-owner`, `pp-ref-owner`,
+`pp-ref-forward`, `pp-script`, `pp-data`, `pp-loop-scope`, `pp-on*`,
 `<pp-context-provider>`, `<pp-fragment>`, every `data-pp-*` attribute, and
 `pp-keep*`. `html!` and the runtime write them — including the
 `<template pp-component="…">` around a root layout's `<slot />` and the
-`<!--pp:…-->`/`<!--/pp-->` pair around a `<>…</>` fragment.
+`<!--pp:…-->`/`<!--/pp-->` pair around a `<>…</>` fragment. A `pp-on*`
+attribute (`pp-onclick`) is a compile error, and a spread that writes one is
+refused at render (a debug assertion; dropped in release).
+
+`pp-component` is stamped by `html!` as well. The one authored case is a
+deliberate boundary: a literal `pp-component="name"` on a tag places the
+block's boundary on that element and turns the stamp off for the block. See
+"Layouts" in `routing.md` and "Components" in `rendering-and-components.md`;
+write it nowhere else.
 
 ### React APIs with no equivalent
 
@@ -388,6 +407,11 @@ own. These are not checked, because their names belong to another block:
   it;
 - fragment-rooted (`<>…</>`) children written between component tags, which
   read the component they are passed to.
+
+Nor are the bindings and handlers of a block with two or more `<script>`s,
+which has no one scope, or code inside a `pp-for` whose directive is not
+`item in items` or `(item, index) in items` with plain identifiers. Keep one
+script per block and those two loop forms.
 
 A script is always checked. What is read *off* a name — `pp.sate(…)`,
 `domain.nmae` — is not a name; see "State Reads" in `rpc-and-uploads.md` for
@@ -548,7 +572,15 @@ Within an event expression PulsePoint exposes:
 - `event`, `e`, and `$event`;
 - `target`;
 - `currentTarget`;
-- `el`.
+- `el`, the same element as `currentTarget`.
+
+A name the block's scope defines wins over these: a script binding or a
+`pp-for` row called `e`, `target` or `el` is what the handler reads. `event`
+is always the event.
+
+A handler is an expression or a statement body, `onclick={if (open) {
+close(); }}`. An expression that evaluates to a function is called with the
+event, so `onclick={save}` runs `save(event)`.
 
 Use native lowercase HTML event names, not JSX names such as `onClick`.
 Long native names such as `onlostpointercapture` work the same way: their
@@ -575,8 +607,8 @@ of the handlers written literally on its root: the tag ships with
 when several instances of one component share a `pp-component` name. A
 caller's handler forwarded through `bindings` keeps running in the caller's
 scope. One element has one event owner, so a root cannot combine its own
-handlers with a caller's: an `on…=@{…}` beside an owned handler is a compile
-error, and a spread that brings an event handler onto such a root is refused
+handlers with a caller's: an `on…=@{…}` is a compile error on every element,
+and a spread that brings an event handler onto such a root is refused
 at render (a debug assertion; dropped in release). Put the caller's handler on
 an inner element, or call it from the block's own handler.
 
@@ -665,7 +697,10 @@ pub async fn save_profile(name: String, email: String) -> Result<()> {
 `defaultvalue={…}` / `defaultchecked={…}` is uncontrolled, applied once and
 then left to the user. Switching between them — usually by binding `value` to
 state that starts `undefined` — logs
-`[PP-WARN] <input#email> changed from uncontrolled to controlled.` Give the
+`[PP-WARN] input#email changed from uncontrolled to controlled. Choose either
+a controlled value binding or an uncontrolled defaultValue for the lifetime
+of the element.` The element is named by its tag and id, or by its tag and
+name (`input[name="email"]`) when it has no id. Give the
 state a defined initial value; never write both forms.
 
 A controlled `type="number"` input compares its text with the bound value by
@@ -845,14 +880,20 @@ html! {
 
 A `{…}` prop is refused when the component's file never reads
 `pp.props.<name>`. Write the prop in kebab-case: `online-now={…}` is read as
-`pp.props.onlineNow`. An unhyphenated name that starts with `on` (`onlineNow`,
-`onPick`) is written as a native event handler and never becomes a prop;
-write a callback prop as `on-pick={…}`. These are never refused:
+`pp.props.onlineNow`. A `{…}` binding under an unhyphenated lowercase name
+that starts with `on` (`onclick={…}`, `online={…}`) is a native event handler
+on a component tag as on an element, never a client prop: write a callback
+prop as `on-pick={…}` (`onPick={…}` is refused with that form) and a client
+value prop under a name that does not start with `on`. A server value is
+different: `online=@{user.online}` fills the Rust parameter `online` like any
+other prop. These are never refused:
 
 - a name the root element uses for itself: an HTML attribute (`class`,
   `hidden`, `disabled`, `value`, …), a handler (`onclick`), and anything
   starting `data-`, `aria-` or `pp-`. To set an attribute of your own on a
-  component's root, name it `data-…`;
+  component's root, name it `data-…`. Attribute names include `name`,
+  `label`, `type`, `open`, `size` and `title`, so a prop of your own with
+  such a name is never checked: give it another name;
 - a prop of a component that reads no prop itself: a wrapper, whose props
   are for its root;
 - a prop of a component that may read one where the build cannot see it:

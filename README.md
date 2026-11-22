@@ -130,9 +130,9 @@ Lines in `.rahti/dev.log`, a file an agent can read.
 | --- | --- |
 | `rahti` | The server runtime: rendering, metadata, RPC, auth, validation, caching, security, observability, background work, time, and sockets. |
 | `rahti-js` | Compiles template bindings, handlers, and scripts ahead of time for the client registry. |
-| `rahti-macros` | `html!`, `#[component]`, `#[rpc]`, `#[socket]` — re-exported by `rahti`. |
+| `rahti-macros` | `html!`, `#[component]`, `#[rpc]`, `#[job]`, `#[socket]`, `shapes!` — re-exported by `rahti`. |
 | `rahti-build` | The build step: scans conventions, generates the router and modules, compiles CSS. |
-| `cargo-rahti` | `cargo rahti new`, `cargo rahti upgrade`, and `cargo rahti build --static`. |
+| `cargo-rahti` | `cargo rahti new`, `upgrade`, `build --static`, `fmt`, `restart`, `stop`, `status`, and `generate`. |
 | `rahti-mcp` | Optional read-only project inspection over local stdio or secured Streamable HTTP. |
 
 This repository is the framework workspace: the crates above, and the

@@ -698,10 +698,35 @@ fn the_env_file_lists_every_optional_application_override() {
         "RAHTI_SPILL_THRESHOLD",
         "RAHTI_SPILL_DIR",
         "RAHTI_DEV",
-        "RAHTI_TAILWIND",
     ] {
         assert!(env.contains(&format!("# {key}=")), "{key} missing:\n{env}");
     }
+}
+
+/// `RAHTI_TAILWIND` is read by the build script from the process
+/// environment. Nothing reads it from `.env`, so the file does not offer it.
+#[test]
+fn the_env_file_offers_only_what_dot_env_can_set() {
+    let tree = Tree::new("env-build-vars");
+    scaffold_with(&tree, true, None);
+    let env = tree.read(".env");
+
+    assert!(!env.contains("RAHTI_TAILWIND"), "{env}");
+}
+
+/// The comment says what the framework default is and what this file sets.
+#[test]
+fn the_env_file_says_which_session_lifetime_is_the_default() {
+    let tree = Tree::new("env-lifetime");
+    scaffold_with(&tree, true, None);
+    let env = tree.read(".env").replace('\r', "");
+
+    assert!(
+        env.contains(
+            "the framework default\n# is 1; this project sets 8.\nSESSION_LIFETIME_HOURS=\"8\""
+        ),
+        "{env}"
+    );
 }
 
 /// Adding a database changes the files it has to change and no others.
@@ -982,4 +1007,17 @@ fn ws_is_recorded_in_the_config() {
     scaffold_full(&tree, false, None, false);
     let config = fs::read_to_string(tree.0.join("rahti.config.json")).expect("a config");
     assert!(!config.contains("\"ws\""), "{config}");
+}
+
+/// The connection is installed by `initialize_application`, and the text a
+/// developer reads when it is missing says so.
+#[test]
+fn the_database_template_names_where_it_is_connected() {
+    let db = t::DB_RS;
+    assert!(
+        db.contains("`initialize_application` in src/lib.rs"),
+        "{db}"
+    );
+    assert!(db.contains("not called by `connect_if_configured`"), "{db}");
+    assert!(!db.contains("`main`"), "{db}");
 }

@@ -31,7 +31,7 @@ The parts divide the work:
 | Job | Use |
 | --- | --- |
 | Data from the server | `#[rpc]` + `pp.rpc`, `RpcStream`, `#[socket]` + `pp.socket`, or `@{Json(&value)}` for the first render |
-| Values the markup shows | `pp.state` — a change re-renders only the nodes that differ |
+| Values the markup shows | `pp.state` — a change re-renders the owning component and updates only the DOM nodes that differ |
 | Handles to browser objects | `pp.ref` — devices, buffers, contexts, workers, audio graphs, streams; a ref change never re-renders |
 | Acquire, feed, release | `pp.effect` — create on mount, push new state in when it changes, dispose in the cleanup |
 | The heavy work | the browser API itself — shaders, threads, codecs, and hardware run at native speed, outside PulsePoint |

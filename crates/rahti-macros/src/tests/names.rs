@@ -107,6 +107,32 @@ fn the_window_is_known() {
     assert!(found("", r#"window.gtag("event", "load");"#).is_empty());
 }
 
+/// Only the Tailwind scaffold's `main.js` publishes `twMerge`, so under any
+/// other engine the bare name is one nothing supplies.
+#[test]
+fn tw_merge_is_published_only_by_the_tailwind_engine() {
+    let src = r###"<div><p class={twMerge("p-2", wide ? "p-4" : "")}>"x"</p><script>r##"const [wide] = pp.state(false);"##</script></div>"###;
+    let tokens = TokenStream::from_str(src).expect("test source does not tokenize");
+    let parsed = parse(tokens).ok().expect("the block parses");
+    let names = |engine: Option<&str>| -> Vec<String> {
+        unknown_under(&parsed.client_code, engine)
+            .into_iter()
+            .map(|unknown| format!("{} {}", unknown.place, unknown.name))
+            .collect()
+    };
+    // A component library has no engine of its own to consult.
+    assert!(names(None).is_empty());
+    assert!(names(Some("tailwind")).is_empty());
+    assert_eq!(names(Some("plain")), ["binding twMerge"]);
+    assert_eq!(names(Some("none")), ["binding twMerge"]);
+
+    // The window is still readable under every engine.
+    let src = r###"<div><p class={window.twMerge("p-2")}>"x"</p><script>r##"const [wide] = pp.state(false);"##</script></div>"###;
+    let tokens = TokenStream::from_str(src).expect("test source does not tokenize");
+    let parsed = parse(tokens).ok().expect("the block parses");
+    assert!(unknown_under(&parsed.client_code, Some("plain")).is_empty());
+}
+
 #[test]
 fn a_block_without_one_script_of_its_own_has_no_names_to_check() {
     // No script: the block renders in the scope of the block around it.

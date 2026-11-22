@@ -18,6 +18,7 @@ rahti-build scans conventions
         +--> src/models/mod.rs          (generated, when a db is configured)
         +--> src/migrations/mod.rs      (generated, carries the Migrator)
         +--> .rahti/manifest.json       (generated tooling metadata)
+        +--> .rahti/rpc-shapes.tsv      (generated rpc response shapes for html!)
         +--> public/css/styles.css      (built/copied according to config)
         |
         v
@@ -56,11 +57,15 @@ src/lib.rs::initialize_application
 The server runtime exports:
 
 - `Html`, `Render`, `RenderJs`, and `Json`;
+- `Metadata`, `Page`, and `Robots`: static and request-specific route
+  metadata (see `metadata-and-seo.md`);
+- `load_env`: the process's one `.env` reader;
 - `client`: the client registry `html!` fills through `inventory` — every
   binding, handler and component script compiled ahead of time — served as
   `/_rahti/client.js` and written by static export;
 - `Attrs`, `Attributes`, `AttrList`, `Presence`, and `attribute`: whether an
   attribute is written at all, and what a `@{..spread}` puts on a tag;
+  `Bindings` carries a component tag's `{…}` props;
 - layout and error-boundary response layers, including the root-layout layer
   that names the document a response was rendered in;
 - `Error`, `ErrorInfo`, and `Result`: nested page boundaries, production-safe
@@ -121,7 +126,7 @@ The server runtime exports:
   bind address as `localhost` because `0.0.0.0` is not a destination;
 - development reload routes, the token-protected status and shutdown routes
   tooling reads from `.rahti/dev-server.json`, and graceful-shutdown
-  coordination — `signal` for Ctrl+C or a request from inside the process, and
+  coordination — `shutdown_signal` for Ctrl+C or a request from inside the process, and
   `begin_shutdown` for a host that says when instead of waiting to be told,
   which is every native package;
 - behind the default `dev-watch` cargo feature: the `public/` filesystem
@@ -130,7 +135,12 @@ The server runtime exports:
   so `cargo-rahti-native` watches it on the development machine and rebuilds,
   reinstalls and restarts with a new embedded tree. A release host forces
   development mode off, leaving the reload routes and watcher inert;
-- the macros re-exported from `rahti-macros` — `#[socket]` only when `ws` is
+- behind the optional `browser-test` cargo feature: `rahti::browser`, a
+  headless Chrome, Chromium or Edge driver for application tests — `serve`,
+  `Browser::launch`, trusted input, `eval`, `wait_for`, and `errors` (see
+  `testing.md`);
+- the macros re-exported from `rahti-macros` — `html!`, `#[component]`,
+  `#[rpc]`, `#[job]`, `shapes!`, and `#[socket]` only when `ws` is
   enabled, so the error for a socket without the feature names the feature
   rather than generated code.
 
@@ -209,7 +219,8 @@ Used at compile time only; `rahti` does not depend on it.
 On every relevant Cargo build it:
 
 - reads `rahti.config.json`;
-- scans route convention files and `src/components/*.rs`;
+- scans route convention files and `src/components/`, nested directories
+  included;
 - validates route, RPC, and socket-name conflicts;
 - parses RPC declarations into the versioned `rpcContracts` agent inventory: source
   locations, scoped URLs, parameters, response types, auth, transports, and
@@ -218,10 +229,13 @@ On every relevant Cargo build it:
   TypeScript shape, with the named declarations in `rpcTypes` per file;
 - reads `src/jobs.rs` and `src/jobs/` into the manifest's `jobs` inventory and
   refuses two jobs sharing a stored name;
-- generates routes, modules, and `.rahti/manifest.json`;
+- generates routes, modules, `.rahti/manifest.json`, and
+  `.rahti/rpc-shapes.tsv`;
 - when `db` is configured, generates `src/models/mod.rs` and
   `src/migrations/mod.rs` — including the `Migrator` — without depending on
-  SeaORM or reading any of its code;
+  SeaORM or reading any of its code. The files they declare are read from
+  `db.models` and `db.migrations`; a directory other than the default is
+  reached by a `#[path]` on each declaration, so `src/lib.rs` never changes;
 - compiles or copies CSS;
 - validates configured locale identifiers and Fluent catalogs, then embeds
   their sources into the generated router;
@@ -230,6 +244,11 @@ On every relevant Cargo build it:
 It also exports `dev_server`, the one reading of a running development server:
 liveness, source files changed since boot, the per-boot browser report, and job
 health. `cargo rahti status` and the MCP tools both go through it.
+
+It also exports `script_check`, which runs the TypeScript compiler
+(`tsc -p jsconfig.json`, the project's own or one on `PATH`, never downloaded)
+over the scripts in `public/js/` and records the result in
+`.rahti/script-check.json`. Without TypeScript the check is skipped.
 
 ### `cargo-rahti`
 
@@ -242,15 +261,22 @@ health. `cargo rahti status` and the MCP tools both go through it.
   build beside the running server, stop it gracefully, start a detached
   server from its own copy of the binary, print how long each phase took, and
   report whether it runs the current source. On Windows the server is created
-  through WMI so it outlives an agent's job object.
-- `cargo rahti generate job` adds a `#[job]` to `src/jobs.rs`, declares the
-  module, and installs the queue. `cargo rahti generate job-store` adds the
+  through WMI so it outlives an agent's job object. `restart` and `stop` take
+  `--timeout <seconds>` (60 by default); `status --json` prints the report as
+  JSON. The server's output goes to `.rahti/dev-server.log`. `restart` and
+  `status` also report the type errors in `public/js/` scripts and exit
+  non-zero on one.
+- `cargo rahti generate job <name> [--params name:Type,...]` adds a `#[job]`
+  to `src/jobs.rs`, declares the module, and installs the queue. `cargo rahti generate job-store` adds the
   application-owned SeaORM adapter, entity, and migration from
   `crates/cargo-rahti/assets/templates/`, which a test holds byte-identical to
   the copies this workspace proves.
 - `cargo rahti new <name>` scaffolds a project and records hashes of owned
   scaffold files. `--tailwind`, `--db [backend]`, `--ws`, and `--mcp` answer its
-  questions from the command line; each flag only ever says yes.
+  questions from the command line; each flag only ever says yes. `--local
+  <path>` depends on a Rahti checkout by path. The scaffold includes
+  `jsconfig.json` and `public/js/pp.d.ts`, which type the runtime for
+  `// @ts-check` scripts.
 - `cargo rahti build --static` runs the application binary in export mode,
   writing fixed pages and declared dynamic paths to `dist/` (or `--out`) and
   copying public assets without binding a listener.
@@ -295,9 +321,11 @@ health. `cargo rahti status` and the MCP tools both go through it.
 
 ### `rahti-mcp`
 
-The read-only MCP server uses the official Rust MCP SDK. Its tools cover routes,
-components, RPC contracts, sockets, jobs, the database, diagnostics, and the
-running server through `server_status` and `browser_status`. Local clients launch
+The read-only MCP server uses the official Rust MCP SDK. Its tools are
+`project_summary`, `list_routes`, `list_components`, `list_rpcs`,
+`list_sockets`, `list_jobs`, `list_database_artifacts`, `site_info`,
+`validate_project`, `recent_diagnostics`, `server_status`, and
+`browser_status`. Local clients launch
 its stdio executable through `.mcp.json`; an opted-in application compiles the
 same tools behind bearer-protected Streamable HTTP at `/mcp/`. It reads
 `rahti.config.json`, generated `.rahti/manifest.json`, convention documents,
@@ -504,6 +532,13 @@ The current implementation covers:
   nearest declared name when there is one;
 - an agent apply loop: `cargo rahti restart`, `status` and `stop`, with stale
   source detection, per-boot browser and job reports, and matching MCP tools;
+- browser-script type-checking: a `public/js/` script that starts with
+  `// @ts-check` is checked against the scaffolded `jsconfig.json` and
+  `public/js/pp.d.ts` by the installed TypeScript compiler, and its errors are
+  reported by `cargo rahti restart`, `status`, and MCP `server_status`;
+- browser tests through `rahti::browser`, behind the `browser-test` cargo
+  feature: the installed Chrome, Chromium or Edge driven headless over the
+  DevTools protocol against the application's own router;
 - optional read-only MCP project inspection over local stdio and secured
   Streamable HTTP, selected with `cargo rahti new --mcp`, with public
   `llms.txt` and well-known discovery, and absent from an application that did

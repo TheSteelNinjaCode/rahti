@@ -1519,7 +1519,13 @@ impl Parser {
                 None => unreachable!("checked by the peek above"),
             };
             // `for="…"`, written as HTML writes it, fills the parameter Rust
-            // spells `r#for`.
+            // spells `r#for`. The raw spelling belongs to the declaration.
+            if let Some(plain) = prop.to_string().strip_prefix("r#") {
+                return Err(Error {
+                    span: prop.span(),
+                    msg: crate::authoring::raw_prop_name(name, plain),
+                });
+            }
             let prop = raw_if_keyword(prop);
             let mut html_name = prop.to_string().trim_start_matches("r#").to_string();
             let attribute_name = self.is_punct(0, '-') || self.is_punct(0, ':');
@@ -1534,13 +1540,15 @@ impl Parser {
                 html_name.push(separator);
                 html_name.push_str(&part);
             }
+            // A JSX name or a directive that does not exist is as wrong on a
+            // component tag as on an element.
+            if let Some(msg) = crate::authoring::attribute_mistake(name, &html_name) {
+                return Err(Error {
+                    span: prop.span(),
+                    msg,
+                });
+            }
             if attribute_name {
-                if let Some(msg) = crate::authoring::attribute_mistake(name, &html_name) {
-                    return Err(Error {
-                        span: prop.span(),
-                        msg,
-                    });
-                }
                 // Bound attributes are entries in `Bindings`, not Rust fields.
                 // Static values still name a typed parameter and need `attrs`.
                 if !(self.is_punct(0, '=') && self.brace_at(1)) {

@@ -101,18 +101,21 @@ fn job_store(root: &Path) -> Result<(), String> {
     if root.join(STORE_FILE).exists() {
         return Err(format!("{STORE_FILE} already exists"));
     }
-    let model = "src/models/job.rs";
-    if root.join(model).exists() {
+    // The directories the build wires up, which `db.models` and
+    // `db.migrations` may have moved.
+    let models = db_dir(&config, "models", "src/models");
+    let migrations = db_dir(&config, "migrations", "src/migrations");
+    let model = format!("{models}/job.rs");
+    if root.join(&model).exists() {
         return Err(format!("{model} already exists"));
     }
 
-    let migrations = root.join("src/migrations");
     let (year, month, day) = civil_date(now_seconds());
-    let migration = format!("src/migrations/m{year:04}{month:02}{day:02}_000001_create_job.rs");
+    let migration = format!("{migrations}/m{year:04}{month:02}{day:02}_000001_create_job.rs");
     // A project with a database and no table yet has neither directory until
     // its first build; the job table may be the first one.
-    for dir in [migrations.clone(), root.join("src/models")] {
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    for dir in [&migrations, &models] {
+        fs::create_dir_all(root.join(dir)).map_err(|error| error.to_string())?;
     }
     if root.join(&migration).exists() {
         return Err(format!("{migration} already exists"));
@@ -120,7 +123,7 @@ fn job_store(root: &Path) -> Result<(), String> {
 
     for (path, contents) in [
         (STORE_FILE, templates::JOB_STORE_RS),
-        (model, templates::MODEL_JOB_RS),
+        (model.as_str(), templates::MODEL_JOB_RS),
         (migration.as_str(), templates::MIGRATION_JOB),
     ] {
         fs::write(root.join(path), contents).map_err(|error| error.to_string())?;
@@ -143,6 +146,16 @@ fn job_store(root: &Path) -> Result<(), String> {
          `crate::job_store::enqueue_in(&txn, crate::jobs::name::request(arguments)?)`."
     );
     Ok(())
+}
+
+/// `db.models` or `db.migrations`, read the way the build reads it: the
+/// configured directory without a trailing slash, or the default.
+pub(crate) fn db_dir(config: &Value, key: &str, default: &str) -> String {
+    config["db"][key]
+        .as_str()
+        .unwrap_or(default)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn amend_lib(root: &Path, amend: impl Fn(&str) -> Option<String>) -> Result<(), String> {

@@ -8,8 +8,8 @@ counterpart is `testing.md`, which teaches a scaffolded application's suite.
 
 - `crates/<crate>/src/tests/*.rs` - unit and module-level behavior, included
   from the crate/module using `#[path = "tests/..."]`. `rahti-js` keeps its
-  tests in `src/tests.rs`, and `rahti-mcp` keeps them inline in
-  `#[cfg(test)] mod tests`.
+  tests in `src/tests.rs` and `src/tests/names.rs`, and `rahti-mcp` keeps
+  them inline in `#[cfg(test)] mod tests`.
 - `crates/rahti/tests/router.rs` - the framework end to end, through a
   router built by hand the way codegen builds one, using only the public
   API.
@@ -142,7 +142,7 @@ cargo test -p cargo-rahti
 ```
 
 Cover fresh generation, local/version dependencies, dry run, unchanged owned
-files, edited files, retired files, asset copying, and each database backend's
+files, edited files, deleted files, asset copying, and each database backend's
 cargo feature.
 
 ### PulsePoint runtime change

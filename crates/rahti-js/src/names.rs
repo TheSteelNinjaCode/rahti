@@ -35,7 +35,7 @@ use crate::Code;
 /// `pp`, so `pp` is not among a script's names; it is among a binding's.
 pub fn free_names(code: Code, source: &str) -> Vec<(String, Range<usize>)> {
     let (prefix, suffix) = match code {
-        Code::Script => ("async function __pp_script(pp, __pp_server) {\n", "\n}"),
+        Code::Script => ("function __pp_script(pp, __pp_server) {\n", "\n}"),
         Code::Expression => ("(", "\n);"),
         Code::Handler if crate::is_expression(source) => ("(", "\n);"),
         Code::Handler => ("function __pp_handler() {\n", "\n}"),

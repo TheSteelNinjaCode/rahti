@@ -13,29 +13,36 @@ pub fn parse(value: &serde_json::Value) -> Option<I18n> {
     let object = raw
         .as_object()
         .unwrap_or_else(|| panic!("rahti: i18n must be an object"));
+    // Both keys are required, as `rahti.schema.json` says: which languages an
+    // application serves is not something a build can guess.
+    let required = |key: &str| {
+        object.get(key).unwrap_or_else(|| {
+            panic!(
+                "rahti: i18n.{key} is missing.\n  \
+                 An `i18n` object names both keys: \
+                 `\"i18n\": {{ \"locales\": [\"en\"], \"default\": \"en\" }}`."
+            )
+        })
+    };
     let default = canonical(
-        object
-            .get("default")
-            .and_then(|value| value.as_str())
-            .unwrap_or("en"),
+        required("default")
+            .as_str()
+            .unwrap_or_else(|| panic!("rahti: i18n.default must be a string")),
         "i18n.default",
     );
-    let locales = match object.get("locales") {
-        Some(value) => value
-            .as_array()
-            .unwrap_or_else(|| panic!("rahti: i18n.locales must be an array"))
-            .iter()
-            .map(|value| {
-                canonical(
-                    value.as_str().unwrap_or_else(|| {
-                        panic!("rahti: every i18n.locales entry must be a string")
-                    }),
-                    "i18n.locales",
-                )
-            })
-            .collect::<Vec<_>>(),
-        None => vec![default.clone()],
-    };
+    let locales = required("locales")
+        .as_array()
+        .unwrap_or_else(|| panic!("rahti: i18n.locales must be an array"))
+        .iter()
+        .map(|value| {
+            canonical(
+                value
+                    .as_str()
+                    .unwrap_or_else(|| panic!("rahti: every i18n.locales entry must be a string")),
+                "i18n.locales",
+            )
+        })
+        .collect::<Vec<_>>();
     if locales.is_empty() {
         panic!("rahti: i18n.locales must contain at least one locale");
     }

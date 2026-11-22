@@ -345,6 +345,18 @@ async fn a_page_is_handed_a_token() {
     assert!(!set.contains("HttpOnly"), "the client reads it: {set}");
 }
 
+/// Outside development the token travels over HTTPS only, like the session
+/// cookie, and stays readable by the client either way.
+#[test]
+fn the_token_cookie_is_secure_outside_development() {
+    let production = csrf_cookie_line("pp_csrf", "abc", true);
+    assert_eq!(production, "pp_csrf=abc; Path=/; SameSite=Lax; Secure");
+    assert!(!production.contains("HttpOnly"), "{production}");
+
+    let development = csrf_cookie_line("pp_csrf_3000", "abc", false);
+    assert_eq!(development, "pp_csrf_3000=abc; Path=/; SameSite=Lax");
+}
+
 /// Re-issuing on every response would race the calls already in flight.
 #[tokio::test]
 async fn a_visitor_who_has_one_keeps_it() {

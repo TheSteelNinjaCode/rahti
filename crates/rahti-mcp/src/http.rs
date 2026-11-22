@@ -19,6 +19,8 @@ use crate::{Project, RahtiMcp};
 pub const AUTH_TOKEN_ENV: &str = "RAHTI_MCP_AUTH_TOKEN";
 pub const ALLOWED_HOSTS_ENV: &str = "RAHTI_MCP_ALLOWED_HOSTS";
 pub const ALLOWED_ORIGINS_ENV: &str = "RAHTI_MCP_ALLOWED_ORIGINS";
+/// The flag that overrides profile-based development mode, as `rahti` reads it.
+const DEV_ENV: &str = "RAHTI_DEV";
 
 pub fn routes() -> Router {
     let project = Project::open_http(".");
@@ -79,12 +81,24 @@ async fn authorize(request: Request, next: Next) -> Response {
     match configured.as_deref() {
         Some(expected) if token_matches(provided, expected) => next.run(request).await,
         Some(_) => unauthorized(),
-        None if cfg!(debug_assertions) => next.run(request).await,
+        None if development_mode(env::var(DEV_ENV).ok().as_deref(), cfg!(debug_assertions)) => {
+            next.run(request).await
+        }
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "error": format!("{AUTH_TOKEN_ENV} is not configured") })),
         )
             .into_response(),
+    }
+}
+
+/// Rahti's development-mode rule: `RAHTI_DEV` decides when it is set, and the
+/// build profile decides when it is not. Anything that is not an "on" word is
+/// off, so a missing token is refused wherever development mode is off.
+fn development_mode(flag: Option<&str>, debug_build: bool) -> bool {
+    match flag {
+        Some(value) => matches!(value.trim(), "1" | "true" | "on" | "yes"),
+        None => debug_build,
     }
 }
 
@@ -127,6 +141,21 @@ mod tests {
         assert!(token_matches(Some("secret"), "secret"));
         assert!(!token_matches(Some("wrong"), "secret"));
         assert!(!token_matches(None, "secret"));
+    }
+
+    #[test]
+    fn a_missing_token_is_open_only_in_development_mode() {
+        // Unset: the build profile decides.
+        assert!(development_mode(None, true));
+        assert!(!development_mode(None, false));
+        // Set: the flag decides, in either profile.
+        assert!(development_mode(Some("1"), false));
+        assert!(development_mode(Some(" true "), false));
+        assert!(!development_mode(Some("0"), true));
+        assert!(!development_mode(Some("false"), true));
+        // Anything unrecognized is off: fail closed.
+        assert!(!development_mode(Some(""), true));
+        assert!(!development_mode(Some("maybe"), true));
     }
 
     #[tokio::test]

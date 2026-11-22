@@ -34,7 +34,9 @@ rahti::time::configure(app_time);
 Resolve it before starting schedulers or serving requests. Changing the
 environment requires a process restart. Rahti bundles the IANA rules through
 its Rust dependency, so named zones work on Windows and do not depend on an
-operating-system timezone database.
+operating-system timezone database. `AppTime::named("Europe/Berlin")`
+resolves a name without reading the environment, which is how a test installs
+a zone; quotes around either value are ignored.
 
 `APP_TIMEZONE` is application behavior rather than a credential. It stays in
 the environment so deployments can use different calendars without compiling

@@ -50,6 +50,10 @@ pub async fn page(Path(slug): Path<String>) -> Html {
 }
 ```
 
+Write it as `pub async fn static_paths()`. A module-level `static_paths`
+function in another form, such as one that is not `async` or not `pub`, is a
+build error that names this spelling.
+
 `static_paths()` returns concrete URL paths, not parameter values or path
 fragments. Each path must start with `/`, contain no query string or fragment,
 and match one of that page's generated route patterns. A catch-all path must
@@ -68,6 +72,7 @@ page needs concrete URLs.
 
 With localization configured, a page whose only dynamic segment is a root
 `[locale]` or `[lang]` is expanded once per configured locale automatically.
+Exporting `static_paths()` from such a page is a build error.
 A page with locale plus another dynamic segment still declares complete URLs,
 including the locale, in `static_paths()`. See `localization.md`.
 
@@ -79,7 +84,10 @@ The exporter writes a response only when the router returns `200 OK` with a
 - redirects, including authentication redirects;
 - non-success responses and extractor rejections;
 - non-HTML responses;
+- responses larger than 32 MiB or not valid UTF-8;
 - undeclared or invalid dynamic paths;
+- a path with a `.` or `..` segment, or a segment containing `\`, `:`, `*`,
+  `"`, `<`, `>`, `|`, or a NUL byte;
 - two routes that would write the same HTML file.
 
 A page containing PulsePoint RPC or WebSocket calls is still rendered, but
@@ -106,8 +114,30 @@ existing directory it does not own. It also refuses the project root, a
 filesystem root, any output nested inside the public directory, any public
 directory nested inside the output, and symlinked public assets.
 
-The command needs the scaffold's static-export handoff in `src/main.rs` and
-stops before running the application when it is absent.
-`cargo rahti upgrade --force src/main.rs` writes the scaffold file; review the
-replacement first with `--dry-run` when that file contains application
-changes.
+The command needs the static-export handoff in `src/main.rs` and stops before
+running the application when the text `static_output()` is absent from that
+file. The handoff sits after `initialize_application()` succeeds and before
+the listener binds:
+
+```rust
+if let Some(output) = rahti::static_output() {
+    match rahti::export_static(
+        app.router,
+        routes::static_routes().await,
+        rahti::public_dir(routes::PUBLIC_DIR),
+        output,
+    )
+    .await
+    {
+        Ok(report) => {
+            report.print();
+            rahti::jobs::finish_shutdown().await;
+            return;
+        }
+        Err(error) => {
+            eprintln!("rahti: static export failed: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+```

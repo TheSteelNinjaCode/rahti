@@ -46,9 +46,18 @@ pub async fn page(Path(id): Path<String>) -> Result {
 `patch`, `delete`, `head`, and `options`. API handlers do not inherit layouts
 or page error boundaries.
 
+The build finds those functions by text and routes only the `pub` ones: write
+each handler as `pub async fn get(`. A private function with one of the seven
+names is a helper and is not routed. A `route.rs` with no `pub` handler is a
+build error, and the error says so when the file has only a private one.
+
 A route segment must choose one public role. Defining both `page.rs` and
 `route.rs` in the same directory is a build error: keep `page.rs` for UI or
 `route.rs` for an API, or move one into a different segment.
+
+Two files that resolve to the same URL are a build error as well: `page.rs`
+beside `(marketing)/page.rs`, or an optional catch-all beside a page at its
+parent path.
 
 An API-only segment can use normal Axum extractors and responses:
 
@@ -277,8 +286,9 @@ The marker must be written on a line of its own, exactly as above; the build
 text-scans for it. A layout that declares it must render a complete document.
 
 Each root layout has an identity — the `pp-component` name the build derives
-from its path, or the one written by hand in its markup. Rahti sends it two
-ways on every page that layout wraps:
+from its path, or the one written by hand in its markup. Besides the
+`<template>` around the slot, Rahti sends it two ways on every page that
+layout wraps:
 
 - the `X-PP-Root-Layout` response header;
 - `<meta name="pp-root-layout" content="...">`, injected into the `<head>`.
@@ -298,8 +308,8 @@ Constraints:
   screen. An application with a single root layout is not held to this — a
   page deliberately left outside it is a fragment.
 - The root `not-found.rs` is rendered with the layouts at the app root. If
-  there is no `src/app/layout.rs`, it renders unwrapped; keep one when a 404
-  needs a document.
+  there is no `src/app/layout.rs`, it renders unwrapped, and exporting
+  `metadata()` from it is a build error; keep one when a 404 needs a document.
 
 ## Error Boundaries
 
@@ -312,9 +322,14 @@ nearest ancestor `error.rs` can render. The boundary receives:
 - `error.request_id()` - optional production correlation reference.
 
 The error UI replaces the failed subtree. Layouts below the selected boundary
-are skipped; layouts above it still wrap the rendered error. RPC failures do
+are skipped; layouts above it still wrap the rendered error. The root layout
+always wraps it, even when that layout sits below the boundary. RPC failures do
 not pass through page error boundaries; they remain JSON errors for
 `pp.rpc(...)`.
+
+A page response with a 5xx status that did not come from `Error` is rendered
+by the boundary too, with the status text as its message. A 4xx response
+built without `Error` passes through unchanged.
 
 Use:
 
@@ -405,7 +420,9 @@ Because the walk is over literal path segments, a `loading.rs` under a dynamic
 segment is a build error — `/customers/{id}` is a string no browser is ever
 on, so the file would ship and never once match. Put it on a static ancestor,
 which covers the dynamic children anyway. Route groups are fine: they
-contribute no URL segment, so `(marketing)/loading.rs` covers `/`.
+contribute no URL segment, so `(marketing)/loading.rs` covers `/`. Two
+`loading.rs` files that cover the same path — that one beside
+`src/app/loading.rs` — are a build error.
 
 ### Transition Timing
 
@@ -428,9 +445,9 @@ pub fn loading() -> Html {
 }
 ```
 
-An app that defines at least one `loading.rs` opts out of the browser's View
-Transitions path: the runtime uses the loading region instead. An app with no
-`loading.rs` writes no container and keeps view transitions.
+An app with no `loading.rs` writes no container. A navigation then leaves the
+current page on screen, unchanged, until the response arrives and replaces the
+body. The same holds when no loading region covers the path being left.
 
 ## Not Found and Static Fallback
 
@@ -449,10 +466,14 @@ application request pipeline.
 `/health` and `/ready` are framework-owned production probes. They are merged
 outside application route groups and the application request pipeline; an
 application convention file resolving to either exact URL is a build error.
+With MCP enabled, `/mcp` and `/.well-known/mcp.json` are reserved the same
+way.
 
-It also installs the auth guard as the outermost layer of every group and of
-the RPC router — but not over the static fallback, so `public/` is served
-without a session. Which routes that guard protects is not a property of the
+It also installs the auth guard around every group and the RPC router, outside
+the application request pipeline — but not over the static fallback, so
+`public/` is served without a session. When localization is configured, the
+locale layer is the outermost layer of each group and sits outside the auth
+guard. Which routes that guard protects is not a property of the
 file tree: it is the policy `initialize_application` installs in
 `src/lib.rs`. See
 `authentication.md`.

@@ -245,13 +245,20 @@ fn optional(value: Option<Literal>) -> TokenStream {
     }
 }
 
-/// `src/jobs.rs`, or anything under a `jobs` directory. An empty path is a
-/// tool that expanded the macro without a file, which has nothing to check.
+/// `src/jobs.rs`, or a file under `src/jobs/`: the two places the build
+/// reads into the manifest. The path is the one rustc was given, so the
+/// crate's `src` may sit below other directories. An empty path is a tool
+/// that expanded the macro without a file, which has nothing to check.
 fn check_location(file: &str, name: &Ident) -> Result<(), Error> {
     let normalized = file.replace('\\', "/");
-    let mut segments = normalized.rsplit('/');
-    let last = segments.next().unwrap_or_default();
-    if file.is_empty() || last == "jobs.rs" || segments.any(|segment| segment == "jobs") {
+    let below_src = match normalized.rsplit_once("/src/") {
+        Some((_, below)) => Some(below),
+        None => normalized.strip_prefix("src/"),
+    };
+    let in_jobs = below_src.is_some_and(|below| {
+        below == "jobs.rs" || (below.starts_with("jobs/") && below.ends_with(".rs"))
+    });
+    if file.is_empty() || in_jobs {
         return Ok(());
     }
 

@@ -757,3 +757,228 @@ fn a_page_outside_the_only_root_layout_is_allowed() {
     let scanned = walk_tree(&tree);
     assert!(root_layout(scanned.entry("stray/page.rs"), scanned.entries()).is_none());
 }
+
+// ------------------------------------------------------- export spellings
+
+/// rustfmt breaks a long signature across lines, and must never be what
+/// turns an export off.
+#[test]
+fn an_export_broken_across_lines_is_still_read() {
+    let tree = Tree::new("wrapped-exports");
+    tree.file(
+        "posts/[id]/page.rs",
+        "pub fn metadata(\n) -> Metadata {\n    todo!()\n}\n\npub fn cache()\n-> PageCache {\n    todo!()\n}\n\npub async fn static_paths(\n) -> Vec<String> {\n    vec![]\n}\n\npub async fn page() -> Html { todo!() }",
+    );
+    let scanned = walk_tree(&tree);
+    let page = scanned.entry("posts/[id]/page.rs");
+    assert!(page.metadata);
+    assert!(page.page_cache);
+    assert!(page.static_paths);
+}
+
+/// A comment on the line above, or after the item before, is not part of the
+/// signature.
+#[test]
+fn an_export_after_a_comment_or_an_attribute_is_read() {
+    let tree = Tree::new("commented-exports");
+    tree.file(
+        "page.rs",
+        "const TITLE: &str = \"Home\"; // shown in the tab\n#[allow(dead_code)]\npub fn metadata() -> Metadata { todo!() }\n/// How long the page is kept.\npub fn cache() -> PageCache { todo!() }\npub async fn page() -> Html { todo!() }",
+    );
+    let scanned = walk_tree(&tree);
+    assert!(scanned.entry("page.rs").metadata);
+    assert!(scanned.entry("page.rs").page_cache);
+}
+
+#[test]
+#[should_panic(expected = "Write it as `pub fn metadata() -> Metadata`")]
+fn an_async_metadata_export_is_refused() {
+    let tree = Tree::new("async-metadata");
+    tree.file(
+        "page.rs",
+        "pub async fn metadata() -> Metadata { todo!() }\npub async fn page() -> Html { todo!() }",
+    );
+    scan(tree.path());
+}
+
+#[test]
+#[should_panic(expected = "declares `pub(crate) fn metadata() -> Metadata`")]
+fn a_crate_visible_metadata_export_is_refused() {
+    let tree = Tree::new("crate-metadata");
+    tree.file(
+        "layout.rs",
+        "pub(crate) fn metadata() -> Metadata { todo!() }\npub fn layout(children: Html) -> Html { children }",
+    );
+    scan(tree.path());
+}
+
+#[test]
+#[should_panic(expected = "Write it as `pub fn metadata() -> Metadata`")]
+fn a_private_metadata_export_is_refused() {
+    let tree = Tree::new("private-metadata");
+    tree.file(
+        "page.rs",
+        "fn metadata() -> Metadata { todo!() }\npub async fn page() -> Html { todo!() }",
+    );
+    scan(tree.path());
+}
+
+#[test]
+#[should_panic(expected = "Write it as `pub fn cache() -> PageCache`")]
+fn a_cache_export_with_another_return_spelling_is_refused() {
+    let tree = Tree::new("cache-path");
+    tree.file(
+        "page.rs",
+        "pub fn cache() -> cache::PageCache { todo!() }\npub async fn page() -> Html { todo!() }",
+    );
+    scan(tree.path());
+}
+
+#[test]
+#[should_panic(expected = "Write it as `pub async fn static_paths() -> Vec<String>`")]
+fn a_static_paths_export_that_is_not_async_is_refused() {
+    let tree = Tree::new("sync-static-paths");
+    tree.file(
+        "posts/[id]/page.rs",
+        "pub fn static_paths() -> Vec<String> { vec![] }\npub async fn page() -> Html { todo!() }",
+    );
+    scan(tree.path());
+}
+
+/// A private helper that only shares the name is ordinary code, and so is a
+/// method of the same name on a type the page declares.
+#[test]
+fn a_helper_that_shares_an_export_name_is_left_alone() {
+    let tree = Tree::new("export-helpers");
+    tree.file(
+        "page.rs",
+        "fn cache(key: &str) -> String { key.to_string() }\nfn metadata(row: &Row) -> String { todo!() }\nimpl Store {\n    pub fn cache(&self) -> u8 { 0 }\n    pub async fn metadata(&self) -> u8 { 0 }\n}\npub async fn page() -> Html { todo!() }",
+    );
+    let scanned = walk_tree(&tree);
+    assert!(!scanned.entry("page.rs").metadata);
+    assert!(!scanned.entry("page.rs").page_cache);
+}
+
+#[test]
+#[should_panic(expected = "has no document head")]
+fn metadata_on_an_api_route_is_refused() {
+    let tree = Tree::new("route-metadata");
+    tree.file(
+        "api/route.rs",
+        "pub fn metadata() -> Metadata { todo!() }\npub async fn get() {}",
+    );
+    scan(tree.path());
+}
+
+#[test]
+#[should_panic(expected = "no `layout.rs` at the app root")]
+fn not_found_metadata_without_a_root_layout_is_refused() {
+    let tree = Tree::new("notfound-metadata");
+    tree.page("page.rs").file(
+        "not-found.rs",
+        "pub fn metadata() -> Metadata { todo!() }\npub async fn not_found() -> Html { todo!() }",
+    );
+    scan(tree.path());
+}
+
+#[test]
+fn not_found_metadata_under_a_root_layout_is_kept() {
+    let tree = Tree::new("notfound-metadata-ok");
+    tree.page("page.rs").layout("layout.rs").file(
+        "not-found.rs",
+        "pub fn metadata() -> Metadata { todo!() }\npub async fn not_found() -> Html { todo!() }",
+    );
+    assert!(walk_tree(&tree).entry("not-found.rs").metadata);
+}
+
+// ------------------------------------------------------- private handlers
+
+/// The generated router calls a handler from another module, so a private
+/// function named after a method is a helper, not a handler.
+#[test]
+fn a_private_function_named_after_a_method_is_not_a_handler() {
+    let tree = Tree::new("private-method");
+    tree.file(
+        "api/route.rs",
+        "fn get(id: u64) -> u64 { id }\npub async fn post() {}\npub(crate) async fn put() {}",
+    );
+    assert_eq!(
+        walk_tree(&tree).entry("api/route.rs").methods,
+        vec!["post", "put"]
+    );
+}
+
+#[test]
+fn a_handler_broken_across_lines_is_read() {
+    let tree = Tree::new("wrapped-method");
+    tree.file(
+        "api/route.rs",
+        "pub async fn get(\n    Path(id): Path<u64>,\n) -> String {\n    todo!()\n}",
+    );
+    assert_eq!(walk_tree(&tree).entry("api/route.rs").methods, vec!["get"]);
+}
+
+#[test]
+#[should_panic(expected = "`fn get` is not `pub`")]
+fn a_route_with_only_private_handlers_says_so() {
+    let tree = Tree::new("only-private-method");
+    tree.file("api/route.rs", "async fn get() {}");
+    scan(tree.path());
+}
+
+// ------------------------------------------------- locale-only static paths
+
+#[test]
+#[should_panic(expected = "its only dynamic segment is the locale")]
+fn a_locale_only_page_does_not_take_static_paths() {
+    let tree = Tree::new("locale-static-paths");
+    tree.file(
+        "[locale]/about/page.rs",
+        "pub async fn static_paths() -> Vec<String> { vec![] }\npub async fn page() -> Html { todo!() }",
+    );
+    check_static_paths(&scan(tree.path()).entries, true);
+}
+
+/// A second dynamic segment is the application's to enumerate, and without
+/// localization `[locale]` is an ordinary parameter.
+#[test]
+fn static_paths_stay_where_the_build_calls_them() {
+    let tree = Tree::new("locale-static-paths-ok");
+    tree.file(
+        "[locale]/products/[id]/page.rs",
+        "pub async fn static_paths() -> Vec<String> { vec![] }\npub async fn page() -> Html { todo!() }",
+    )
+    .file(
+        "[locale]/about/page.rs",
+        "pub async fn page() -> Html { todo!() }",
+    );
+    check_static_paths(&scan(tree.path()).entries, true);
+
+    let plain = Tree::new("unlocalized-static-paths");
+    plain.file(
+        "[locale]/about/page.rs",
+        "pub async fn static_paths() -> Vec<String> { vec![] }\npub async fn page() -> Html { todo!() }",
+    );
+    check_static_paths(&scan(plain.path()).entries, false);
+}
+
+// ------------------------------------------------- duplicate loading regions
+
+#[test]
+#[should_panic(expected = "two `loading.rs` files cover the same path `/`")]
+fn two_loading_regions_cannot_cover_one_path() {
+    let tree = Tree::new("duplicate-loading");
+    tree.page("page.rs")
+        .loading("loading.rs")
+        .loading("(marketing)/loading.rs");
+    scan(tree.path());
+}
+
+#[test]
+fn loading_regions_for_different_paths_are_kept() {
+    let tree = Tree::new("distinct-loading");
+    tree.page("page.rs")
+        .loading("loading.rs")
+        .loading("(marketing)/reports/loading.rs");
+    assert_eq!(walk_tree(&tree).entries().len(), 3);
+}

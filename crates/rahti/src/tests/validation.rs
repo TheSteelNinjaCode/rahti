@@ -90,6 +90,10 @@ async fn an_api_route_can_return_the_same_structured_validation_contract() {
 
     assert_eq!(response.status(), VALIDATION_STATUS);
     assert!(response.extensions().get::<crate::RpcBody>().is_none());
+    assert_eq!(
+        response.headers()[axum::http::header::CACHE_CONTROL],
+        "no-store"
+    );
     let body = to_bytes(response.into_body(), 4096).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["errors"]["name"][0], "The name field is required.");

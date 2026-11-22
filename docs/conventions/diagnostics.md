@@ -30,7 +30,8 @@ and warnings, how background jobs are doing, and whether the scripts in
 `public/js/` type-check, then says what to do next. It exits non-zero unless
 the server is up and current and the scripts have no type errors, and `--json`
 prints the same report as JSON. MCP `server_status` and `browser_status` return
-it too.
+it too. An `MCP:` line names each command `.mcp.json` starts that is not on
+`PATH`; it does not change the exit code.
 
 ### Script Type Errors
 
@@ -44,6 +45,9 @@ a script or `jsconfig.json` changed after the last check, so a script fix
 needs no restart. Each error is listed as `file:line:column TScode message`
 under `Scripts:`, and the result is kept in `.rahti/script-check.json`, which
 MCP `server_status` and `validate_project` read without running anything.
+The check's `status` is `passed`, `failed`, `skipped` (no compiler, or no `jsconfig.json`), or
+`unchecked`; only `failed` fails a command. At most 50 errors are listed and
+the rest are counted.
 
 The compiler is the project's `node_modules/.bin/tsc`, otherwise a `tsc` on
 `PATH`; Rahti never downloads it. Without one the check is skipped and the
@@ -92,8 +96,10 @@ Fields:
 - `kind`: `browser`;
 - `receivedAtMs`: server receipt time;
 - `boot`: development server process identifier;
-- `level`: `warn`, `error`, `uncaught`, `unhandledrejection`, or
-  `resource-error`;
+- `level`: `warn`, `error`, `uncaught`, `unhandledrejection`,
+  `resource-error`, or `load` — one `load` record, message `page loaded`, per
+  full page load, which is evidence for `cargo rahti status` and not a
+  problem;
 - `message`: safely serialized console arguments or error reason;
 - `stack`: browser stack when available;
 - `url`: document URL;
@@ -125,8 +131,17 @@ Example:
 
 `target` identifies the framework subsystem, such as `page`, `page-panic`,
 `rpc`, `rpc-contract`, `rpc-panic`, `rpc-upload`, `rpc-stream`, `socket`, `upload-config`,
-`csrf`, `jobs`, or `schedule`. An expected refusal — any 4xx an rpc or socket
+`csrf`, `auth`, `authorization`, `page-cache`, `jobs`, or `schedule`. An expected refusal — any 4xx an rpc or socket
 returns on purpose — is `warn`; `error` is reserved for failures.
+
+## Session Record
+
+The first line of the file is the session header the server writes when it
+truncates the log:
+
+```json
+{"kind":"session","receivedAtMs":1785300000000,"boot":"...","message":"Rahti development diagnostics started"}
+```
 
 ## Limits and Failure Behavior
 

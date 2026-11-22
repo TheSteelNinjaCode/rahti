@@ -75,10 +75,12 @@ use quote::quote;
 ///   the `#[component]` function of that name. Props are its parameters,
 ///   written as literals or `@{expr}`; the children between the tags become
 ///   its `children` argument, and a self-closing tag passes none.
-/// - `<>…</>` — a fragment: several sibling roots for one block, rendered
-///   behind a wrapper element whose `display: contents` keeps it out of the
-///   layout. Allowed as a block's root and as the root of a component tag's
-///   children; inside an element, siblings need no wrapper.
+/// - `<>…</>` — a fragment: several sibling roots for one block, written
+///   between a comment pair, `<!--pp:name-->…<!--/pp-->`, whose open marker
+///   carries the block's name. No wrapper element is rendered, so the
+///   siblings are direct children of their parent. Allowed as a block's root
+///   and as the root of a component tag's children; inside an element,
+///   siblings need no wrapper.
 /// - `<script>` and `<style>` hold text, not markup: each body is one raw
 ///   string, always `r##"…"##`, emitted as written — no escaping, and no `{…}`, which in
 ///   JavaScript is a block and in CSS is a rule. `@{expr}` inside `<script>`
@@ -376,13 +378,13 @@ fn stamp(mut parsed: Parsed, file: &str) -> Vec<Op> {
     // The scope children between component tags read is the block they were
     // written in — the page named after the file, or the `#[component]`
     // function whose name was handed down. That is the id an owner wrap
-    // carries; static child blocks are still named by the file alone.
+    // carries, and the name a `#[component]`'s scripted or fragment-rooted
+    // child blocks take; static child blocks are named by the file alone.
     let owner_id = parsed.forced_component.clone().or_else(|| file_id.clone());
 
-    // Children written between component tags are their own blocks, named
-    // the way an inline `html! { … }` child argument is: by the file alone.
-    // That keeps the two spellings byte-identical — and it is independent of
-    // how this block itself is named, so it happens before any early return.
+    // Children written between component tags are their own blocks. Naming
+    // them is independent of how this block itself is named, so it happens
+    // before any early return.
     stamp_component_children(&mut parsed.ops, file_id.as_deref(), owner_id.as_deref());
 
     // A document's slot always lands in a deferred `<template pp-component>`
@@ -491,8 +493,9 @@ fn wrap_slot(mut ops: Vec<Op>, slot_at: Option<usize>, id: &str) -> Vec<Op> {
 ///   is a reactive block of its own wherever it lands, so a single root gets
 ///   `pp-component`, exactly where a separate `html! { … }` child block
 ///   would have carried it.
-/// - **Static children** — no bindings at all. Served inline as before,
-///   visible without JavaScript, with a single root named for form's sake.
+/// - **Static children** — no bindings at all. Served inline, visible
+///   without JavaScript; in a convention file a single root is named after
+///   the file.
 ///
 /// A fragment-rooted child block is named like any block even when it carries
 /// bindings: its comment markers are what the runtime raises into a
@@ -522,7 +525,17 @@ fn stamp_component_children(ops: &mut [Op], file_id: Option<&str>, owner_id: Opt
             }
         }
 
-        let (Some(id), Some(slot)) = (file_id, child.component_slot) else {
+        // A convention file names every child block after itself. A
+        // `#[component]` has no file name, so a child that is a block of its
+        // own there — it carries a `<script>`, or its fragment markers are
+        // what the runtime raises into a boundary — takes the function's
+        // name; static children need none and stay as written.
+        let id = match file_id {
+            Some(id) => Some(id),
+            None if child.has_script || is_fragment => owner_id,
+            None => None,
+        };
+        let (Some(id), Some(slot)) = (id, child.component_slot) else {
             continue;
         };
         write_name(&mut child.ops, slot, id, child.root_owns_events);
@@ -795,13 +808,18 @@ fn register(
                 parse::ClientKind::Handler => "this handler",
                 parse::ClientKind::Script => "this script",
             };
-            parse::Error {
-                span: source.span,
-                msg: format!(
+            let msg = if error.message == rahti_js::TOP_LEVEL_AWAIT {
+                format!("rahti: {error}")
+            } else {
+                format!(
                     "rahti: {what} is not JavaScript the browser can run: {error}.\n  Client \
                      code is compiled into the page ahead of time; write a literal brace as \
                      `&#123;`."
-                ),
+                )
+            };
+            parse::Error {
+                span: source.span,
+                msg,
             }
             .to_compile_error()
         })?;

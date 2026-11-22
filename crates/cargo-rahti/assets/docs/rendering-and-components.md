@@ -39,7 +39,8 @@ dialects stand out from the HTML:
 | `{javascript_expression}` | PulsePoint | browser render |
 
 - **Text** is a quoted string, `<p>"Hello"</p>`, written to the page as it is
-  — apostrophes, `#` and any punctuation included. Several pieces sit side by
+  — apostrophes, `#` and any punctuation included. Write every piece of text
+  quoted. Several pieces sit side by
   side: `"Clicked "{count}" times"`. Whitespace between tokens is never text,
   so a space that belongs on the page goes inside the quotes. Write a literal
   `<` as `&lt;` and a literal brace as `&#123;`/`&#125;`.
@@ -73,7 +74,12 @@ readable, and every error — `html!`'s own or rustc's — is reported on the
 token that caused it.
 
 The two dialects also print differently. `@{…}` renders a Rust value through
-`Display`, so `false` renders `false`. `{…}` serializes its result the way
+`Render`, so `false` renders `false`. `Render` is implemented for `Html`,
+`&str`, `String`, `char`, `bool`, the integer and float types, a reference to
+any of them, and an `Option` of any of them. Any other type — a `Uuid`, a
+date, a `Cow<str>` — is an unsatisfied `Render` bound at the `@{…}`:
+interpolate `@{value.to_string()}`, or format the value in Rust above the
+template. `{…}` serializes its result the way
 React serializes a JSX child, so a `bool` or an `Option::None` seeded into the
 browser renders as *nothing at all* — a correct value with no visible output.
 The complete table, including the attribute rules, is under "Value Rendering"
@@ -94,7 +100,9 @@ Attribute forms:
 
 A PulsePoint binding is a braced expression; a server value is `@{…}`.
 Rahti quotes dynamic attributes in emitted HTML, and client
-expressions remain present for PulsePoint.
+expressions remain present for PulsePoint. A bare `true`, `false` or
+negative number is not an attribute value — `disabled=true` is a compile
+error: write `disabled=@{true}`, or the bare attribute `disabled`.
 
 An attribute name is written as it appears in markup: letters, digits, `-`,
 and `:` for a namespace prefix — `data-user-id`, `aria-label`, `xlink:href`,
@@ -173,7 +181,11 @@ included: a spread value is data and never opens a client expression. A name
 markup cannot carry is dropped and reported through `debug_assert!` —
 development says so, and a release build serves the page without that one
 attribute. `pp-component` is the client runtime's and a spread never writes
-it.
+it. A native handler name is refused the same way: a spread never writes
+`onclick`, or any other `on…`, from a string value, because the runtime
+would run it as JavaScript — a caller's handler travels in `bindings`. A
+handler that `@{..bindings}` brings onto a root element that writes an
+`on…={…}` of its own is dropped too; see "Events" in `pulsepoint.md`.
 
 A spread is for elements. A component takes typed props, so a component that
 forwards attributes declares one — `attrs: Attrs` — and the caller passes it
@@ -205,7 +217,9 @@ HTML attributes do: `<Button aria-pressed={selected} data-state={state}
 pp-ref={button}>"Select"</Button>`. These names are entries in `Bindings`,
 not Rust parameter names. A static or server-interpolated attribute still
 uses the component's explicit `attrs` prop; ordinary typed props remain
-Rust identifiers. Unsupported directives are refused on component tags too.
+Rust identifiers. A `{…}` prop whose name is a Rust keyword is the entry
+under its HTML name: `<Label for={fieldId} />` arrives as the `for` binding.
+Unsupported directives are refused on component tags too.
 
 Each binding keeps its authored expression. A native handler (`onclick`)
 travels in inert compiler-owned `pp-on*` metadata, which PulsePoint removes
@@ -227,6 +241,10 @@ let attrs = Attrs::new().set("title", "{not code}"); // data: braces escaped
 let merged = own.merge(&caller);                     // last-wins
 let aria = caller.only(|name| name.starts_with("aria-"));
 ```
+
+`attrs.get("class")` and `attrs.names()` read what a caller's set carries
+before a component adds to it; `bindings.is_empty()` and `bindings.iter()`
+do the same for a tag's client props.
 
 `<script>` and `<style>` bodies are raw text. Browser JavaScript/CSS braces
 remain literal. `@{...}` is supported inside `<script>`; it is not lifted
@@ -360,7 +378,31 @@ A prop value is a Rust expression: a literal as written (`title="Profile"`,
 shorthand — `<Card wide>` passes `wide: true`. A client `{…}` on a component
 tag is not a typed prop: it arrives in the component's `bindings: Bindings`
 parameter (see "Client Props"), and is a compile error — no field
-`bindings` — on a component that declares none.
+`bindings` — on a component that declares none. A value written without
+`@{…}` is one literal token, a string or an unsigned number: `wide=false`
+and `offset=-3` are compile errors, written `wide=@{false}` and
+`offset=@{-3}`.
+
+A prop is written on the tag as HTML writes it, also when its name is a Rust
+keyword: `<Input type="number" />`, `<Label for="email" />`. The raw
+identifier belongs only in the component's declaration and body —
+`r#type: &str` and `@{r#type}` — and never on the tag, where `html!`
+refuses `r#type="number"` with the HTML spelling to write:
+
+```rust
+use crate::rahti::{Html, component, html};
+
+#[component]
+pub fn Input(r#type: &str, name: &str) -> Html {
+    html! {
+        <input type=@{r#type} name=@{name} />
+    }
+}
+```
+
+```rust
+<Input type="number" name="quantity" />
+```
 
 The tag form is compile-time sugar over the function call. `Card` is still an
 ordinary function, and the call form is what expression contexts use — a
@@ -373,6 +415,10 @@ loop, a condition, a `map`:
 An omitted prop takes its type's `Default` — `""`, `false`, `0`, `None`,
 `Html::empty()` — so a forgotten prop compiles and renders that default; a
 prop whose type has no `Default` is an unsatisfied trait bound at the tag.
+That bound covers every prop of the component, passed or omitted: a
+component with a parameter such as `&User`, `&Vec<T>` or `impl Fn` cannot be
+called as a tag. Declare the prop as an `Option` — `user: Option<&User>`,
+passed as `user=@{Some(&user)}` — or call the component with the call form.
 The other prop mistakes fail with rustc's ordinary struct-literal errors: an
 unknown one is "no field named", a doubled one is "specified more than once". Behind the tag, `#[component]` generates a hidden
 props struct sharing the function's name; the one `use` that imports the
@@ -387,8 +433,8 @@ Rules:
 - return `Html`;
 - end branches/returns in the `html!` value being returned;
 - take props as normal typed Rust arguments;
-- keep one root — a literal element, or a single component tag (see
-  Composition below);
+- keep one root — a literal element, a single component tag (see
+  Composition below), or a `<>…</>` fragment (see Fragments below);
 - write client `{…}` bindings inside the root, not on it: root attributes
   are evaluated in the caller's scope, so `html!` refuses a component's own
   `{…}` on its root (handlers excepted — see "Events" in `pulsepoint.md`);
@@ -568,8 +614,7 @@ serialization the children take is decided per child block:
   single root is stamped `pp-component` — the same block a separate
   `html! { … }` child argument is — and its bindings resolve against state
   it declares itself, never the caller's.
-- **Static children** are served inline, visible without JavaScript, with a
-  single root stamped as before.
+- **Static children** are served inline, visible without JavaScript.
 
 Two shapes stay in the component's scope: children rooted in `<>…</>`
 keep the fragment's own-block stamping even when they carry bindings, and
@@ -599,5 +644,7 @@ One file may export several components. A nested file is reached through its
 full generated module path.
 
 Components live in `src/components/`. That is the only directory the build
-scans for them, and it is the only directory Tailwind is pointed at besides
-the app directory — a component written anywhere else is styled by nothing.
+generates module files for. The scaffold's `globals.css` points Tailwind at
+all of `src/`, so the classes of any Rust file under it are compiled; a
+component imported from another crate is styled only when `globals.css`
+names that crate's source in an `@source` line of its own.

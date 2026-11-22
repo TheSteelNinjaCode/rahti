@@ -352,6 +352,42 @@ fn component_children_outside_the_app_directory_are_left_alone() {
     assert!(!out.contains("pp-component"), "{out}");
 }
 
+/// A `#[component]` has no file name, but its function has one: a child
+/// block that is a block of its own — scripted, or fragment-rooted — takes
+/// it, so it is a boundary wherever the receiving component puts it.
+#[test]
+fn a_components_scripted_and_fragment_children_take_its_name() {
+    let scripted = markup(
+        r###"@component frame_1 <main><Card><section><p>{n}</p><script>r##"const [n] = pp.state(1);"##</script></section></Card></main>"###,
+        "src/components/frame.rs",
+    );
+    assert_eq!(
+        scripted.matches("pp-component=\"frame_1\"").count(),
+        2,
+        "the root and the scripted child: {scripted}"
+    );
+
+    let fragment = markup(
+        r#"@component frame_1 <main><Card><><b>"a"</b><i>"b"</i></></Card></main>"#,
+        "src/components/frame.rs",
+    );
+    assert!(fragment.contains("<!--pp:frame_1-->"), "{fragment}");
+
+    // Static children are markup, not a block: nothing to name.
+    let fixed = markup(
+        r#"@component frame_1 <main><Card><p>"hi"</p></Card></main>"#,
+        "src/components/frame.rs",
+    );
+    assert_eq!(fixed.matches("pp-component").count(), 1, "{fixed}");
+
+    // Children that read the writer's state stay owner-scoped.
+    let owned = markup(
+        r###"@component frame_1 <main><Card><p>{n}</p></Card><script>r##"const [n] = pp.state(1);"##</script></main>"###,
+        "src/components/frame.rs",
+    );
+    assert!(owned.contains("<template pp-owner=\"frame_1\">"), "{owned}");
+}
+
 /// Several roots match the `Html::concat` shape, which never carried a name.
 #[test]
 fn multi_rooted_children_are_not_stamped() {
@@ -839,4 +875,48 @@ fn a_question_about_a_server_value_wraps_that_value() {
         }
         .to_string()
     );
+}
+
+/// What `register` answers for a block's client code: the tokens it emits,
+/// as text, whether they register the code or refuse it.
+fn registered(src: &str) -> String {
+    let tokens = template(src, "src/app/page.rs", None).unwrap_or_else(|msg| panic!("{msg}"));
+    let parsed = parse::parse(tokens).unwrap_or_else(|e| panic!("{}", e.msg));
+    match register(&parsed.client_code, None) {
+        Ok(tokens) | Err(tokens) => tokens.to_string(),
+    }
+}
+
+/// A component script runs on every render and cannot wait, so `await` at
+/// its top level is refused with the form to write.
+#[test]
+fn a_script_awaiting_at_its_top_level_is_refused_with_the_fix() {
+    let out = registered(
+        r###"<section><script>r##"const rows = await pp.rpc("rows", {});"##</script></section>"###,
+    );
+    assert!(out.contains("compile_error"), "{out}");
+    assert!(
+        out.contains("`await` at its top level is not allowed"),
+        "{out}"
+    );
+    assert!(out.contains("call that from an effect"), "{out}");
+    assert!(
+        !out.contains("is not JavaScript the browser can run"),
+        "{out}"
+    );
+}
+
+/// The same call inside an async function, started from an effect, is the
+/// ordinary way to load data and registers as any script does.
+#[test]
+fn a_script_awaiting_inside_a_function_is_registered() {
+    let out = registered(
+        r###"<section><script>r##"
+            const [rows, setRows] = pp.state([]);
+            async function load() { setRows(await pp.rpc("rows", {})); }
+            pp.effect(() => { load(); }, []);
+        "##</script></section>"###,
+    );
+    assert!(!out.contains("compile_error"), "{out}");
+    assert!(out.contains("ClientCode"), "{out}");
 }

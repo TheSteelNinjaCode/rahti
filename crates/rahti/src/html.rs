@@ -380,10 +380,9 @@ pub struct Json<T: serde::Serialize>(pub T);
 impl<T: serde::Serialize> RenderJs for Json<T> {
     fn render_js_into(&self, out: &mut String) {
         let body = serde_json::to_string(&self.0).expect(
-            "Rahti: `serde_json::to_string` failed on a `Json` interpoland. `NaN` and \
-             `Infinity` are not representable in JSON — either drop the field, branch to \
-             `None` on it, or interpolate the bare value through its own `RenderJs` impl \
-             (it accepts them as JS literals).",
+            "Rahti: `serde_json::to_string` failed on a `Json` interpoland. Its \
+             `Serialize` impl returned an error, or a map in it has a key that is not a \
+             string. `NaN` and the infinities are not the cause: they are written as `null`.",
         );
         out.push_str(&neutralise_script_breakouts(&body));
     }

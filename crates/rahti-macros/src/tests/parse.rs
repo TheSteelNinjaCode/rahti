@@ -1775,3 +1775,74 @@ fn inert_event_metadata_is_generated_instead_of_authored() {
     );
     parse_ok(r#"<button onclick={save()}>"Save"</button>"#);
 }
+
+/// A tag writes a prop as HTML does. `r#type` is Rust's spelling of the
+/// parameter, and belongs to the component's declaration.
+#[test]
+fn a_raw_identifier_prop_is_refused_with_the_html_spelling() {
+    for (src, plain) in [
+        (r##"<div><Input r#type="number" /></div>"##, "type"),
+        (r##"<div><Label r#for=@{id} /></div>"##, "for"),
+        (r##"<div><Card r#title="x" /></div>"##, "title"),
+    ] {
+        let msg = error(src);
+        assert!(msg.contains("is Rust's spelling"), "{src}: {msg}");
+        assert!(
+            msg.contains(&format!("Write `{plain}=\"…\"`")),
+            "{src}: {msg}"
+        );
+    }
+    parse_ok(r#"<div><Input type="number" for=@{id} title="x" /></div>"#);
+}
+
+/// A JSX name is refused on a component tag as on an element, with the name
+/// to write.
+#[test]
+fn a_jsx_name_on_a_component_tag_is_refused() {
+    for (src, write) in [
+        (r#"<div><Card onClick={save()} /></div>"#, "write `onclick`"),
+        (r#"<div><Card className="wide" /></div>"#, "write `class`"),
+        (r#"<div><Label htmlFor="email" /></div>"#, "write `for`"),
+        (
+            r#"<div><Input defaultValue={name} /></div>"#,
+            "write `defaultvalue`",
+        ),
+    ] {
+        let msg = error(src);
+        assert!(msg.contains("is JSX"), "{src}: {msg}");
+        assert!(msg.contains(write), "{src}: {msg}");
+    }
+    // A camelCase callback is named with the kebab-case prop to write.
+    let msg = error(r#"<div><Card onRowPick={pick} /></div>"#);
+    assert!(msg.contains("`on-row-pick={…}`"), "{msg}");
+    assert!(msg.contains("pp.props.onRowPick"), "{msg}");
+    // The names a component tag is written with every day.
+    parse_ok(
+        r#"<div><Card class="wide" title="x" onclick={save()} on-pick={pick} online-now={on} wide /></div>"#,
+    );
+}
+
+/// A server value on a component tag fills a typed Rust parameter, whatever
+/// the parameter is called: `online=@{…}` is a `bool` prop named `online`,
+/// not a handler. The element the component renders is where a server value
+/// as a handler is refused.
+#[test]
+fn a_server_value_prop_may_start_with_on() {
+    let parsed = parse_ok(
+        r#"<div><Card title=@{title} online=@{online} once=@{once} onclick={save()} /></div>"#,
+    );
+    let Some(Op::Component(call)) = parsed.ops.iter().find(|op| matches!(op, Op::Component(_)))
+    else {
+        panic!("expected a component op");
+    };
+    let names: Vec<String> = call.props.iter().map(|(p, _)| p.to_string()).collect();
+    assert_eq!(names, ["title", "online", "once"]);
+    assert_eq!(
+        call.bindings,
+        [("onclick".to_string(), "save()".to_string())]
+    );
+
+    // On an element the same spelling is a handler, and is refused.
+    let msg = error(r#"<div><button onclick=@{handler}>"x"</button></div>"#);
+    assert!(msg.contains("onclick"), "{msg}");
+}

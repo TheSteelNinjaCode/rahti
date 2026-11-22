@@ -2,7 +2,8 @@
 
 SPA navigation, scroll restoration, loading regions and `pp.redirect`.
 Rahti stays the URL and response authority: PulsePoint fetches the next
-document from the server and morphs it in. Never add a second client router.
+document from the server and replaces the page's body with it. Never add a
+second client router.
 
 ## Links
 
@@ -12,13 +13,26 @@ document from the server and morphs it in. Never add a second client router.
 - `<a pp-spa="false">` makes that one link a normal browser navigation.
 - External links, downloads, `target="_blank"` and modifier-key clicks are
   never intercepted.
-- A navigation fetches the next document, swaps the body under the root
-  layout, morphs owned DOM in place, keeps component identity where it can,
-  and manages focus, history and redirects.
+- A navigation fetches the next document, replaces the whole `<body>` with
+  the new one, and updates the title and the history entry. The window and
+  everything a module script put on it stay. A redirect the server answers
+  with is followed inside the same navigation; a response from a different
+  root layout is loaded with a normal browser navigation instead.
+- Every component on the page is unmounted — effect cleanups run — and the
+  new document's components mount fresh. Component state does not carry
+  across a navigation, including the state of a component in a layout both
+  pages share. A value that must outlive a navigation lives in the URL, on
+  the server, or in a store module (see "Splitting a Large Page" in
+  `pulsepoint-performance.md`).
 - The runtime dispatches `pp:navigation:start`, `pp:navigation:complete` and
-  `pp:navigation:error` on `document`. `public/js/main.js` listens for
+  `pp:navigation:error` on `document`, each with the target in
+  `event.detail.url`. `public/js/main.js` listens for
   `pp:navigation:complete` to carry the page's managed `<head>` metadata
   across; application code rarely needs these events.
+- A navigation that fails — a response outside 2xx, a network error, or no
+  response within 15 seconds — dispatches
+  `pp:navigation:error`, with the failure in `event.detail.error`, and then
+  loads the target with a normal browser navigation.
 
 ## `pp.redirect(url)`
 
@@ -46,7 +60,8 @@ cross-origin or invalid redirect target is ignored.
 While a navigation is in flight the runtime replaces the first element in the
 document marked `pp-loading-content="true"` — or the whole `<body>` when
 nothing is marked — with the markup of the nearest loading region, then
-restores it from the response. Marking a section layout's content pane rather
+restores it from the response. Everything outside that element stays on
+screen as it is, state included, until the response replaces the body. Marking a section layout's content pane rather
 than a root layout's slot keeps the chrome around it on screen for the wait.
 The regions come from the application's `loading.rs` files; Rahti renders
 them once and writes them into every document inside a hidden container, so
@@ -58,9 +73,10 @@ starts, which is the page being left. Ownership, the literal-path walk, the
 build-time refusal of a region under a dynamic segment, and the transition
 JSON are all in "Loading Regions" in `routing.md`.
 
-Defining any `loading.rs` replaces the View Transitions path with the loading
-region. An application with no `loading.rs` writes no container and uses view
-transitions.
+An application with no `loading.rs` writes no container. A navigation then
+leaves the current page on screen, unchanged, until the response arrives and
+replaces the body. The same holds when no loading region covers the path
+being left.
 
 A wait inside a page — an rpc, a submit, a filter, an upload — is the owning
 component's state (`pp.state`, or `pp.transition()`), never a loading region.

@@ -118,21 +118,30 @@ pub async fn page() -> Html {
 }
 ```
 
+Write it as `pub fn cache() -> PageCache`, importing `PageCache` by name. A
+module-level `cache` function that is `pub` or returns a `PageCache` in
+another form — `-> cache::PageCache`, `pub async fn cache`, a private one —
+is a build error that names this spelling. A signature rustfmt breaks across
+lines is read the same. The export in any convention file other than
+`page.rs` is a build error.
+
 Use `PageCache::new(Duration)` for another duration. Every page policy has a
 finite lifetime so entries made unreachable by revalidation are eventually
 removed by the backend. Omitting `cache()` disables page caching. A zero
-lifetime is a startup error rather than another spelling of disabled caching.
+lifetime panics when the generated router is built, as does an empty tag,
+rather than being another spelling of disabled caching.
 
 Rahti stores the response only when all of these conditions hold:
 
 - the request is an anonymous `GET`;
 - it has no `Authorization` or `Range` header and does not request cache
-  bypass with `Cache-Control` or `Pragma`;
-- the response is a successful Rahti HTML page, is at most 4 MiB, and sets no
-  cookie;
-- the response is not compressed, partial, private, or marked `no-store` or
-  `no-cache`, and does not vary on a request header other than
-  `Accept-Encoding`.
+  bypass with `Cache-Control` (`no-cache`, `no-store`, `max-age=0`) or
+  `Pragma: no-cache`;
+- the response is a `200 OK` Rahti HTML page with a known body size of at
+  most 4 MiB, and sets no cookie;
+- the response is not compressed, partial, private, or marked `no-store`,
+  `no-cache`, or `max-age=0`, and does not vary on a request header other
+  than `Accept-Encoding`.
 
 Authenticated sessions always bypass the page cache. Redirects, errors,
 RPCs, API `route.rs` responses, streams, and uploads are never page-cached.
@@ -145,15 +154,21 @@ contain arbitrary cookies, locale headers, or application-defined request
 state. A page that varies on any of those values must not export `cache()`.
 
 Localized cacheable pages use explicit locale-prefixed URLs, so the complete
-path separates `/en/products` from `/es/products`. An unprefixed i18n request
-whose locale came from `Accept-Language` bypasses page caching; redirect it to
-the explicit locale URL first. See `localization.md`.
+path separates `/en/products` from `/es/products`. In a localized application
+every request on a route without a root locale segment bypasses page caching,
+whether or not it sent `Accept-Language`; redirect it to the explicit locale
+URL first. See `localization.md`.
 
 `X-Rahti-Cache` reports `MISS` when Rahti rendered a page because no entry
 existed, `HIT`
 when it reused one, and `BYPASS` when a declared cache policy was unsafe or
 unavailable for that request or response. A `HEAD` request can reuse an
 existing `GET` entry without sending its body; a `HEAD` miss is not stored.
+Development mode and static export send no `X-Rahti-Cache` header at all.
+
+Cached pages and revalidation tokens live in the installed store beside
+application data. `cache::configure` therefore moves them, and
+`cache::clear()` drops every cached page.
 
 ## Page Revalidation
 
@@ -172,7 +187,8 @@ cache::revalidate_tag("catalog").await?;
 ```
 
 `revalidate_path` takes a concrete URL path beginning with `/`, without a
-query or fragment. It does not accept a route pattern. Tags are application
+query or fragment. It does not accept a route pattern, and it invalidates that
+path on every host. Tags are application
 defined, non-empty strings. Keep them stable and use one vocabulary for page
 policies and mutations.
 

@@ -916,11 +916,21 @@ pub async fn csrf(req: Request, next: Next) -> Response {
 
     // `SameSite=Lax` still sends the cookie on the top-level navigation that
     // renders the page, which is when the client needs to read it.
-    let cookie = format!("{name}={token}; Path=/; SameSite=Lax");
+    let cookie = csrf_cookie_line(&name, &token, !super::dev::enabled());
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         res.headers_mut().append(header::SET_COOKIE, value);
     }
     res
+}
+
+/// The token cookie. Readable by script on purpose, and `Secure` outside
+/// development under the same condition as the session cookie.
+fn csrf_cookie_line(name: &str, token: &str, secure: bool) -> String {
+    let mut line = format!("{name}={token}; Path=/; SameSite=Lax");
+    if secure {
+        line.push_str("; Secure");
+    }
+    line
 }
 
 /// Refuse a call whose header and cookie do not agree.

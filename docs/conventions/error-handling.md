@@ -71,7 +71,10 @@ request id is a correlation reference, not authentication or a database id.
 The boundary replaces the failed subtree. Layouts below it are skipped;
 layouts above it still wrap the result. A rendered boundary removes the
 internal failure marker, so an outer boundary does not render the same failure
-again. RPC responses never pass through page boundaries.
+again. RPC responses never pass through page boundaries. A handler that
+returns a bare 5xx response without `Error` is rendered by the nearest
+boundary too, with the status's canonical reason as the message; a bare 4xx
+response passes through unchanged.
 
 If no boundary owns a failed page, or an unwrapped `route.rs` returns
 `Error`, Rahti responds with `application/problem+json`:
@@ -106,7 +109,8 @@ The status is preserved. `requestId` is optional and `error` remains the field
 the browser runtime reads. `Error::with_details(...)` adds explicitly public
 structured RPC context. Object fields are merged beside `error`, except that
 neither `error` nor `requestId` can be overwritten. A non-object value is put
-under `details`.
+under `details`. Details reach the RPC wire only: a page boundary, a Problem
+Details response, and a socket error frame carry the message without them.
 
 The browser receives a PulsePoint `RpcError`: `message` contains `error`,
 `status` contains the HTTP status, `errors` contains the validation field map
@@ -120,10 +124,11 @@ production failures suppress them. Do not put a credential, raw session,
 password material, token, connection string, or unapproved personal data in
 public details.
 
-Malformed RPC envelopes and mistyped arguments remain HTTP 400. Validation
-failures remain HTTP 422 with their field map. Authentication, authorization,
-CSRF, rate-limit, and upload refusals keep their established RPC response
-contracts.
+Malformed RPC envelopes and mistyped arguments are HTTP 400. Validation
+failures are HTTP 422 with their field map. Authentication, authorization,
+CSRF, rate-limit, and upload refusals are described in `authentication.md`,
+`authorization.md`, `security.md`, `rate-limiting.md`, and
+`rpc-and-uploads.md`.
 
 ## Panics
 
@@ -149,8 +154,9 @@ diagnostic path. Expected 4xx failures use `warn`; 5xx failures and panics use
 the structured observability event stream and automatically includes the
 current request id.
 
-All framework-built Error and RPC error responses set
-`Cache-Control: no-store`. The development revalidation layer respects that
+Framework error responses set `Cache-Control: no-store`: every response built
+from a `rahti::Error`, every RPC error response, a `ValidationErrors` returned
+from a `route.rs` handler, and a rate-limit 429. The development revalidation layer respects that
 explicit policy. Page caching stores successful anonymous documents only and
 never stores a failed response.
 
@@ -163,7 +169,8 @@ or query secrets in either one.
 
 Production redaction is active whenever Rahti development mode is off. A debug
 build defaults development mode on and a release build defaults it off;
-`RAHTI_DEV` can override that choice. Never enable development mode on a public
+`RAHTI_DEV` overrides that choice: `1`, `true`, `on`, or `yes` turns it on,
+and any other value turns it off. Never enable development mode on a public
 deployment: it also enables development diagnostics and intentionally detailed
 error messages.
 

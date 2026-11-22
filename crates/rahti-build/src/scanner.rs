@@ -126,9 +126,19 @@ pub fn scan(app_dir: &Path) -> Scan {
             .map(|socket| socket.name.clone())
             .collect();
         let sockets = sockets.into_iter().map(|socket| socket.name).collect();
-        let metadata = declares_metadata(&file);
-        let static_paths = declares_static_paths(&file);
-        let page_cache = declares_page_cache(&file);
+        let source = fs::read_to_string(&file).unwrap_or_default();
+        let metadata = exports(&file, &source, &METADATA);
+        let static_paths = exports(&file, &source, &STATIC_PATHS);
+        let page_cache = exports(&file, &source, &PAGE_CACHE);
+        if metadata && matches!(kind, Kind::Route | Kind::Error | Kind::Loading) {
+            panic!(
+                "rahti: {file} exports `metadata()`, but a `{}` has no document head \
+                 to put it in.\n  \
+                 Move `pub fn metadata() -> Metadata` into the `page.rs` or \
+                 `layout.rs` that owns the document.",
+                kind.label()
+            );
+        }
         if static_paths && (kind != Kind::Page || !urls.iter().any(|url| url.contains('{'))) {
             panic!(
                 "rahti: {file} exports `static_paths()`, but it is not a dynamic page.\n  \
@@ -237,14 +247,39 @@ fn walk(
 ///
 /// A text scan rather than a real parse: enough to wire the router, and a
 /// wrong guess surfaces as an ordinary rustc error against the real file.
+/// Only a `pub` function is a handler — the generated router calls it from
+/// another module — so a private helper that happens to be named `get` is
+/// left alone.
 fn exported_methods(file: &str) -> Vec<String> {
     let src = fs::read_to_string(file).unwrap_or_default();
-    let found: Vec<String> = METHODS
-        .iter()
-        .filter(|m| src.contains(&format!("fn {m}(")) || src.contains(&format!("fn {m}<")))
-        .map(|m| m.to_string())
-        .collect();
+    let mut found = Vec::new();
+    let mut private = Vec::new();
+    for method in METHODS {
+        let declared = declarations(&src, method);
+        if declared.iter().any(Declaration::is_public) {
+            found.push(method.to_string());
+        } else if declared.iter().any(|declaration| declaration.top_level) {
+            private.push(method);
+        }
+    }
 
+    if found.is_empty() && !private.is_empty() {
+        let named = |prefix: &str, suffix: &str| {
+            private
+                .iter()
+                .map(|method| format!("`{prefix}fn {method}{suffix}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        panic!(
+            "rahti: {file} exports no handlers: {} {} not `pub`.\n  \
+             The generated router calls a handler from another module. Write \
+             {}.",
+            named("", ""),
+            if private.len() == 1 { "is" } else { "are" },
+            named("pub async ", "(")
+        );
+    }
     if found.is_empty() {
         panic!(
             "rahti: {file} exports no handlers.\n  \
@@ -400,42 +435,271 @@ fn declares_root(file: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether a convention file supplies static metadata.
+/// One `fn name` found by the text scan.
+struct Declaration {
+    /// What stands between the previous item and `fn`, single-spaced:
+    /// `pub async`, `pub(crate)`, or nothing.
+    qualifiers: String,
+    /// The parameter list, whitespace removed.
+    params: String,
+    /// What stands between the parameter list and the body, single-spaced:
+    /// `-> PageCache`.
+    returns: String,
+    /// The item starts in column 0, which is where rustfmt puts a function
+    /// that belongs to the module rather than to an `impl` or a nested `mod`.
+    top_level: bool,
+}
+
+impl Declaration {
+    fn is_public(&self) -> bool {
+        self.qualifiers
+            .split(' ')
+            .next()
+            .is_some_and(|first| first.starts_with("pub"))
+    }
+
+    /// The declaration as the author wrote it, for a message.
+    fn written(&self, name: &str) -> String {
+        let mut out = String::new();
+        if !self.qualifiers.is_empty() {
+            out.push_str(&self.qualifiers);
+            out.push(' ');
+        }
+        out.push_str(&format!("fn {name}({})", self.params));
+        if !self.returns.is_empty() {
+            out.push(' ');
+            out.push_str(&self.returns);
+        }
+        out
+    }
+}
+
+/// Every function named `name` a file declares.
 ///
-/// This remains a deliberately small text scan: generated code calls the
-/// real Rust function, so its return type and visibility are still checked by
-/// rustc. Comment lines are ignored so documentation examples do not wire a
-/// function that is not there.
-fn declares_metadata(file: &str) -> bool {
-    fs::read_to_string(file)
-        .map(|src| {
-            src.lines()
-                .filter(|line| !line.trim_start().starts_with("//"))
-                .any(|line| line.contains("pub fn metadata("))
+/// Still a text scan, but over the whole source rather than line by line, so
+/// a signature rustfmt broke across lines reads the same as one it did not.
+/// Comment lines are left out: a doc comment showing the function is prose.
+fn declarations(src: &str, name: &str) -> Vec<Declaration> {
+    let code = src
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("//") {
+                ""
+            } else {
+                line
+            }
         })
-        .unwrap_or(false)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let single_spaced = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let mut found = Vec::new();
+    for (at, _) in code.match_indices("fn") {
+        let before = &code[..at];
+        if before
+            .chars()
+            .next_back()
+            .is_some_and(|c| !c.is_whitespace())
+        {
+            continue;
+        }
+        let after = &code[at + 2..];
+        let unspaced = after.trim_start();
+        if unspaced.len() == after.len() {
+            continue;
+        }
+        let Some(rest) = unspaced.strip_prefix(name) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if !(rest.starts_with('(') || rest.starts_with('<')) {
+            continue;
+        }
+
+        // The parameter list, by matching its parentheses, and whatever
+        // stands between it and the body.
+        let mut params = String::new();
+        let mut returns = String::new();
+        if let Some(open) = rest.find('(') {
+            let mut depth = 0usize;
+            let mut close = None;
+            for (offset, ch) in rest[open..].char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = Some(open + offset);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(close) = close {
+                params = rest[open + 1..close]
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                let tail = &rest[close + 1..];
+                let tail = single_spaced(&tail[..tail.find(['{', ';']).unwrap_or(tail.len())]);
+                returns = match tail.find(" where ") {
+                    Some(at) => tail[..at].to_string(),
+                    None => tail,
+                };
+            }
+        }
+
+        // The qualifiers are the keywords standing directly before `fn`,
+        // read backwards one word at a time. Anything else — the end of the
+        // previous item, an attribute, a trailing comment — ends them.
+        let mut qualifiers: Vec<&str> = Vec::new();
+        let mut first = at;
+        let mut end = before.trim_end().len();
+        loop {
+            let head = &before[..end];
+            let start = head
+                .char_indices()
+                .rev()
+                .find(|(_, c)| c.is_whitespace())
+                .map(|(index, c)| index + c.len_utf8())
+                .unwrap_or(0);
+            let word = &head[start..];
+            let qualifier = word == "pub"
+                || word.starts_with("pub(")
+                || matches!(word, "async" | "const" | "unsafe" | "extern" | "default");
+            if !qualifier {
+                break;
+            }
+            qualifiers.push(word);
+            first = start;
+            end = head[..start].trim_end().len();
+        }
+        qualifiers.reverse();
+        found.push(Declaration {
+            qualifiers: qualifiers.join(" "),
+            params,
+            returns,
+            top_level: first == 0 || code.as_bytes()[first - 1] == b'\n',
+        });
+    }
+    found
 }
 
-/// Whether a dynamic page supplies the concrete URLs static export renders.
-fn declares_static_paths(file: &str) -> bool {
-    fs::read_to_string(file)
-        .map(|src| {
-            src.lines()
-                .filter(|line| !line.trim_start().starts_with("//"))
-                .any(|line| line.contains("pub async fn static_paths("))
-        })
-        .unwrap_or(false)
+/// One optional export the generated router calls by name.
+struct Export {
+    name: &'static str,
+    /// The spelling the build reads, as it is named in a refusal.
+    signature: &'static str,
+    accepts: fn(&Declaration) -> bool,
+    /// The return type that marks a private function of this name as an
+    /// attempt at the export. `None` when the name alone says so.
+    marker: Option<&'static str>,
 }
 
-/// Whether a page opts its complete anonymous response into the cache.
-fn declares_page_cache(file: &str) -> bool {
-    fs::read_to_string(file)
-        .map(|src| {
-            src.lines()
-                .filter(|line| !line.trim_start().starts_with("//"))
-                .any(|line| line.contains("pub fn cache() -> PageCache"))
-        })
-        .unwrap_or(false)
+/// `pub fn metadata() -> Metadata`: static metadata for a page, a layout, or
+/// the root `not-found.rs`. Its return type is left to rustc, which checks
+/// the call the generated router makes.
+const METADATA: Export = Export {
+    name: "metadata",
+    signature: "pub fn metadata() -> Metadata",
+    accepts: |declaration| declaration.qualifiers == "pub",
+    marker: Some("Metadata"),
+};
+
+/// `pub async fn static_paths()`: the concrete URLs static export renders
+/// for a dynamic page.
+const STATIC_PATHS: Export = Export {
+    name: "static_paths",
+    signature: "pub async fn static_paths() -> Vec<String>",
+    accepts: |declaration| declaration.qualifiers == "pub async",
+    marker: None,
+};
+
+/// `pub fn cache() -> PageCache`: a page opting its complete anonymous
+/// response into the cache.
+const PAGE_CACHE: Export = Export {
+    name: "cache",
+    signature: "pub fn cache() -> PageCache",
+    accepts: |declaration| {
+        declaration.qualifiers == "pub"
+            && declaration.params.is_empty()
+            && declaration.returns == "-> PageCache"
+    },
+    marker: Some("PageCache"),
+};
+
+/// Whether a convention file supplies `export`.
+///
+/// The generated router calls the real function, so rustc still checks its
+/// types. What rustc cannot report is a function the scan did not recognise:
+/// that one is simply never called, and the page is served without its
+/// metadata, its cache policy or its static paths with nothing to say why. So
+/// a module-level function of the export's name in any other form is refused
+/// here, against the file the author wrote.
+///
+/// A private function of the same name that returns something else is an
+/// ordinary helper and is left alone.
+fn exports(file: &str, src: &str, export: &Export) -> bool {
+    let declared = declarations(src, export.name);
+    if declared.iter().any(export.accepts) {
+        return true;
+    }
+    let attempt = declared.iter().find(|declaration| {
+        declaration.top_level
+            && export.marker.is_none_or(|marker| {
+                declaration.is_public() || declaration.returns.contains(marker)
+            })
+    });
+    if let Some(declaration) = attempt {
+        panic!(
+            "rahti: {file} declares `{}`, which the build does not read as the \
+             `{}` export, so it would never be called.\n  \
+             Write it as `{}`.",
+            declaration.written(export.name),
+            export.name,
+            export.signature
+        );
+    }
+    false
+}
+
+/// Whether every dynamic segment of these URLs is the root locale segment,
+/// which static export expands once per configured locale by itself.
+pub fn locale_only(urls: &[String]) -> bool {
+    urls.iter().all(|url| {
+        let without_locale = url.replace("{locale}", "").replace("{lang}", "");
+        !without_locale.contains('{')
+    }) && urls.iter().any(|url| {
+        url == "/{locale}"
+            || url.starts_with("/{locale}/")
+            || url == "/{lang}"
+            || url.starts_with("/{lang}/")
+    })
+}
+
+/// A locale-only page is expanded for every configured locale, so the
+/// generated router never calls a `static_paths()` it exports. Refused
+/// rather than left to return paths nobody reads.
+///
+/// Apart from [`validate`] because it needs to know whether the project
+/// configured localization, which the scan of `app/` does not.
+pub fn check_static_paths(entries: &[Entry], localized: bool) {
+    if !localized {
+        return;
+    }
+    if let Some(entry) = entries
+        .iter()
+        .find(|entry| entry.kind == Kind::Page && entry.static_paths && locale_only(&entry.urls))
+    {
+        panic!(
+            "rahti: {} exports `static_paths()`, but its only dynamic segment is \
+             the locale, which static export expands for every configured \
+             locale by itself.\n  \
+             Delete `static_paths()` from this page; it would never be called.",
+            entry.file
+        );
+    }
 }
 
 /// A root layout renders its children through `<slot />`, and nothing else.
@@ -572,6 +836,46 @@ fn validate(entries: &[Entry]) {
                  Move the file to a static ancestor — the loading region there \
                  covers every URL below it, dynamic segments included.",
                 entry.file
+            );
+        }
+    }
+
+    // Two regions for one path. The browser takes the first `pp-loading-url`
+    // that matches, so the second would ship in every document and never
+    // show — a route group contributes no segment, which is how two files
+    // come to cover the same path.
+    let mut regions: Vec<(String, &str)> = Vec::new();
+    for entry in entries.iter().filter(|e| e.kind == Kind::Loading) {
+        for url in route::to_urls(&entry.dirs) {
+            if let Some((_, other)) = regions.iter().find(|(u, _)| *u == url) {
+                panic!(
+                    "rahti: two `loading.rs` files cover the same path `{url}`.\n  \
+                     {other}\n  {}\n  \
+                     A route group adds no URL segment, so both answer for \
+                     `{url}` and only one could ever show. Keep one of them.",
+                    entry.file
+                );
+            }
+            regions.push((url, &entry.file));
+        }
+    }
+
+    // The root 404 gets its document, and so its `<head>`, from the layouts
+    // at the app root. With none there is nowhere to write metadata, and the
+    // generated handler would never call the function.
+    if let Some(not_found) = entries
+        .iter()
+        .find(|e| e.kind == Kind::NotFound && e.dirs.is_empty() && e.metadata)
+    {
+        if !entries
+            .iter()
+            .any(|e| e.kind == Kind::Layout && e.dirs.is_empty())
+        {
+            panic!(
+                "rahti: {} exports `metadata()`, but there is no `layout.rs` at \
+                 the app root to give the 404 a document head.\n  \
+                 Add `layout.rs` beside it, or delete `metadata()`.",
+                not_found.file
             );
         }
     }

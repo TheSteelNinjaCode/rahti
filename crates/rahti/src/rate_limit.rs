@@ -120,7 +120,7 @@ impl Default for RateLimit {
             exempt_paths: vec![
                 "/health".to_string(),
                 "/ready".to_string(),
-                "/__rahti/dev".to_string(),
+                "/__rahti".to_string(),
             ],
         }
     }
@@ -421,6 +421,9 @@ fn rejected(outcome: Outcome, rpc: bool) -> Response {
             .unwrap()
     };
     apply_headers(response.headers_mut(), outcome);
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response.headers_mut().insert(
         header::RETRY_AFTER,
         HeaderValue::from_str(&outcome.reset.to_string()).unwrap(),

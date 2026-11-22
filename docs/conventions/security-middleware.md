@@ -54,6 +54,27 @@ require-trusted-types-for 'script'
 trusted-types pulsepoint
 ```
 
+The complete default outside development mode is one header value, its
+directives joined with `; ` and shown here one per line:
+
+```text
+default-src 'self'
+script-src 'self'
+worker-src 'self' blob:
+style-src 'self' 'unsafe-inline' https:
+img-src 'self' data: blob: https:
+media-src 'self' data: blob: https:
+font-src 'self' data: https:
+connect-src 'self' ws: wss: https: blob:
+frame-src 'self' https:
+object-src 'none'
+base-uri 'self'
+form-action 'self'
+frame-ancestors 'self'
+require-trusted-types-for 'script'
+trusted-types pulsepoint
+```
+
 `script-src` is `'self'` and nothing else: no `'unsafe-eval'` and no
 `'unsafe-inline'`. PulsePoint never turns page text into code. Every binding,
 handler and component script is compiled when the application is built and
@@ -88,9 +109,10 @@ permits HTTPS styles, fonts, images, media, frames, and connections, which
 cannot run script in the page. Images and media additionally permit `data:` and
 `blob:` where appropriate, and connections permit `ws:`/`wss:`. Applications
 that know their external dependencies can replace these scheme allowances with
-exact hosts. Keep the locked directives above. In development, loopback HTTP
-connection sources and cleartext media/frames are admitted for local tooling;
-production omits them.
+exact hosts. Keep the locked directives above. In development mode
+`connect-src` additionally admits `http://localhost:*` and
+`http://127.0.0.1:*`, and `img-src`, `media-src` and `frame-src` additionally
+admit `http:`, for local tooling; production omits them.
 
 ## Application configuration
 
@@ -105,9 +127,13 @@ rahti::security::configure(SecurityHeaders {
     content_security_policy: Some(
         "default-src 'self'; \
          script-src 'self' https://js.stripe.com; \
-         style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:; \
-         connect-src 'self' ws: wss:; \
+         worker-src 'self' blob:; \
+         style-src 'self' 'unsafe-inline' https:; \
+         img-src 'self' data: blob: https:; \
+         media-src 'self' data: blob: https:; \
+         font-src 'self' data: https:; \
+         connect-src 'self' ws: wss: https: blob:; \
+         frame-src 'self' https:; \
          object-src 'none'; base-uri 'self'; \
          form-action 'self'; frame-ancestors 'self'; \
          require-trusted-types-for 'script'; trusted-types pulsepoint"
@@ -118,6 +144,11 @@ rahti::security::configure(SecurityHeaders {
     ..SecurityHeaders::default()
 });
 ```
+
+A replacement `content_security_policy` is the whole policy. A fetch directive
+it leaves out is governed by its fallback (`script-src` or `default-src`),
+which is `'self'`, so start from the complete default and change only what
+differs.
 
 Every field is an `Option<String>`; `None` omits that header. A malformed
 header value is rejected during `configure` instead of failing silently while

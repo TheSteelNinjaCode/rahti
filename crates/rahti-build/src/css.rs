@@ -174,7 +174,7 @@ fn on_path() -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
-/// The cache file name. Version-stamped, so changing `version` in rahti.toml
+/// The cache file name. Version-stamped, so changing `version` in rahti.config.json
 /// fetches the new one instead of silently reusing the old.
 fn binary_name(version: &str) -> String {
     format!("tailwindcss-{version}{}", env::consts::EXE_SUFFIX)
@@ -182,7 +182,7 @@ fn binary_name(version: &str) -> String {
 
 /// How Tailwind spells a platform in its release assets.
 ///
-/// Also the key checksums are recorded under in rahti.toml: a hash is of one
+/// Also the key checksums are recorded under in rahti.config.json: a hash is of one
 /// specific binary, so a team on mixed machines needs one entry each rather
 /// than a single value that would be wrong for everyone but its author.
 ///
@@ -244,7 +244,7 @@ fn download(css: &Css, dest: &Path) -> Option<PathBuf> {
             let _ = fs::remove_file(&partial);
             panic!(
                 "rahti: the Tailwind CLI downloaded from {url} does not match the \
-                 checksum in rahti.toml.\n  expected {expected}\n  got      {digest}\n  \
+                 checksum in rahti.config.json.\n  expected {expected}\n  got      {digest}\n  \
                  Refusing to run it."
             );
         }
@@ -254,7 +254,7 @@ fn download(css: &Css, dest: &Path) -> Option<PathBuf> {
         // lets the pin be added without going and finding it by hand.
         None => warn(&format!(
             "Tailwind CLI v{} for {} has sha256 {digest}\n  \
-             Pin it by adding `{} = \"{digest}\"` under [css.sha256] in rahti.toml.",
+             Pin it by adding `\"{}\": \"{digest}\"` to `css.sha256` in rahti.config.json.",
             css.version,
             platform_key(env::consts::OS, env::consts::ARCH).unwrap_or("this platform"),
             platform_key(env::consts::OS, env::consts::ARCH).unwrap_or("<platform>"),

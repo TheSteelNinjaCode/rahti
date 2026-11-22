@@ -74,6 +74,22 @@ fn authored(path: &str) -> bool {
     path.starts_with("src/") && !matches!(path, "src/main.rs" | "src/lib.rs")
 }
 
+/// What is left to do by hand when a database was added to a project whose
+/// `src/lib.rs` is the author's.
+///
+/// The template's `src/lib.rs` declares the three modules and connects from
+/// `initialize_application`. An edited one is left alone, and without these
+/// lines the database files written beside it are not even compiled.
+pub(crate) fn database_advice(yours: &[String]) -> Option<String> {
+    yours.iter().any(|path| path == "src/lib.rs").then(|| {
+        "  src/lib.rs is yours, so wire the database in yourself: declare\n  \
+         `pub mod db;`, `pub mod migrations;` and `pub mod models;`, and call\n  \
+         `db::connect_if_configured().await` in `initialize_application`,\n  \
+         before the router is built — see docs/conventions/database.md.\n"
+            .to_string()
+    })
+}
+
 pub fn run(args: &[&str]) -> Result<(), String> {
     let options = Options::parse(args)?;
 
@@ -862,16 +878,12 @@ fn report(
         println!("    cargo check\n");
     }
 
-    // A pristine `src/main.rs` was just rewritten to connect at startup; an
-    // edited one was left alone, and without these lines the database files
-    // written above are not even compiled.
-    if added_db.is_some() && plan.yours.contains(&"src/main.rs".to_string()) {
-        println!(
-            "  src/main.rs is yours, so wire the database in yourself: declare\n  \
-             `mod db;`, `mod migrations;` and `mod models;`, and call\n  \
-             `db::connect_if_configured().await` at the top of `main` — see\n  \
-             docs/conventions/database.md.\n"
-        );
+    // A pristine `src/lib.rs` was just rewritten to connect at startup; an
+    // edited one was left alone.
+    if added_db.is_some()
+        && let Some(advice) = database_advice(&plan.yours)
+    {
+        println!("{advice}");
     }
 
     if added_mcp {

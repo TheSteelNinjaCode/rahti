@@ -58,7 +58,9 @@ real environment variable always wins over the file.
 `cargo rahti new` generates the first two per project and writes them to
 `.env`, so no two Rahti applications share a signing key or a cookie name. It
 writes them whether or not the project has a database — `AUTH_SECRET` is not a
-database setting.
+database setting. The same file sets `SESSION_LIFETIME_HOURS="8"`, so a
+scaffolded application's sessions last eight hours; the framework default of
+one hour applies when the variable is absent or empty.
 
 ### `AUTH_SECRET`
 
@@ -107,7 +109,8 @@ copies from development rather than invents.
 ### `SESSION_LIFETIME_HOURS`
 
 The only one of the three that is ordinary configuration. A whole number of
-hours, greater than zero. A value that is present but unreadable —
+hours, greater than zero and at most 87600 (ten years). An empty value means
+the default. A value that is present but unreadable —
 `SESSION_LIFETIME_HOURS=24h` — is refused rather than defaulted: falling back
 to one hour would sign people out all day for no visible reason, and there is
 no environment in which a typo here is what someone meant.
@@ -131,22 +134,38 @@ rewrites it — it only ever adds a `DATABASE_URL` above what is already there,
 and only when the project gains a database. That is what protects your
 credentials from an upgrade.
 
-`.env` is read by `rahti::load_env()`, which both `AuthSettings::from_env` and
-the application's `db::connect_if_configured` call. It is idempotent, so neither has to know
+`.env` is read by `rahti::load_env()`, which `AuthSettings::from_env`,
+`AppTime::from_env`, `rahti::listen`, and the application's
+`db::connect_if_configured` call. It is idempotent, so none of them has to know
 which ran first, and a project without a database still reaches its variables.
 
 ## The policy
 
-Built in `src/auth.rs` and installed from `initialize_application` before the
-router is built:
+`cargo rahti new` writes no `src/auth.rs` and installs no policy:
+`initialize_application` in `src/lib.rs` carries the `configure` lines as
+comments, and until a policy is installed no route is private. To turn
+authentication on:
+
+1. Create `src/auth.rs` with a `pub fn settings() -> AuthSettings` (below).
+2. Declare `mod auth;` in `src/lib.rs`.
+3. In `initialize_application`, before `routes::router()` is called, write:
+
+   ```rust
+   rahti::auth::configure(auth::settings());
+   ```
+
+4. Install the same policy inside `setup()` in `src/tests/support.rs`; see
+   "Testing" below.
+
+`AuthSettings::from_env()` supplies the defaults; name only what differs. The
+defaults are `private_routes` empty, `public_routes` `["/"]`, `auth_routes`
+`["/signin", "/signup"]`, `signin` `"/signin"`, `after_signin` and
+`after_signout` `"/"`, and `all_private` and `sliding` `false` — an application
+whose sign-in page is not `/signin` sets both `signin` and `auth_routes`.
 
 ```rust
-rahti::auth::configure(auth::settings());
-```
+use rahti::auth::AuthSettings;
 
-`AuthSettings::from_env()` supplies the defaults; name only what differs.
-
-```rust
 pub fn settings() -> AuthSettings {
     AuthSettings {
         // Fixed lifetime. Set true to refresh the expiry on each
@@ -216,7 +235,8 @@ A trailing slash is not a different route.
 ## The guard
 
 `rahti::auth_guard` is installed by generated code as the outermost layer of
-every page group, every `route.rs` group, and the rpc router. It is not
+every page group, every `route.rs` group, the rpc router, and the WebSocket
+router. It is not
 installed over `public/`: a stylesheet needs no session, and an all-private
 application whose stylesheet redirected to the sign-in page would render that
 page unstyled.
@@ -228,13 +248,16 @@ lookup.
 Per request, in order:
 
 1. Decode and verify the cookie; discard it if expired.
-2. **RPC calls** (a POST carrying `X-PP-Function`) on a private route with no
+2. **RPC calls** (a request carrying the `X-PP-Function` header, which
+   `pp.rpc` sends) on a private route with no
    session get `401` with `{"error": …}` — never a redirect, because `fetch`
    would follow it and hand the sign-in page's HTML to a caller expecting JSON.
 3. **Navigations** to an auth route while signed in redirect to `?next=`, or to
    `after_signin`.
 4. **Navigations** to a private route with no session redirect to
-   `<signin>?next=<path>` with `303`.
+   `<signin>?next=<target>` with `303`. `<target>` is the request's path and
+   query string, percent-encoded: `/account?tab=billing` becomes
+   `?next=/account%3Ftab%3Dbilling`.
 5. Otherwise the handler runs, inside a task-local session scope.
 6. On the way out, whatever `sign_in` or `sign_out` asked for is written as a
    `Set-Cookie`.
@@ -253,6 +276,9 @@ rahti::auth::sign_out()
 rahti::auth::require()          -> Result<Session, Response>
 ```
 
+A `Session` is read with `user() -> &serde_json::Value`,
+`user_as::<T>() -> Option<T>`, and `expires_at() -> u64` (unix seconds).
+
 `sign_in` and `sign_out` do not write headers. They record what the guard
 should do, and the guard does it as the response leaves — so they are callable
 from a page, an rpc, or a `route.rs` handler, and the caller returns whatever
@@ -265,7 +291,8 @@ rather than panicking. **Writing** there is reported as an error to
 cookie to be written to, so `sign_in` would return normally and leave the
 visitor anonymous. The same applies to a spawned task, which outlives the
 request that started it — call `sign_in` from the handler, not from work it
-kicked off.
+kicked off. A `#[socket]` handler can read the session, but it has no response
+to carry a cookie: `sign_in` and `sign_out` there write none.
 
 ### Read the installed policy, not a rebuilt one
 
@@ -292,7 +319,9 @@ pub async fn rename(name: String) -> rahti::Result<SessionUser> { … }
 
 `auth` is the only argument `#[rpc]` accepts. The check runs before the payload
 is read and answers `401` with `{"error": …}` — the shape `pp.rpc` already
-throws on, so the client needs no special case.
+throws on, so the client needs no special case. The CSRF check runs earlier,
+at dispatch: a call without a valid token is answered `403` before
+`#[rpc(auth)]` is consulted.
 
 **A route guard is not a substitute.** The guard decides who may load a page;
 an rpc is a POST anyone can send, and a session that expires while a page is
@@ -326,7 +355,8 @@ is never echoed back as it arrived:
   value it echoes is the one that reaches the browser.
 
 A scheme, a host, a protocol-relative `//host`, or a backslash falls back to
-the configured default. Never build a redirect target from an unchecked request
+the configured default. The check reads the whole target, so a `next` whose
+query string contains `://`, a backslash, or `%2f%2f` falls back as well. Never build a redirect target from an unchecked request
 parameter.
 
 ### PulsePoint's half of `?next=`
@@ -383,8 +413,8 @@ Application-owned, in `src/auth.rs`. What a sound implementation looks like:
 
 ## Testing
 
-The application test harness installs the same policy
-`initialize_application` does:
+Inside `setup()` in `src/tests/support.rs`, install the same policy
+`initialize_application` installs:
 
 ```rust
 rahti::auth::configure(crate::auth::settings());
@@ -394,7 +424,8 @@ rahti::authorization::configure(crate::auth::authorization());
 Without it a suite exercises private routes that nothing protects. A suite
 that signs in and then calls a protected rpc needs to carry both cookies —
 the session and the CSRF token — from one response to the next request, the
-way a browser would.
+way a browser would. An rpc sent without the CSRF cookie and its matching
+`X-CSRF-Token` header is refused with `403`, not `401`.
 
 ## What is not here
 

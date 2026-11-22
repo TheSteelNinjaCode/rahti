@@ -17,6 +17,14 @@
 //! table is not, and nothing anywhere says why. Generated from the directory,
 //! that state cannot be reached.
 //!
+//! The two module files have fixed homes — `src/models/mod.rs` and
+//! `src/migrations/mod.rs` — because that is where `pub mod models;` and
+//! `pub mod migrations;` in `src/lib.rs` look. `db.models` and `db.migrations`
+//! say where the entity and migration *files* are: when one names another
+//! directory, each declaration carries a `#[path]` to its file there, so
+//! `crate::models::invoice` reads the same wherever `invoice.rs` is kept and
+//! nothing in `src/lib.rs` changes.
+//!
 //! Both directories are flat. A table name is a flat namespace — there is no
 //! `users::billing` table — and a nested entity tree would only invite a
 //! module path that the database has no counterpart for.
@@ -44,7 +52,18 @@ pub struct Scan {
     pub watched: Vec<String>,
 }
 
+/// Where `pub mod models;` in `src/lib.rs` resolves, whatever `db.models` is.
+pub const MODELS_HOME: &str = "src/models";
+
+/// Where `pub mod migrations;` in `src/lib.rs` resolves.
+pub const MIGRATIONS_HOME: &str = "src/migrations";
+
 pub fn scan(db: &Db) -> Scan {
+    scan_into(db, MODELS_HOME, MIGRATIONS_HOME)
+}
+
+/// [`scan`], with the two module files written under the given homes.
+fn scan_into(db: &Db, models_home: &str, migrations_home: &str) -> Scan {
     let models = collect(Path::new(&db.models), "models");
     let migrations = collect(Path::new(&db.migrations), "migrations");
 
@@ -54,12 +73,20 @@ pub fn scan(db: &Db) -> Scan {
 
     let modules = vec![
         (
-            normalize(&Path::new(&db.models).join("mod.rs")),
-            models_mod_rs(&db.models, &names(&models)),
+            normalize(&Path::new(models_home).join("mod.rs")),
+            models_mod_rs(
+                &db.models,
+                &relative(models_home, &db.models),
+                &names(&models),
+            ),
         ),
         (
-            normalize(&Path::new(&db.migrations).join("mod.rs")),
-            migrations_mod_rs(&db.migrations, &names(&migrations)),
+            normalize(&Path::new(migrations_home).join("mod.rs")),
+            migrations_mod_rs(
+                &db.migrations,
+                &relative(migrations_home, &db.migrations),
+                &names(&migrations),
+            ),
         ),
     ];
 
@@ -129,7 +156,41 @@ fn names(found: &[(String, String)]) -> Vec<String> {
     found.iter().map(|(module, _)| module.clone()).collect()
 }
 
-fn models_mod_rs(dir: &str, modules: &[String]) -> String {
+/// The path from the module file's home to the directory its files are in:
+/// empty when they are the same directory, `../../db/entities` otherwise.
+///
+/// A `#[path]` in a `mod.rs` resolves against that file's own directory, so
+/// this is what stands in front of each file name.
+fn relative(home: &str, dir: &str) -> String {
+    let parts = |path: &str| -> Vec<String> {
+        path.replace('\\', "/")
+            .split('/')
+            .filter(|part| !part.is_empty() && *part != ".")
+            .map(str::to_string)
+            .collect()
+    };
+    let (home, dir) = (parts(home), parts(dir));
+    let shared = home
+        .iter()
+        .zip(&dir)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut out: Vec<String> = vec!["..".to_string(); home.len() - shared];
+    out.extend(dir[shared..].iter().cloned());
+    out.join("/")
+}
+
+/// `pub mod name;`, led by the `#[path]` to its file when the files are kept
+/// somewhere other than beside the module file.
+fn declaration(relative: &str, module: &str) -> String {
+    if relative.is_empty() {
+        format!("pub mod {module};\n")
+    } else {
+        format!("#[path = \"{relative}/{module}.rs\"]\npub mod {module};\n")
+    }
+}
+
+fn models_mod_rs(dir: &str, relative: &str, modules: &[String]) -> String {
     let mut out = header(dir);
     out.push_str("//\n");
     out.push_str("// Every `.rs` file here is declared as a module, so an entity is in scope\n");
@@ -147,7 +208,7 @@ fn models_mod_rs(dir: &str, modules: &[String]) -> String {
 
     out.push('\n');
     for module in modules {
-        out.push_str(&format!("pub mod {module};\n"));
+        out.push_str(&declaration(relative, module));
     }
     out
 }
@@ -159,7 +220,7 @@ fn models_mod_rs(dir: &str, modules: &[String]) -> String {
 /// synchronous `fn`. So the attribute is deliberately absent: writing it would
 /// mean the application had to carry an `async-trait` dependency to compile a
 /// file it did not write.
-fn migrations_mod_rs(dir: &str, modules: &[String]) -> String {
+fn migrations_mod_rs(dir: &str, relative: &str, modules: &[String]) -> String {
     let mut out = header(dir);
     out.push_str("//\n");
     out.push_str("// The `Migrator` below lists every file in this directory, in filename\n");
@@ -168,7 +229,7 @@ fn migrations_mod_rs(dir: &str, modules: &[String]) -> String {
     out.push_str("#![allow(dead_code, unused_imports)]\n\n");
 
     for module in modules {
-        out.push_str(&format!("pub mod {module};\n"));
+        out.push_str(&declaration(relative, module));
     }
     if modules.is_empty() {
         out.push_str(&format!(

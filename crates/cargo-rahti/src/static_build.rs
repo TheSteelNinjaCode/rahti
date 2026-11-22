@@ -58,8 +58,8 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     if !main.contains("static_output()") {
         return Err(
             "src/main.rs does not contain Rahti's static-export handoff.\n  \
-             Run `cargo rahti upgrade --force src/main.rs`, or add the handoff \
-             documented in `docs/conventions/static-generation.md`."
+             Add the handoff documented in \
+             `docs/conventions/static-generation.md`."
                 .to_string(),
         );
     }

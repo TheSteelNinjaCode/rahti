@@ -104,13 +104,21 @@ impl Validate for ProfileInput {
 construction happen together: it consumes the validator and returns
 `Ok(value)` when no rule failed. `ValidationErrors` can also be built directly;
 it provides `add`, `has`, `field`, `first`, `fields`, `len`, `is_empty`, and
-`into_result`.
+`into_result`. `add` panics on an empty field name or a blank message.
 
 ## Error Contract
 
 `ValidationErrors` converts into `rahti::Error`, so `validator.finish()?`
-works inside the ordinary `rahti::Result<T>` alongside database and other
-errors. No second RPC result type is required.
+works inside an RPC's ordinary `rahti::Result<T>` alongside database and
+other errors. No second RPC result type is required.
+
+The field map travels on two wires only: an RPC response, and a `route.rs`
+handler that returns `Result<T, ValidationErrors>`, which answers the same
+422 JSON body with `Cache-Control: no-store` and, while observability is
+enabled, the `requestId`. A `ValidationErrors` converted into `rahti::Error` in a page
+or a `route.rs` handler is a 422 page boundary or Problem Details response
+carrying the summary without `errors`, and a `#[socket]` error frame carries
+the summary alone.
 
 An RPC validation failure returns HTTP 422 with a readable summary and every
 field message:
@@ -145,6 +153,6 @@ The same shape is available for file uploads made with `onUploadProgress`.
 Never place secrets, password values, tokens, query text, or database
 diagnostics in validation messages.
 
-Malformed JSON and values that cannot deserialize remain HTTP 400 RPC wire
+Malformed JSON and values that cannot deserialize are HTTP 400 RPC wire
 errors. HTTP 422 means the payload was structurally readable and business
 validation ran.

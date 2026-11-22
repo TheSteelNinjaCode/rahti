@@ -50,9 +50,18 @@ schema its `$schema` key names documents and validates its shape.
   the supported/default locales, fallback chains, and the Fluent catalog
   directory. Catalog contents are application data embedded at build time;
   see `localization.md`.
+- `ws` is absent unless the project uses WebSockets. `true` records that
+  `Cargo.toml` carries the `ws` feature on the `rahti` dependency; `upgrade`
+  reads it and the build does not. See `websockets.md`.
 - The active Rahti version comes from `Cargo.toml`.
 
-All operational keys default, but keep the file valid JSON.
+All operational keys default, but keep the file valid JSON. An absent
+`app.dir` is `src/app`, `app.public` is `public`, `server.host` is `0.0.0.0`,
+`server.port` is `3000`, `css.engine` is `tailwind`, `css.entry` is
+`src/app/globals.css`, `css.output` is `public/css/styles.css`, and
+`css.download` and `css.minify` are `false`. A `db` object without `backend`
+is `sqlite`, and `"db": null` is no database. A misspelled `css.engine` or
+`db.backend` stops the build instead of defaulting.
 
 `server.host` and `server.port` are where the server binds. A deployment can
 name its own address instead: `PORT` overrides the configured port, `HOST`
@@ -126,8 +135,10 @@ not absolute expiry or storage. See `application-timezone.md`.
 ## Environment Reference
 
 `cargo rahti new` writes the settings required by the selected project and
-lists safe optional overrides as commented entries. Uncomment an optional
-entry to replace its documented default. A setting that does not apply to the
+lists the optional overrides the running application reads as commented
+entries. Uncomment an optional entry to replace its documented default.
+`RAHTI_TAILWIND` is read by the build script from the process environment, so
+`.env` does not list it: export it in the shell or CI instead. A setting that does not apply to the
 project stays inert; MCP credentials are written as active generated values
 only when the project enables MCP.
 
@@ -145,8 +156,10 @@ only when the project enables MCP.
 | `RAHTI_MAX_FILE` | `0` | Per-file upload limit in bytes; zero means the total request limit. |
 | `RAHTI_SPILL_THRESHOLD` | `262144` | Bytes retained in memory before an upload spills to disk. |
 | `RAHTI_SPILL_DIR` | OS temporary directory | Private directory for spilled uploads. |
-| `RAHTI_DEV` | build profile | Explicitly enables or disables development behavior. |
-| `RAHTI_TAILWIND` | binary lookup | Path to a Tailwind CLI executable. |
+| `RAHTI_DEV` | build profile | `1`, `true`, `on` or `yes` enables development behavior; any other value disables it. |
+| `RAHTI_TAILWIND` | binary lookup | Path to a Tailwind CLI executable, read by the build script from the process environment, not from `.env`. |
+| `RAHTI_BROWSER` | browser search | Browser executable for the browser test suite; see `testing.md`. |
+| `RAHTI_BROWSER_REQUIRED` | unset | Any value but `0` or empty makes a missing browser fail a browser test instead of skipping it. |
 | `RAHTI_MCP_AUTH_TOKEN` | MCP projects only | Distinct bearer credential for the HTTP MCP endpoint. |
 | `RAHTI_MCP_ALLOWED_HOSTS` | MCP SDK default | Comma-separated host allowlist for the HTTP MCP endpoint. |
 | `RAHTI_MCP_ALLOWED_ORIGINS` | MCP SDK default | Comma-separated full origins allowed for browser MCP clients. |
@@ -161,11 +174,16 @@ application policy.
 application settings. The build/static-export tools set the first two
 internally, while native signing credentials belong in the packaging or CI
 environment and must never be bundled into an application's `.env`.
+`RAHTI_STATE_REPORT` names a file `html!` appends its client-code findings to
+at compile time; it is a build diagnostic, not an application setting.
+
+An upload size that is not a whole number of bytes is ignored: the default
+applies and an `upload-config` warning is recorded.
 
 `rahti::load_env()` is the one `.env` reader for the process. It is called by
-`AppTime::from_env`, `AuthSettings::from_env`, and the application's
-`db::connect_if_configured`, is idempotent, and never overwrites a variable the environment
-already carries.
+`AppTime::from_env`, `AuthSettings::from_env`, `rahti::listen`, and the
+application's `db::connect_if_configured`, is idempotent, and never overwrites
+a variable the environment already carries.
 
 Explicit application routes win. Public files are the router fallback, and
 the root 404 runs only when neither claims a path.
@@ -193,6 +211,9 @@ The plain CSS scaffold supplies neither. `css.engine: "none"` only disables
 CSS output management; it does not guarantee any frontend helper. Inspect
 `rahti.config.json`, `public/js/main.js`, and the local asset before assuming
 `twMerge` is available. A CSS build does not install JavaScript imports.
+`html!` knows the engine: under `plain` or `none` a bare `twMerge` in a
+binding or script is a compile error (`RAHTI_UNKNOWN_NAME`), and a helper the
+application publishes itself is read as `window.twMerge`.
 
 `twMerge(classes)` is the existing **browser JavaScript** helper, not a Rust
 API and not `pp.twMerge`. Do not add `tw_merge`, a Rust Tailwind merger, an
@@ -257,6 +278,9 @@ The `css.engine` modes are:
 
 The editable `entry` and served `output` keep the same roles in all modes.
 The output is committed so builds remain usable without downloading a CLI.
+Under `plain` the build refuses an entry with a line that starts with
+`@import "tailwindcss"`, `@source`, `@theme` or `@apply`. Under `tailwind` and
+`plain` it refuses to publish an empty sheet over a non-empty output.
 
 Tailwind configuration:
 
@@ -265,8 +289,12 @@ Tailwind configuration:
 - `minify` controls deterministic output style;
 - `sha256` maps platform keys such as `windows-x64` to trusted hashes.
 
-Binary lookup includes `.rahti/bin`, `RAHTI_TAILWIND`, and `tailwindcss` on
-`PATH`. A configured hash mismatch is fatal.
+Binary lookup order is `RAHTI_TAILWIND`, the cached binary in `.rahti/bin`,
+`tailwindcss` on `PATH`, and then a download when `download` is true.
+`RAHTI_TAILWIND` is read from the build's process environment. With no binary
+the build warns and the committed output is served. A configured hash
+mismatch is fatal; a platform with no `sha256` entry downloads unverified and
+the build prints the hash to pin.
 
 Tailwind scans this project's own sources. Class names are authored in
 `src/app/` and `src/components/`, which the build already watches, so a
@@ -275,8 +303,8 @@ changed class rebuilds the stylesheet.
 ## Development Runtime
 
 Development reload is enabled in debug builds and disabled in release builds,
-unless overridden by `RAHTI_DEV`. True-like values enable it; other values
-disable it.
+unless overridden by `RAHTI_DEV`. `1`, `true`, `on` and `yes` enable it; any
+other value disables it.
 
 Rahti injects a dev client into page HTML, watches public files, swaps changed
 stylesheets, reloads for other changes, and forwards browser warnings/errors
@@ -308,9 +336,9 @@ It re-runs `cargo run` on every change under `src/` or to
 `rahti.config.json`, and the open tab reloads itself when the new server
 comes up. `public/` is deliberately not on the watch list — the running
 server handles it without a recompile. The alias needs cargo-watch installed
-once per machine: `cargo install cargo-watch`. Plain `cargo run` still works;
-you restart it yourself after a Rust edit, and the browser reload half
-behaves the same.
+once per machine: `cargo install cargo-watch`. Plain `cargo run` runs the
+same server without the watcher: restart it yourself after a Rust edit, and
+the browser reload half behaves the same.
 
 The `.rahti` directory is gitignored by both the repository and new-project
 scaffold. It contains generated manifests, CSS scratch files, and the current
@@ -389,9 +417,10 @@ bounds each wait and defaults to 60.
 The server runs a copy of the built binary under `.rahti/dev-server/`, never
 the file in `target/`. Windows refuses to replace a running executable, and
 the copy is what lets this build, a plain `cargo build`, or `cargo test` run
-beside the server. A server started another way — `cargo run`, `cargo dev` —
-holds the file in `target/`; for that one restart the source is type-checked
-first and the server is stopped before the build.
+beside the server. On Windows a server started another way — `cargo run`,
+`cargo dev` — holds the file in `target/`; for that one restart the source is
+type-checked first and the server is stopped before the build, and the timing
+line begins with a `check` part.
 
 Restart ends by saying where its time went:
 
@@ -423,8 +452,8 @@ Backtraces keep this crate's file and line numbers; dependencies carry no
 debug info, which is most of what a linker otherwise copies into every build
 and most of what fills `target/`. Build scripts and proc macros — `rahti-build`,
 `html!`, the derives — run on every build, so they are optimized. `Cargo.toml`
-is the application's own file: add these three tables to a project that does
-not have them, and expect one full rebuild when a profile changes. Remove
+is the application's own file and the scaffold writes these three tables into
+it; changing a profile costs one full rebuild. Remove
 `debug = false` for the session in which a debugger has to step into a
 dependency.
 
@@ -433,7 +462,8 @@ cargo rahti status
 ```
 
 Status says whether that server is running the current source. See
-`diagnostics.md`. `cargo rahti stop` stops it gracefully.
+`diagnostics.md`. `cargo rahti stop` stops it gracefully and takes the same
+`--timeout <seconds>`.
 
 A dev server writes `.rahti/dev-server.json` with its address, boot id, and a
 token generated for that process. The `/__rahti/dev/status` and
@@ -500,8 +530,22 @@ and CSS use their authored formatting; no JavaScript tooling is required.
 ```text
 cargo rahti new <name> [--tailwind] [--db [backend]] [--ws] [--mcp] [--local <path>]
 cargo rahti build --static [--out <directory>]
-cargo rahti upgrade [--dry-run] [--force [path...]] [--db [backend]] [--ws] [--mcp]
+cargo rahti upgrade [-n|--dry-run] [-f|--force [path...]] [--db [backend]] [--ws] [--mcp]
+cargo rahti fmt [--check] [path...]
+cargo rahti restart [--timeout <seconds>]
+cargo rahti stop [--timeout <seconds>]
+cargo rahti status [--json]
+cargo rahti generate job <name> [--params name:Type,...]
+cargo rahti generate job-store
+cargo rahti native <command> [options]
+cargo rahti help | --help | -h
+cargo rahti --version | -V
 ```
+
+That is every command. An option a command does not list is an error, and
+`build` requires `--static`. A project `<name>` is ASCII letters, digits, `-`
+and `_`, and does not start with a digit. `generate` is covered in
+`background-jobs.md`.
 
 Every feature flag adds something, and leaving it out is how you say no. One
 spelling per answer, so there are no opposing flags to reconcile. An
@@ -528,8 +572,9 @@ the render contract and output safety rules.
   endpoint; a project that leaves it out compiles no MCP application code.
   The separate stdio executable is still installed once per machine.
 - `new` writes one `.env`, carrying this project's generated `AUTH_SECRET` and
-  `AUTH_COOKIE_NAME`, explicit session/timezone defaults, every supported
-  optional application override as a commented entry, and, with `--db`, a
+  `AUTH_COOKIE_NAME`, an explicit `SESSION_LIFETIME_HOURS="8"` and
+  `APP_TIMEZONE="UTC"`, every optional override the running application
+  reads as a commented entry, and, with `--db`, a
   `DATABASE_URL`. MCP projects additionally receive their generated endpoint
   credential and local host allowlist. The file is gitignored and untracked by
   the ledger, so no upgrade rewrites it, and nothing is committed in its
@@ -546,9 +591,10 @@ the render contract and output safety rules.
   without them: `--db`/`--ws`/`--mcp` say yes outright, and an interactive run asks
   about whichever the project lacks, defaulting to no. A dry run never asks —
   name the feature to preview adding it. The feature's files are written and
-  the choice is recorded in `rahti.config.json`. The CSS engine is not
-  offered: switching it rewrites an authored stylesheet, which is a
-  migration, not an addition.
+  the choice is recorded in `rahti.config.json`. `upgrade` does not change
+  the CSS engine: `css.engine` is edited by hand in `rahti.config.json`, and
+  under `plain` the build refuses an entry that contains Tailwind directives,
+  so the entry is rewritten as ordinary CSS first.
 - `upgrade` moves the `rahti` and `rahti-build` version pins to the version of
   the tool that is running, because the framework ships in lockstep and the
   files an upgrade writes are written against its own version. A pin left
@@ -567,8 +613,11 @@ the render contract and output safety rules.
   would undo your dependencies, a `--local` path dependency, or a real
   credential — but it does amend them, by the smallest edit that makes the
   files it just wrote compile and run: the version pins above, `sea-orm` and
-  `sea-orm-migration` appended to `[dependencies]`, `features = ["ws"]` folded
-  into the `rahti` line, `DATABASE_URL` added above what is already in `.env`.
+  `sea-orm-migration` appended to `[dependencies]`, `http-body-util` and
+  `tower` appended to `[dev-dependencies]` for the test suite,
+  `features = ["ws"]` and `features = ["mcp"]` folded into the `rahti` line,
+  `DATABASE_URL` added above what is already in an existing `.env`. It writes
+  no `RAHTI_MCP_AUTH_TOKEN`; set that yourself after `upgrade --mcp`.
   Driven by `rahti.config.json` rather than by what this run
   added, so a project that gained a feature by editing its config is repaired
   by running `upgrade` again; every edit is skipped when it is already there,

@@ -44,6 +44,12 @@ dependency — and everything else in `.env` stays where it was, with the
 connection string above it. Nothing is added twice, so running the command
 again changes nothing.
 
+The modules and the connect call live in `src/lib.rs`. An unedited one is
+rewritten with them. An edited one is left alone, and the command prints what
+to add: `pub mod db;`, `pub mod migrations;` and `pub mod models;`, and
+`db::connect_if_configured().await` in `initialize_application` before the
+router is built.
+
 For a backend other than SQLite the connection string it writes is an
 example, and pointing it at your server is the one step left. If the manifest
 is in a shape the addition cannot read — a `[dependencies.rahti]` table, say —
@@ -78,18 +84,21 @@ build creates both directories and their `mod.rs` files.
 
 Both directories are **flat**. A table name is a flat namespace — there is no
 `users::billing` table — and a subdirectory is refused by the build rather
-than quietly given a module path the database has no counterpart for.
+than quietly given a module path the database has no counterpart for. A file
+stem becomes a module name, so it is ASCII letters, digits and `_`, does not
+start with a digit, and is not a Rust keyword; the build refuses any other
+name. A file whose name starts with `.` is ignored.
 
 ## What the Build Generates
 
 `rahti-build` writes two files, from the contents of the two directories, on
 every build. Neither is edited by hand.
 
-**`src/models/mod.rs`** declares every `.rs` file beside it. Saving
+**`src/models/mod.rs`** declares every entity file. Saving
 `src/models/invoice.rs` is the whole of making `crate::models::invoice`
 exist.
 
-**`src/migrations/mod.rs`** declares every `.rs` file beside it *and* writes
+**`src/migrations/mod.rs`** declares every migration file *and* writes
 the `Migrator`:
 
 ```rust
@@ -117,6 +126,27 @@ migration for the moment it was written** —
 Both directories are created if missing, because `src/lib.rs` declares the
 modules unconditionally once a project has a database.
 
+### Keeping the Files in Another Directory
+
+`db.models` and `db.migrations` in `rahti.config.json` name the directories
+the entity and migration files are in, relative to the crate root; they are
+`src/models` and `src/migrations` unless changed:
+
+```json
+"db": {
+  "backend": "sqlite",
+  "models": "src/data/entities",
+  "migrations": "db/changes"
+}
+```
+
+The two generated files stay at `src/models/mod.rs` and
+`src/migrations/mod.rs`, and declare each file with a `#[path]` to where it
+is. Nothing else changes: `src/lib.rs` keeps `pub mod models;` and
+`pub mod migrations;`, an entity is `crate::models::invoice`, and the
+migrator is `crate::migrations::Migrator`. Write no `#[path]` by hand.
+`cargo rahti generate job-store` writes into the configured directories.
+
 ## Reaching the Connection
 
 ```rust
@@ -128,7 +158,7 @@ let rows = invoice::Entity::find().all(db()).await?;
 
 `db()` is a process-wide `OnceLock<DatabaseConnection>`, installed by
 `db::connect_if_configured()` before the listener binds when `DATABASE_URL`
-is configured. A deployment can start without the variable, which lets its
+is configured; a blank value counts as absent. A deployment can start without the variable, which lets its
 owner choose and add their connection string later; database-using pages and
 RPCs must check `db::is_connected()` and return a useful unavailable state
 instead of calling `db()` while no connection exists.
@@ -255,8 +285,10 @@ pub async fn list() -> Result<Vec<invoice::Model>> {
 
 `rahti::Error` implements `From<E>` for every
 `E: std::error::Error + Send + Sync + 'static`, so a
-database failure becomes a 500 carrying its message the moment it is
-returned. Nothing was written to make this work.
+database failure becomes a 500 the moment it is returned. Its message reaches
+the client only in development mode; otherwise the response carries the
+generic server-error text. See `error-handling.md`. Nothing was written to
+make this work.
 
 Use a real status where you have one. A missing row is a 404, not a 500:
 
@@ -313,6 +345,9 @@ under test.
 
 Delete the file on the way in, not on the way out: a test binary has no
 reliable teardown, and starting from nothing is what makes a run repeatable.
+
+`connect_to` is a no-op once a connection is installed, so calling the setup
+from every test is safe.
 
 Call the setup from the request helpers rather than from each test — pages
 that touch the database are reached by tests that are not about the database
@@ -379,15 +414,14 @@ async fn the_invoice_table_round_trips() {
 ```
 
 `null` when the project has no database. A directory listing answers "what
-files are there"; this answers "what did the build actually wire up", which is
-the question that has been wrong before.
+files are there"; this answers "what did the build actually wire up".
 
 ## Failure Modes
 
 | Symptom | Cause |
 | --- | --- |
 | `db.backend is "…", which is not a backend` | Misspelled in `rahti.config.json`. Not defaulted, deliberately. |
-| `the database has not been connected` | `db()` was reached while `DATABASE_URL` is absent, or before `db::connect_if_configured()`. Guard the page or RPC with `db::is_connected()`. |
+| `the database has not been connected` | `db()` was reached while `DATABASE_URL` is absent, or before `initialize_application` called `db::connect_if_configured()`. Guard the page or RPC with `db::is_connected()`. |
 | `DATABASE_URL` is absent | This is allowed. The app starts without persistence until its owner configures a connection string and restarts it. |
 | `no such table` after a migration was written | The migration ran but the table is not there: almost always an in-memory SQLite that outlived its runtime. See Testing. |
 | `unresolved import sea_orm` | The config has a `db` object and `Cargo.toml` does not have the dependency. Run `cargo rahti upgrade`, which adds it. |

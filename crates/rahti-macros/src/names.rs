@@ -33,8 +33,26 @@ use crate::parse::{ClientKind, ClientSource, Error};
 /// What a handler may call its event, and the element it fired on.
 const EVENT_NAMES: [&str; 6] = ["event", "e", "$event", "target", "currentTarget", "el"];
 
-/// What the scaffold's `main.js` publishes on the window before mounting.
+/// What the Tailwind scaffold's `main.js` publishes on the window before
+/// mounting.
 const PUBLISHED: [&str; 1] = ["twMerge"];
+
+/// Set by `rahti-build` via `cargo:rustc-env` to the project's `css.engine`.
+const CSS_ENGINE_ENV: &str = "RAHTI_CSS_ENGINE";
+
+/// The names `main.js` publishes under this `css.engine`.
+///
+/// Only the Tailwind scaffold imports the merge helper, so under `plain` or
+/// `none` a bare `twMerge` is a name nothing supplies and a `ReferenceError`
+/// in the browser. A crate with no Rahti build script — a component library —
+/// has no engine to consult, and its code runs in whichever application
+/// mounts it, so the name is admitted there.
+fn published(engine: Option<&str>) -> &'static [&'static str] {
+    match engine {
+        None | Some("tailwind") => &PUBLISHED,
+        Some(_) => &[],
+    }
+}
 
 /// A name some piece of the block's code reads and nothing supplies.
 #[derive(Debug, PartialEq)]
@@ -69,6 +87,12 @@ pub fn check(sources: &[ClientSource]) -> Result<(), Error> {
 
 /// Every name the block's code reads that nothing supplies, in source order.
 pub fn unknown(sources: &[ClientSource]) -> Vec<Unknown> {
+    unknown_under(sources, std::env::var(CSS_ENGINE_ENV).ok().as_deref())
+}
+
+/// [`unknown`], for a project on the named `css.engine`.
+pub fn unknown_under(sources: &[ClientSource], engine: Option<&str>) -> Vec<Unknown> {
+    let published = published(engine);
     // Most blocks have no client code at all.
     if sources.is_empty() {
         return Vec::new();
@@ -128,7 +152,7 @@ pub fn unknown(sources: &[ClientSource]) -> Vec<Unknown> {
                 }
             }
         };
-        known.extend(PUBLISHED);
+        known.extend(published);
         for (name, span) in rahti_js::free_names(code, &source.source) {
             if known.contains(name.as_str()) || rahti_js::is_global(&name) {
                 continue;

@@ -75,7 +75,8 @@ pub struct I18nResource {
 /// should not download a compiler to copy a file, and — more to the point —
 /// should not have to learn a different project layout to avoid it: under
 /// every engine the author edits `entry` and the browser is served `output`.
-/// Switching is a one-word change, not a migration.
+/// Switching is a one-word change; `plain` refuses an entry that still
+/// carries Tailwind directives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
     /// Compile `entry` with the Tailwind standalone CLI.
@@ -214,11 +215,22 @@ pub fn run() {
     // `html!` reads this during expansion to work out which part of a file
     // path is the route, so `pp-component` names survive a moved app dir.
     println!("cargo:rustc-env=RAHTI_APP_DIR={}", config.app_dir);
+    // And this to know whether `main.js` publishes `twMerge`: only the
+    // Tailwind scaffold imports the helper.
+    println!(
+        "cargo:rustc-env=RAHTI_CSS_ENGINE={}",
+        match config.css.engine {
+            Engine::Tailwind => "tailwind",
+            Engine::Plain => "plain",
+            Engine::None => "none",
+        }
+    );
 
     let scan = scanner::scan(Path::new(&config.app_dir));
     let components = components::scan(Path::new(components::COMPONENTS_DIR));
 
     check_reserved_routes(&scan.entries, config.mcp);
+    scanner::check_static_paths(&scan.entries, config.i18n.is_some());
 
     // Only when the project configured one. An app with no `db` object never
     // has these directories created, never has a module generated, and never
@@ -348,15 +360,6 @@ fn socket_list(entries: &[scanner::Entry], components: &[components::Rpc]) -> Ve
 fn load_config() -> Config {
     let raw = match fs::read_to_string(CONFIG_PATH) {
         Ok(raw) => raw,
-        // The file this replaced. Saying "no such file" to someone holding a
-        // working `rahti.toml` describes the symptom and hides the cause.
-        Err(e) if Path::new("rahti.toml").is_file() => panic!(
-            "rahti: this project still has a `rahti.toml`, and configuration \
-             now lives in {CONFIG_PATH}.\n  \
-             The keys are the same, one JSON object per table — `[server]` \
-             becomes `\"server\": {{ … }}`.\n  \
-             ({CONFIG_PATH}: {e})"
-        ),
         Err(e) => panic!("rahti: cannot read {CONFIG_PATH}: {e}"),
     };
     parse_config(&raw)

@@ -197,22 +197,30 @@ fn code_that_does_not_parse_has_no_calls() {
     assert!(rpc_calls(Code::Expression, "pp.rpc(\"a\", {").is_empty());
 }
 
-/// The reads of an rpc result in a script, as `rpc: a.b` lines.
+/// The reads of an rpc result in a script, as `rpc: a.b` lines. The source
+/// stands inside an async function, where a script awaits.
 fn reads(source: &str) -> Vec<String> {
-    rpc_reads(Code::Script, source)
-        .into_iter()
-        .map(|read| {
-            let path: Vec<String> = read
-                .steps
-                .iter()
-                .map(|step| match step {
-                    Step::Field { name, .. } => name.clone(),
-                    Step::Index => "[]".to_string(),
-                })
-                .collect();
-            format!("{}: {}", read.rpc, path.join("."))
-        })
-        .collect()
+    rpc_reads(
+        Code::Script,
+        &format!(
+            "async function run() {{
+{source}
+}}"
+        ),
+    )
+    .into_iter()
+    .map(|read| {
+        let path: Vec<String> = read
+            .steps
+            .iter()
+            .map(|step| match step {
+                Step::Field { name, .. } => name.clone(),
+                Step::Index => "[]".to_string(),
+            })
+            .collect();
+        format!("{}: {}", read.rpc, path.join("."))
+    })
+    .collect()
 }
 
 #[test]
@@ -240,7 +248,7 @@ fn a_field_read_off_an_awaited_rpc_result_is_found() {
 
 #[test]
 fn a_read_names_the_span_of_the_field_it_reads() {
-    let source = r#"const r = await pp.rpc("load"); r.total;"#;
+    let source = r#"async function f() { const r = await pp.rpc("load"); r.total; }"#;
     let read = &rpc_reads(Code::Script, source)[0];
     let Step::Field { name, span } = &read.steps[0] else {
         panic!("a field step");
@@ -1071,5 +1079,37 @@ fn props_used_whole_may_read_any_prop() {
     assert_eq!(
         prop_reads(Code::Script, "pp.props.open = ;"),
         PropReads::default()
+    );
+}
+
+#[test]
+fn a_script_that_awaits_at_its_top_level_is_refused_with_the_fix() {
+    let refused = component_script("const rows = await pp.rpc(\"rows\", {});").unwrap_err();
+    assert_eq!(refused.message, TOP_LEVEL_AWAIT);
+    assert!(
+        refused
+            .message
+            .contains("pp.effect(() => { load(); }, []);")
+    );
+    assert!(awaits_at_top_level(
+        "for await (const chunk of stream) { use(chunk); }"
+    ));
+}
+
+#[test]
+fn a_script_that_awaits_inside_a_function_compiles() {
+    let script = component_script(
+        "const [rows, setRows] = pp.state([]);\n\
+         async function load() { setRows(await pp.rpc(\"rows\", {})); }\n\
+         const reload = async () => { await load(); };\n\
+         pp.effect(() => { load(); }, []);",
+    )
+    .unwrap();
+    assert_eq!(script.bindings, ["rows", "setRows", "load", "reload"]);
+    assert!(!awaits_at_top_level("const awaited = 1; // await nothing"));
+    // A script that is not JavaScript at all is reported as that.
+    assert_ne!(
+        component_script("const x = await ;").unwrap_err().message,
+        TOP_LEVEL_AWAIT
     );
 }

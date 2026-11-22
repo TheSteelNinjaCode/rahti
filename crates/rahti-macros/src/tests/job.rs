@@ -155,10 +155,32 @@ fn the_jobs_module_is_recognised_on_every_platform() {
         "src/jobs.rs",
         "src/jobs/mail.rs",
         r"src\jobs\mail.rs",
-        "tests/jobs/main.rs",
+        "src/jobs/mail/digest.rs",
+        "/home/me/shop/src/jobs.rs",
+        r"C:\work\shop\src\jobs\mail.rs",
         "",
     ] {
         expand(TokenStream::new(), quote! { pub async fn a() {} }, file)
             .unwrap_or_else(|error| panic!("{file}: {}", error.msg));
+    }
+}
+
+/// The build reads `src/jobs.rs` and `src/jobs/` and nothing else, so a job
+/// anywhere else would run without ever reaching the manifest.
+#[test]
+fn a_jobs_file_the_build_does_not_read_is_refused() {
+    for file in [
+        "tests/jobs/main.rs",
+        "src/app/jobs.rs",
+        "src/app/jobs/page.rs",
+        "src/admin/jobs/mail.rs",
+        "jobs.rs",
+        "src/jobs_extra.rs",
+    ] {
+        let message = refused(TokenStream::new(), quote! { pub async fn a() {} }, file);
+        assert!(
+            message.contains("`src/jobs.rs` or under `src/jobs/`"),
+            "{file}: {message}"
+        );
     }
 }

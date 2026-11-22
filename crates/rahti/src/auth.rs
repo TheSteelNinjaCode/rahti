@@ -749,7 +749,8 @@ pub async fn guard(req: Request, next: Next) -> Response {
         return redirect(&crate::i18n::scoped_path(&target));
     } else if session.is_none() && settings.is_private_route(&policy_path) {
         let signin = crate::i18n::scoped_path(&safe_target(&settings.signin, "/"));
-        return redirect(&format!("{signin}?next={}", encode_query(&path)));
+        let wanted = next_target(&path, req.uri().query());
+        return redirect(&format!("{signin}?next={}", encode_query(&wanted)));
     }
 
     let context = Arc::new(Context {
@@ -1043,6 +1044,17 @@ fn safe_target(target: &str, fallback: &str) -> String {
         None => (target, ""),
     };
     format!("{}{rest}", normalize(path))
+}
+
+/// What a bounced visitor was after: the path and its query string.
+///
+/// Built from the request's own path and query, never from a header, so it is
+/// same-origin by construction. It is still read back through [`safe_target`].
+fn next_target(path: &str, query: Option<&str>) -> String {
+    match query.filter(|query| !query.is_empty()) {
+        Some(query) => format!("{path}?{query}"),
+        None => path.to_string(),
+    }
 }
 
 /// One query parameter, by name, percent-decoded.

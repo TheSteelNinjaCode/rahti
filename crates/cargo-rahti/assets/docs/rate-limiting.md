@@ -6,17 +6,20 @@ and error work, and inside the security-header middleware. A refused request
 therefore avoids application work and still receives the normal browser
 security headers.
 
-The default is **200 requests per client IP per minute**, retaining no more
+The default is **200 requests per client IP per minute** outside development
+mode and 2,000 in development mode, retaining no more
 than 10,000 client buckets. Defaults require no startup call.
 
 ## What is counted
 
 Pages, API routes, RPCs, redirects, missing routes, and WebSocket handshakes
-share the client's budget. These requests are exempt:
+share the client's budget. So do the framework's own dynamic routes: the
+client registry at `/_rahti/client.js`, which every full page load requests,
+and the `/mcp/` endpoint when MCP is enabled. These requests are exempt:
 
 - `OPTIONS` preflight requests;
 - `/health` and `/ready`, including their subtrees;
-- Rahti's `/__rahti/dev` development subtree;
+- Rahti's `/__rahti` development subtree, the reload script included;
 - an existing `GET` or `HEAD` file beneath the configured `public/` root.
 
 Public-file exemption is based on the resolved file, not a URL extension or
@@ -35,7 +38,8 @@ An admitted dynamic response receives:
 | `RateLimit-Reset` | seconds until the oldest counted request expires |
 
 Existing response values win. When the budget is exhausted, Rahti answers
-HTTP 429 and adds `Retry-After` with the same reset duration. An RPC receives
+HTTP 429 with `Cache-Control: no-store` and adds `Retry-After` with the same
+reset duration. An RPC receives
 the normal JSON error shape (`{"error":"…"}`), so `pp.rpc` rejects normally;
 other requests receive a small HTML response.
 
@@ -55,7 +59,7 @@ rate_limit::configure(RateLimit {
     trust_forwarded_headers: false,
     exempt_paths: vec![
         "/health".into(),
-        "/__rahti/dev".into(),
+        "/__rahti".into(),
         "/metrics".into(),
     ],
 });
@@ -81,7 +85,8 @@ production budget on its own. The constants are
 `RateLimit::per_second`, `per_minute`, and `per_hour` provide concise starting
 policies. `RateLimit::disabled()` disables the middleware without removing the
 generated layer. A positive policy requires a nonzero window and
-`max_clients`; invalid configuration fails during startup.
+`max_clients`, and each exempt path must start with `/` and contain no `?`,
+`#`, or whitespace; `configure` panics on an invalid policy.
 
 Exempt paths cover their subtree, except `/`, which covers only the root. Do
 not exempt a mutation, sign-in endpoint, or expensive dynamic route merely

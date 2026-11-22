@@ -41,7 +41,7 @@ pub fn prop_reads(code: Code, source: &str) -> PropReads {
         return PropReads::default();
     }
     let (prefix, suffix) = match code {
-        Code::Script => ("async function __pp_script(pp, __pp_server) {\n", "\n}"),
+        Code::Script => ("function __pp_script(pp, __pp_server) {\n", "\n}"),
         Code::Expression => ("(", "\n);"),
         Code::Handler if crate::is_expression(source) => ("(", "\n);"),
         Code::Handler => ("function __pp_handler() {\n", "\n}"),

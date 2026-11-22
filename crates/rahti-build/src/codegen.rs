@@ -446,17 +446,7 @@ pub fn routes_rs(
                 .map(|url| format!("\"{url}\""))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let locale_only = config.i18n.as_ref().is_some_and(|_| {
-                page.urls.iter().all(|url| {
-                    let without_locale = url.replace("{locale}", "").replace("{lang}", "");
-                    !without_locale.contains('{')
-                }) && page.urls.iter().any(|url| {
-                    url == "/{locale}"
-                        || url.starts_with("/{locale}/")
-                        || url == "/{lang}"
-                        || url.starts_with("/{lang}/")
-                })
-            });
+            let locale_only = config.i18n.is_some() && crate::scanner::locale_only(&page.urls);
             if locale_only {
                 let paths = page
                     .urls

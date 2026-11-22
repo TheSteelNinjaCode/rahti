@@ -96,6 +96,28 @@ fn a_store_is_the_first_table_of_a_project_with_none() {
     assert_eq!(migrations, 1);
 }
 
+/// `db.models` and `db.migrations` move the directories the build reads, so
+/// the generator writes where the build will look.
+#[test]
+fn a_store_follows_the_configured_directories() {
+    let root = project(
+        "store-dirs",
+        r#"{"db":{"backend":"sqlite","models":"src/entities/","migrations":"src/schema"}}"#,
+    );
+    job_store(&root).unwrap();
+
+    assert!(root.join("src/entities/job.rs").is_file());
+    assert_eq!(fs::read_dir(root.join("src/schema")).unwrap().count(), 1);
+    assert!(!root.join("src/models/job.rs").exists());
+    assert_eq!(
+        fs::read_dir(root.join("src/migrations")).unwrap().count(),
+        0
+    );
+
+    let message = job_store(&root).unwrap_err();
+    assert!(message.contains("already exists"), "{message}");
+}
+
 #[test]
 fn a_store_replaces_nothing_a_project_already_chose() {
     let chosen = "rahti::jobs::Jobs::new().store(MyStore).install();";

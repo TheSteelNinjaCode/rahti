@@ -540,7 +540,8 @@ AUTH_SECRET="{secret}"
 # domain that share a cookie name overwrite each other's sessions.
 AUTH_COOKIE_NAME="{cookie}"
 
-# Optional. Session lifetime in hours; the default is 1.
+# Session lifetime in whole hours. Without this line the framework default
+# is 1; this project sets {lifetime}.
 SESSION_LIFETIME_HOURS="{lifetime}"
 
 # =============================================================================
@@ -580,13 +581,12 @@ APP_TIMEZONE="UTC"
 # RAHTI_SPILL_DIR="path/to/private/temp"
 
 # =============================================================================
-# DEVELOPMENT AND BUILD TOOLING (OPTIONAL)
-# RAHTI_DEV overrides profile-based development mode. RAHTI_TAILWIND points
-# rahti-build at a Tailwind CLI executable when it is not on PATH.
+# DEVELOPMENT (OPTIONAL)
+# RAHTI_DEV overrides profile-based development mode: 1, true, on or yes
+# enables it, and any other value disables it.
 # =============================================================================
 
 # RAHTI_DEV="1"
-# RAHTI_TAILWIND="path/to/tailwindcss"
 "#,
         secret = values.secret,
         cookie = values.cookie,
@@ -976,16 +976,17 @@ static DB: OnceLock<DatabaseConnection> = OnceLock::new();
 
 /// The connection, from a page, an rpc, or a route handler.
 ///
-/// Panics if the process has not connected yet, which can only happen by
-/// calling this before `main` reaches `connect()`. That is a wiring mistake
-/// rather than a runtime condition, and a message naming it is worth more
-/// than an `Option` every call site has to unwrap.
+/// Panics if the process has no connection: `DATABASE_URL` is absent, or
+/// this ran before `initialize_application` reached
+/// `connect_if_configured()`. Guard a page or an rpc with `is_connected()`;
+/// a message naming the cause is worth more than an `Option` every call site
+/// has to unwrap.
 pub fn db() -> &'static DatabaseConnection {
     DB.get().expect(
         "the database has not been connected.\n  \
-         `db::connect_if_configured().await` runs from `main` before the \
-         server starts — \
-         if you removed it, put it back.",
+         `db::connect_if_configured().await` runs from \
+         `initialize_application` in src/lib.rs and connects only when \
+         DATABASE_URL is set — guard this call with `db::is_connected()`.",
     )
 }
 
@@ -1076,11 +1077,12 @@ pub async fn connect_to(url: &str) -> Result<(), sea_orm::DbErr> {
 
 /// Apply every pending migration.
 ///
-/// Deliberately not called by `connect`. A framework that changes your schema
-/// because you started the server is the same surprise as one that downloads
-/// a compiler you did not ask for — and the version of that surprise which
-/// happens in production is much worse. Call it from a `main` branch behind
-/// an argument, or run it from a test, when you want it.
+/// Deliberately not called by `connect_if_configured`. A framework that
+/// changes your schema because you started the server is the same surprise as
+/// one that downloads a compiler you did not ask for — and the version of
+/// that surprise which happens in production is much worse. Call it from
+/// `initialize_application` behind an argument or an environment check, or
+/// run it from a test, when you want it.
 ///
 /// ```ignore
 /// # async fn example() {
@@ -1867,7 +1869,11 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
         "Components are PascalCase functions marked `#[component]`, return\n\
          `Html`, and take props as normal Rust arguments. In markup they are\n\
          called as tags — `<Card title=\"…\">…</Card>` — and children are an\n\
-         explicit `Html` argument rendered with `<slot />`."
+         explicit `Html` argument rendered with `<slot />`. A prop is written\n\
+         on the tag as HTML writes it, also when its name is a Rust keyword —\n\
+         `<Input type=\"number\" />`, `<Label for=\"email\" />`; the raw\n\
+         identifier (`r#type: &str`, `@{r#type}`) belongs only in the\n\
+         component's declaration and body, never on the tag."
             .to_string(),
     );
     rules.push(
@@ -1876,7 +1882,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          there reads the writing block's state — `html!` ships such children\n\
          as an owner-scoped `<template pp-owner=\"…\">`, the React children\n\
          semantics. Fragment-rooted (`<>…</>`) and `@{expr}`-built children\n\
-         still do not cross the boundary."
+         read the component's scope instead."
             .to_string(),
     );
     rules.push(
@@ -1920,7 +1926,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
         "Deserialize into owned Rust types first, then use `rahti::Validator`\n\
          for business rules at the handler boundary before side effects.\n\
          Validation failures are HTTP 422 with named field messages; malformed\n\
-         or mistyped RPC payloads remain HTTP 400. Database constraints remain\n\
+         or mistyped RPC payloads are HTTP 400. Database constraints are\n\
          authoritative for invariants that concurrent requests can race."
             .to_string(),
     );
@@ -1941,7 +1947,8 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
     rules.push(
         "The generated router applies the process-local `rahti::rate_limit`\n\
          outside application/auth/CSRF work and inside security headers. The\n\
-         default is 200 dynamic requests per client IP per minute; real public\n\
+         default is 200 dynamic requests per client IP per minute in production\n\
+         and 2,000 in development mode; real public\n\
          files, `OPTIONS`, `/health`, `/ready`, and development tooling are\n\
          exempt. Never\n\
          trust `X-Forwarded-For` unless an inaccessible trusted proxy replaces\n\

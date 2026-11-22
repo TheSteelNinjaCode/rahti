@@ -609,3 +609,20 @@ fn a_project_without_a_database_is_not_wired_for_one() {
     assert_eq!(config.db, None);
     assert!(!config.ws);
 }
+
+/// The database is wired in `src/lib.rs`, so that is the file whose being
+/// edited leaves work to do by hand, and `initialize_application` is where
+/// the advice sends the reader.
+#[test]
+fn database_advice_names_the_file_startup_lives_in() {
+    let edited = vec!["src/app/page.rs".to_string(), "src/lib.rs".to_string()];
+    let advice = database_advice(&edited).expect("advice for an edited src/lib.rs");
+    assert!(advice.contains("src/lib.rs is yours"), "{advice}");
+    assert!(advice.contains("`pub mod db;`"), "{advice}");
+    assert!(advice.contains("`initialize_application`"), "{advice}");
+    assert!(!advice.contains("`main`"), "{advice}");
+
+    // An edited `src/main.rs` binds an address and nothing else.
+    assert_eq!(database_advice(&["src/main.rs".to_string()]), None);
+    assert_eq!(database_advice(&[]), None);
+}

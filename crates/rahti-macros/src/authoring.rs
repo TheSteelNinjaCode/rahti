@@ -54,6 +54,24 @@ pub fn attribute_mistake(tag: &str, name: &str) -> Option<String> {
         && event.starts_with(|c: char| c.is_ascii_uppercase())
     {
         let lowercase = name.to_ascii_lowercase();
+        // On a component tag the name may be a callback prop, which is
+        // kebab-case: `onRowPick` is `on-row-pick`.
+        if tag.starts_with(|c: char| c.is_ascii_uppercase()) {
+            let mut callback = String::from("on");
+            for c in event.chars() {
+                if c.is_ascii_uppercase() {
+                    callback.push('-');
+                }
+                callback.push(c.to_ascii_lowercase());
+            }
+            return rename(
+                &lowercase,
+                &format!(
+                    "Event attributes are the native lowercase DOM names, and a callback prop \
+                     of `{tag}` is kebab-case: `{callback}={{…}}`, read as `pp.props.{name}`."
+                ),
+            );
+        }
         return rename(
             &lowercase,
             "Event attributes are the native lowercase DOM names.",
@@ -112,6 +130,16 @@ pub fn server_value_as_handler(name: &str) -> String {
          decodes the HTML escaping before the handler runs, so the value can end its string \
          and execute. Write the handler as a client binding, `{name}={{…}}`. \
          {SERVER_VALUE_FIX}"
+    )
+}
+
+/// `<Input r#type="number">` — a prop written with Rust's raw spelling. A tag
+/// writes a name as HTML does; `r#` is for the parameter's declaration.
+pub fn raw_prop_name(component: &str, name: &str) -> String {
+    format!(
+        "rahti: `r#{name}` on `<{component}>` is Rust's spelling, and a tag writes a prop as \
+         HTML does.\n  Write `{name}=\"…\"`: it fills the parameter `{component}` declares as \
+         `r#{name}`, and only that declaration needs the `r#`."
     )
 }
 
@@ -394,11 +422,18 @@ pub fn unknown_name(place: &str, name: &str, known: &[String], line: &str) -> St
             }
         }
     };
+    // Reached only under a `css.engine` whose `main.js` does not publish it.
+    let tailwind = if name == "twMerge" {
+        "\n  `twMerge` is published by the Tailwind scaffold's `public/js/main.js`, and this \
+         project's `css.engine` is not `tailwind`: nothing defines it here."
+    } else {
+        ""
+    };
     format!(
         "rahti[RAHTI_UNKNOWN_NAME]: this {place} reads `{name}`{line}, a name nothing gives \
          it.{meant}\n  {reads}.\n  Declare `{name}` in the block's script. A value another \
          script put on the window is read as `window.{name}`, and a value from the block \
-         around this one arrives as a prop, `pp.props.{name}`."
+         around this one arrives as a prop, `pp.props.{name}`.{tailwind}"
     )
 }
 

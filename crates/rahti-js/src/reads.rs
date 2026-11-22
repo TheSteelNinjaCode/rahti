@@ -78,7 +78,7 @@ pub fn rpc_reads(code: Code, source: &str) -> Vec<Read> {
     if code != Code::Script {
         return Vec::new();
     }
-    let (prefix, suffix) = ("async function __pp_script(pp, __pp_server) {\n", "\n}");
+    let (prefix, suffix) = ("function __pp_script(pp, __pp_server) {\n", "\n}");
     let wrapped = format!("{prefix}{source}{suffix}");
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, &wrapped, SourceType::mjs()).parse();

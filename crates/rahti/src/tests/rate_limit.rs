@@ -145,6 +145,7 @@ async fn a_rejected_rpc_gets_json_and_retry_headers() {
 
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()[header::RETRY_AFTER], "30");
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(response.headers()[LIMIT_HEADER], "1");
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(String::from_utf8_lossy(&body).contains(r#""error""#));
@@ -189,11 +190,36 @@ fn a_zero_window_is_rejected_at_configuration() {
 }
 
 #[test]
+fn the_default_exempts_all_development_tooling() {
+    let policy = RateLimit::default();
+    for path in [
+        "/__rahti/dev",
+        "/__rahti/dev.js",
+        "/__rahti/dev/log",
+        "/__rahti/dev/status",
+    ] {
+        assert!(
+            policy
+                .exempt_paths
+                .iter()
+                .any(|candidate| path_matches(candidate, path)),
+            "{path} spends the budget"
+        );
+    }
+    assert!(
+        !policy
+            .exempt_paths
+            .iter()
+            .any(|candidate| path_matches(candidate, "/_rahti/client.js"))
+    );
+}
+
+#[test]
 fn exempt_adds_to_the_default_exemptions() {
     let policy = RateLimit::default()
         .exempt("/api/hooks")
         .exempt("/api/hooks");
-    for kept in ["/health", "/ready", "/__rahti/dev"] {
+    for kept in ["/health", "/ready", "/__rahti"] {
         assert!(
             policy.exempt_paths.iter().any(|p| p == kept),
             "{kept} dropped"

@@ -287,8 +287,12 @@ impl Cadence {
     fn next(&self, previous: SystemTime, now: SystemTime) -> Option<SystemTime> {
         match self {
             Self::Once(_) => None,
+            // The next occurrence after the observation time: days a sleeping
+            // process missed are coalesced into the one dispatch just made.
+            // `previous` bounds it from below, so a clock that reads earlier
+            // than the occurrence it just dispatched cannot repeat that one.
             Self::Daily { zone, hour, minute } => {
-                Some(next_daily_after(previous, *zone, *hour, *minute))
+                Some(next_daily(previous.max(now), *zone, *hour, *minute))
             }
             // Fixed delay from the observation time deliberately coalesces
             // missed occurrences. A sleeping process must not replay a burst.
@@ -396,24 +400,6 @@ fn next_daily(now: SystemTime, zone: chrono_tz::Tz, hour: u8, minute: u8) -> Sys
     }
     now.checked_add(Duration::from_secs(24 * 60 * 60))
         .unwrap_or(now)
-}
-
-fn next_daily_after(previous: SystemTime, zone: chrono_tz::Tz, hour: u8, minute: u8) -> SystemTime {
-    let previous_utc: DateTime<Utc> = previous.into();
-    let mut day = previous_utc
-        .with_timezone(&zone)
-        .date_naive()
-        .succ_opt()
-        .unwrap_or_else(|| previous_utc.date_naive());
-    for _ in 0..=2 {
-        if let Some(candidate) = crate::time::resolve_local(zone, day, hour, minute) {
-            return candidate.into();
-        }
-        day = day.succ_opt().unwrap_or(day);
-    }
-    previous
-        .checked_add(Duration::from_secs(24 * 60 * 60))
-        .unwrap_or(previous)
 }
 
 fn valid_name(name: &str) -> bool {
@@ -654,9 +640,35 @@ mod tests {
         let zone = "America/New_York".parse().unwrap();
         let before_spring: SystemTime = Utc.with_ymd_and_hms(2026, 3, 7, 13, 0, 0).unwrap().into();
         let first = next_daily(before_spring, zone, 8, 30);
-        let second = next_daily_after(first, zone, 8, 30);
+        let second = next_daily(first, zone, 8, 30);
         let elapsed = second.duration_since(first).unwrap();
         assert_eq!(elapsed, Duration::from_secs(23 * 60 * 60));
+    }
+
+    /// A process that slept through several days dispatches once on waking,
+    /// and its next occurrence is the first one after that moment.
+    #[test]
+    fn daily_occurrences_missed_during_a_stall_are_coalesced() {
+        let at = |day, hour, minute| -> SystemTime {
+            Utc.with_ymd_and_hms(2026, 3, day, hour, minute, 0)
+                .unwrap()
+                .into()
+        };
+        let cadence = Cadence::Daily {
+            zone: chrono_tz::UTC,
+            hour: 8,
+            minute: 30,
+        };
+
+        // Due on the 1st, observed on the 4th at noon: the 2nd, 3rd and 4th
+        // are not replayed.
+        assert_eq!(cadence.next(at(1, 8, 30), at(4, 12, 0)), Some(at(5, 8, 30)));
+        // Woken before that day's time: the same day still runs.
+        assert_eq!(cadence.next(at(1, 8, 30), at(4, 6, 0)), Some(at(4, 8, 30)));
+        // On time, and with a clock reading just before the occurrence it
+        // dispatched: the next day, never the same occurrence again.
+        assert_eq!(cadence.next(at(1, 8, 30), at(1, 8, 30)), Some(at(2, 8, 30)));
+        assert_eq!(cadence.next(at(1, 8, 30), at(1, 8, 29)), Some(at(2, 8, 30)));
     }
 
     #[tokio::test]

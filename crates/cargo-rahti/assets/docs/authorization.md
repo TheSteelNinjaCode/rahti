@@ -18,7 +18,8 @@ framework never infers what a role means.
 ## Define and install the gate
 
 Keep the policy application-owned, normally beside the authentication policy
-in `src/auth.rs`:
+in `src/auth.rs`. `cargo rahti new` does not write that file: create it and
+declare `mod auth;` in `src/lib.rs` (the steps are in `authentication.md`).
 
 ```rust
 use rahti::authorization::Gate;
@@ -51,12 +52,18 @@ struct PostPolicy {
 ```
 
 Install the complete gate once during application startup, after auth and
-before building the router:
+before building the router. In `initialize_application` (`src/lib.rs`), before
+`routes::router()` is called, write:
 
 ```rust
 rahti::auth::configure(auth::settings());
 rahti::authorization::configure(auth::authorization());
 ```
+
+The scaffold carries both lines there as comments. Install the same two
+policies inside `setup()` in `src/tests/support.rs`, with `crate::auth::` in
+place of `auth::`, or the suite runs against an empty gate that denies every
+ability.
 
 A second `configure` replaces the gate. This makes router integration tests
 deterministic; production startup should install it once.
@@ -91,7 +98,9 @@ pub async fn update_post(id: i32, title: String) -> rahti::Result<Post> {
 
 `#[rpc(auth)]` answers 401 before parsing the payload when no valid session
 exists. `authorize_resource` answers 403 when an authenticated session is not
-allowed. The route guard only protects page loading; it does not protect an
+allowed. `authorize` and `authorize_resource` themselves answer 401 when no
+session exists, so they also protect a page or `route.rs` handler that has no
+`#[rpc(auth)]`. The route guard only protects page loading; it does not protect an
 RPC, API endpoint, or operation on a particular row.
 
 Take caller identity from the signed session. Never trust a `user_id` argument
@@ -113,7 +122,8 @@ the policy check.
 | `before::<User>` | typed session and ability name, before every defined policy |
 
 A `before` callback returns `Some(true)` to grant, `Some(false)` to deny, or
-`None` to continue to the named rule. It is useful for a deliberate
+`None` to continue to the named rule. Several callbacks run in registration
+order and the first `Some` decides. It is useful for a deliberate
 administrator override:
 
 ```rust
@@ -151,7 +161,9 @@ exposing their details in the HTTP response.
 
 Test all three relevant paths through the real router:
 
-1. no session receives 401 from `#[rpc(auth)]`;
+1. no session receives 401 from `#[rpc(auth)]` — send the CSRF cookie and its
+   matching `X-CSRF-Token` header, because a call without them is refused
+   with 403 first;
 2. a signed-in but unauthorized session receives 403;
 3. an allowed session reaches the operation.
 

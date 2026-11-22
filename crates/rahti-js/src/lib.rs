@@ -134,6 +134,11 @@ pub struct Script {
 /// The registry function for a component script whose body is `source`, in
 /// which each server value is already written as `__pp_server[i]`.
 pub fn component_script(source: &str) -> Result<Script, Error> {
+    if awaits_at_top_level(source) {
+        return Err(Error {
+            message: TOP_LEVEL_AWAIT.into(),
+        });
+    }
     let wrapped = format!("function __pp_script(pp, __pp_server) {{\n{source}\n}}");
     let mut bindings = Vec::new();
     analyze(&wrapped, |program| {
@@ -184,6 +189,33 @@ pub fn component_script(source: &str) -> Result<Script, Error> {
         ),
         bindings,
     })
+}
+
+/// What [`component_script`] refuses a script with when it awaits at its top
+/// level.
+pub const TOP_LEVEL_AWAIT: &str = "a component script runs from top to bottom on every render \
+     and cannot wait, so `await` at its top level is not allowed.\n  Put the call in an async \
+     function and call that from an effect: `async function load() { setRows(await \
+     pp.rpc(\"rows\", {})); }` and `pp.effect(() => { load(); }, []);`";
+
+/// Does this script body `await` outside every function of its own?
+///
+/// The runtime calls a script as an ordinary function and reads the bindings
+/// it returns, so nothing at its top level can wait. The body is such a
+/// script when it only parses inside an async function.
+pub fn awaits_at_top_level(source: &str) -> bool {
+    let parses = |prefix: &str| {
+        let wrapped = format!("{prefix} __pp_script(pp, __pp_server) {{\n{source}\n}}");
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, &wrapped, SourceType::mjs()).parse();
+        parsed.diagnostics.errors().next().is_none()
+            && matches!(
+                parsed.program.body.as_slice(),
+                [Statement::FunctionDeclaration(function)]
+                    if function.span.end as usize == wrapped.len()
+            )
+    };
+    source.contains("await") && !parses("function") && parses("async function")
 }
 
 /// Whether `source` is one JavaScript expression.

@@ -371,6 +371,60 @@ fn a_path_survives_being_a_query_value() {
     );
 }
 
+/// The sign-in redirect carries the path and its query, and what comes back
+/// out of `?next=` is the same target.
+#[test]
+fn next_carries_the_query_string() {
+    assert_eq!(next_target("/account", None), "/account");
+    assert_eq!(next_target("/account", Some("")), "/account");
+
+    let wanted = next_target("/account", Some("tab=billing&page=2"));
+    assert_eq!(wanted, "/account?tab=billing&page=2");
+
+    let encoded = encode_query(&wanted);
+    assert_eq!(encoded, "/account%3Ftab%3Dbilling%26page%3D2");
+    let returned = query_param(Some(&format!("next={encoded}")), "next").unwrap();
+    assert_eq!(safe_target(&returned, "/dashboard"), wanted);
+}
+
+/// A query value that is already percent-encoded returns as it was sent.
+#[test]
+fn next_keeps_an_encoded_query_value() {
+    let wanted = next_target("/search", Some("q=caf%C3%A9%20au%20lait&x=a%26b"));
+    let encoded = encode_query(&wanted);
+    assert!(
+        !encoded.contains('&') && !encoded.contains('='),
+        "{encoded}"
+    );
+    let returned = query_param(Some(&format!("next={encoded}")), "next").unwrap();
+    assert_eq!(returned, wanted);
+    assert_eq!(safe_target(&returned, "/dashboard"), wanted);
+}
+
+/// A query does not buy a way off the origin: an external or scheme-relative
+/// target is refused whether it is the path or hidden behind an encoding.
+#[test]
+fn next_with_a_query_cannot_leave_the_origin() {
+    for hostile in [
+        "https://evil.test/steal?tab=billing",
+        "//evil.test/steal?tab=billing",
+        "/\\\\evil.test?tab=billing",
+        "/%2f%2fevil.test?tab=billing",
+        "/account?return=https://evil.test",
+        "evil.test?tab=billing",
+    ] {
+        assert_eq!(
+            safe_target(hostile, "/dashboard"),
+            "/dashboard",
+            "{hostile}"
+        );
+    }
+
+    // And as the guard reads it: decoded out of the query first.
+    let sent = query_param(Some("next=%2F%2Fevil.test%2Fsteal%3Ftab%3D1"), "next").unwrap();
+    assert_eq!(safe_target(&sent, "/dashboard"), "/dashboard");
+}
+
 #[test]
 fn an_absent_query_parameter_is_none() {
     assert_eq!(query_param(None, "next"), None);

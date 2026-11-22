@@ -13,17 +13,12 @@ feature:
 rahti = { version = "…", features = ["ws"] }
 ```
 
-`cargo rahti new --ws` (or answering yes to "Use WebSockets?") writes that
-line and records `"ws": true` in `rahti.config.json`. A project that did not
-ask compiles none of the socket wire — the feature is what keeps
-tokio-tungstenite out of an app that never opens a connection.
-
-`cargo rahti upgrade --ws` adds WebSockets to a project that started without
-them: it records the key and folds `features = ["ws"]` into the `rahti` line
-already in `Cargo.toml`, keeping the version or path that is there and any
-features beside it. The config key is what it reads to know the feature is
-wanted, so a project whose config says `"ws": true` and whose manifest does
-not name the feature is repaired by running `upgrade` again.
+Two settings enable WebSockets together: that feature, and `"ws": true` in
+`rahti.config.json`. `cargo rahti new --ws` (or answering yes to "Use
+WebSockets?") writes both, and so does `cargo rahti upgrade --ws`, which
+folds `features = ["ws"]` into the `rahti` line in `Cargo.toml`, keeping its
+version or path and the features beside it. Without the feature none of the
+socket wire is compiled, and tokio-tungstenite is not a dependency.
 
 ## The Rust Signature
 
@@ -49,9 +44,11 @@ Rules:
 - The function must be `async` — the conversation only exists behind
   `.await`.
 - The last parameter is the `Socket`. Everything before it arrives in the
-  connection's first frame, read by the parameter's own name under the rpc
-  payload rules: owned deserializable types, `Option<T>` for an optional
-  argument.
+  connection's first frame, read by the parameter's own name: owned
+  deserializable types, `Option<T>` for an optional argument. The frame is
+  JSON end to end, so a value has to be JSON of the parameter's type — a
+  number sent as a string is not converted. A missing or mistyped argument
+  is an error frame, then the close, and the handler does not run.
 - Return nothing, or `rahti::Result<()>`. A socket answers through its
   frames, so a returned value would have nowhere to go — the macro refuses
   one. An `Err` reaches the browser as an error frame, then the close. It is
@@ -87,6 +84,7 @@ at startup, the way component rpc names are.
 - `socket.sender()` — a cloneable `SocketSender` another task may hold. A
   chat room is a list of these: keep one per connection in shared state, and
   a send that returns `false` is a connection to forget.
+- `socket.is_open()` — whether the connection is open, without sending.
 - `socket.close().await` — say goodbye first. Dropping the socket closes the
   connection too, so a handler that returns is a conversation that ends.
 - `rahti::auth::session()` answers inside a handler the way it does in an
@@ -158,16 +156,20 @@ that must recover missed state should fetch it in `onOpen` when
   text frame — one JSON object, exactly the payload `pp.rpc` would have
   posted — because a URL is logged by every proxy on the way and an argument
   is data.
-- Every frame after that is one JSON value, in either direction.
+- The server waits 10 seconds for that first frame; a connection that sends
+  none, or sends something other than a JSON object, receives an error frame
+  and is closed.
+- Every frame after that is one JSON value, in either direction. Binary
+  frames are ignored.
 - Single-key `__pp` objects are reserved for heartbeat control. A client
   `ping` receives a server `pong`; neither is passed to application code.
 - A frame of the shape `{"error": "…"}` — that key alone — is reserved: it is
   how the server reports failure inside an open connection, where no HTTP
   status line exists any more. The client routes it to `onError`, not
   `onMessage`.
-- Everything refusable is refused before the upgrade, as HTTP: an unnamed or
-  unknown socket, a cross-origin page, a missing session on
-  `#[socket(auth)]`.
+- Everything refusable is refused before the upgrade, as HTTP: an unnamed
+  socket (400), an unknown one (404), a cross-origin page (403), a missing
+  session on `#[socket(auth)]` (401).
 
 ## Who May Connect
 
@@ -175,7 +177,9 @@ The same-origin policy does not cover WebSockets: another site's page can
 open one here and the browser attaches the cookies. What that page cannot do
 is forge its `Origin` header, so the handshake is refused when `Origin`
 disagrees with `Host` — the socket counterpart of the rpc CSRF check.
-Schemes are not compared (a TLS-terminating proxy rewrites them); a request
+The comparison is `Origin`'s host and port against the `Host` header,
+ignoring case, so a reverse proxy has to forward the `Host` the browser
+used. Schemes are not compared (a TLS-terminating proxy rewrites them); a request
 with no `Origin` at all is a non-browser client carrying nothing to forge,
 and passes.
 

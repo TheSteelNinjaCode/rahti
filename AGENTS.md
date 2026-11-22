@@ -122,7 +122,11 @@ preserve them, and documentation or scaffold changes must teach them.
    and take props as normal Rust arguments. In markup they are called as
    tags — `<Card title="…">…</Card>` — where props are named attributes
    (literal or `@{expr}`); the function-call form remains for expression
-   contexts such as loops and conditionals.
+   contexts such as loops and conditionals. A prop is written on the tag as
+   HTML writes it, also when its name is a Rust keyword —
+   `<Input type="number" />`, `<Label for="email" />`; the raw identifier
+   (`r#type: &str`, `@{r#type}`) belongs only in the component's declaration
+   and body; `html!` refuses it on the tag.
 9. Children are an explicit `Html` argument rendered with `<slot />`. An
    empty tag pair passes `Html::empty()`, a self-closing tag passes no
    `children` at all. `Html::concat(...)` joins a list built in Rust.
@@ -356,7 +360,7 @@ preserve them, and documentation or scaffold changes must teach them.
   security, rate limiting, request middleware, observability, jobs,
   scheduling, application time, localization, sockets, statics, live reload,
   and shutdown.
-- `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[socket]`.
+- `crates/rahti-macros/` - `html!`, `#[component]`, `#[rpc]`, `#[job]`, `#[socket]`, and `shapes!`.
 - `crates/rahti-js/` - compile-time JavaScript compiler for `html!`; the
   browser compiles nothing.
 - `crates/rahti-build/` - configuration, filesystem scan, router/component

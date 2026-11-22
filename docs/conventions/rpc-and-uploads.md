@@ -40,7 +40,8 @@ Rules:
 - Functions may be sync or async, but cannot be methods or generic functions.
 - Parameters need plain names and owned deserializable types.
 - The payload key must match the Rust parameter name.
-- Return a serializable value or `rahti::Result<T>`.
+- Return a serializable value or `rahti::Result<T>`. A function with no
+  return type is a compile error.
 - `Option<T>` accepts an absent/null argument.
 - The original function remains callable from Rust.
 
@@ -59,8 +60,8 @@ messages remain public; unexpected 5xx diagnostics are generic in production
 and stay in server telemetry. A `ValidationErrors`-backed error uses status
 422 and named field messages; see `validation.md` and `error-handling.md`.
 
-For 401 and 403, PulsePoint keeps its stable messages `Authentication
-required` and `Permission denied` while preserving the response in `body`.
+For 401 and 403, the `message` is `Authentication required` or `Permission
+denied`, and the server's response is in `body`.
 When `onStreamError` is supplied, PulsePoint calls it for a failed request or
 stream instead of rejecting the outer Promise; handle the error there.
 
@@ -471,12 +472,20 @@ A struct is checked when all of these hold:
 
 So a struct a page declares for its own data is written `pub struct Row`,
 not `struct Row`. A value whose struct does not qualify is not checked, and
-nothing says so. These are also left alone:
+the build is silent about it unless a report is requested: with the
+environment variable `RAHTI_STATE_REPORT` set to a file path during
+`cargo check`, `html!` appends one tab-separated line per state, read, loop
+and `pp.rpc` payload saying whether it was checked, and the compiler warns
+`RAHTI_UNSHAPED` with the constant's name for each server value whose reads
+are not checked. These are also left alone:
 
-- an enum, a `#[serde(flatten)]` field, a map, a `serde_json::Value`, a
-  struct with a hand-written `Serialize`: these have no fields to check a
-  read against, here or nested inside a checked struct;
-- a struct from another crate;
+- an enum, a `#[serde(flatten)]` field, a map, a `serde_json::Value`: these
+  have no fields to check a read against, here or nested inside a checked
+  struct;
+- a struct from another crate, and a struct with a hand-written `Serialize`.
+  A struct with a field of either type, or with a `with = "…"` field, is not
+  checked at all: every part of a checked struct has `schemaStatus`
+  `resolved` (see "Wire Shapes");
 - a field name the block assigns anywhere, and what an array, a string or
   any object answers to (`length`, `map`, `toString`);
 - a server value that is not a top-level `const`: one used inside an
@@ -517,8 +526,8 @@ every payload, and the handler validates business rules before side effects
    separate page URLs may use the same name. A component RPC has no fixed URL;
    it is called from the page rendering that component.
 3. Read `parameters` (`name`, `rustType`, `required`, `transport`,
-   `typescript`) and `response` (`rustType`, `fallible`, `transport`,
-   `typescript`). `line` and `column` locate the declaration. `typescript` is
+   `schemaStatus`, `typescript`) and `response` (`rustType`, `fallible`,
+   `transport`, `schemaStatus`, `typescript`). `line` and `column` locate the declaration. `typescript` is
    the JSON the browser sends or reads, and `payload.typescript` is the whole
    object a call passes; write the caller's keys and field accesses from them
    (see "Wire Shapes"). `schemaStatus` says how far to trust a shape: anything
@@ -602,6 +611,10 @@ parameter). The shape honors `rename`, `rename_all`, `rename_all_fields`,
 - `dynamic` — JSON of any shape, such as `serde_json::Value`.
 - `stream` — an `RpcStream`, whose events no type declares.
 
+Each parameter and the response carry their own `schemaStatus`.
+`payload.schemaStatus` is `resolved` when every parameter is, and `partial`
+otherwise.
+
 A shape is read from source, not from the compiler, so it describes what the
 derive writes: a macro-generated type, a `#[path]` the scan cannot follow, or
 a type shadowing a standard name is reported as `unknown` or under the
@@ -615,8 +628,8 @@ it, and a project without it compiles with no response check.
 
 The manifest declares `rpcContractVersion: 1`. MCP requires this contract
 inventory and reports `RAHTI_RPC_CONTRACT_MANIFEST` with a regeneration
-instruction if it is missing or unsupported. It never reconstructs contracts
-from route-name lists. Discovery remains read-only and never invokes an RPC.
+instruction if it is missing or unsupported. Discovery is read-only and
+never invokes an RPC.
 `authRequired` describes the RPC session requirement, not route privacy or
 resource authorization.
 
@@ -632,10 +645,10 @@ A missing or mistyped JSON argument that fails server deserialization returns
 HTTP 400 with `error`, `code`, `rpc`, `argument`, `expectedRustType`,
 `receivedType`, and `hint`. `code` is `RAHTI_RPC_MISSING_ARGUMENT` or
 `RAHTI_RPC_ARGUMENT_TYPE`. `receivedType` is a shape such as `string` or
-`missing`, never the input value. A successful custom deserializer remains
-valid even if it accepts an absent argument as null. Business validation
-remains HTTP 422 with named field messages. Streaming-upload ordering errors
-and file errors retain their transport-specific explanations.
+`missing`, never the input value. A custom deserializer that accepts an
+absent argument as null succeeds. Business validation is HTTP 422 with named
+field messages. A missing file and a streaming-upload ordering error are
+HTTP 400 with an `error` message of their own and no `code`.
 
 Read these fields through `failure.body`, for example:
 
@@ -697,6 +710,14 @@ page GET and returned as `X-CSRF-Token`. The client includes Rahti/PulsePoint
 wire headers and honors same-origin server redirects. Do not replace
 `pp.rpc(...)` with raw `fetch` unless implementing a distinct external API.
 
+On the wire a call is a POST to the page URL with `X-PP-Function: <name>`
+and `X-CSRF-Token`. The token must equal the CSRF cookie: `pp_csrf_<port>`
+when the `Host` header carries a port, otherwise `pp_csrf`. A router test
+loads a page, then sends the cookie and the header together. The server
+answers 400 when the function header is absent or the body is not a JSON
+object, 403 when the token is absent or differs from the cookie, and 404 for
+a name that is neither a page RPC of that URL nor a component RPC.
+
 ## Server Streaming
 
 Return `RpcStream` to produce `text/event-stream`:
@@ -714,6 +735,9 @@ Other construction forms:
 - `RpcStream::from_iter(values)` for an iterator;
 - `RpcStream::channel(capacity)` for `(RpcSender, RpcStream)`;
 - `RpcSender::send(value).await` sends one serialized event.
+
+Return `rahti::Result<RpcStream>` to refuse before the stream starts: an
+`Err` is an ordinary RPC failure with its status and JSON error.
 
 Client:
 
@@ -768,8 +792,8 @@ Rules:
 
 - at most one `RpcUpload` parameter;
 - it must be the final parameter;
-- the browser's file value must be last on the multipart wire. The current
-  PulsePoint client deliberately appends all non-file fields before files;
+- the browser's file value must be last on the multipart wire. The
+  PulsePoint client appends all non-file fields before files;
 - a missing or non-multipart file is an RPC error.
 
 APIs include `name`, `safe_name`, `content_type`, `read_so_far`, `chunk`,
@@ -792,6 +816,9 @@ Overrides:
 - `RAHTI_SPILL_THRESHOLD`
 - `RAHTI_SPILL_DIR`
 
-Values are byte counts. The effective per-file limit never exceeds the total
-request limit. Keep application-level content validation separate from
+Values are byte counts; a value that is not a number is logged as a warning
+and the default applies. The effective per-file limit never exceeds the total
+request limit. A JSON payload, and each multipart part without a filename, is
+limited to 1 MiB. A payload, part, file or request over its limit answers
+HTTP 413. Keep application-level content validation separate from
 transport limits.

@@ -12,7 +12,7 @@ every render:
 
 | Hook | Returns | Use |
 | --- | --- | --- |
-| `pp.state(initial)` | `[value, setValue]` | A value the markup shows. The setter takes a value or `(previous) => next`; equal values (`Object.is`) do not re-render |
+| `pp.state(initial)` | `[value, setValue]` | A value the markup shows. A function passed as `initial` is called once and its result is the first value, so a function is never stored as state directly. The setter takes a value or `(previous) => next`; equal values (`Object.is`) do not re-render |
 | `pp.effect(callback, deps?)` | — | Work after commit; may return a synchronous cleanup |
 | `pp.layoutEffect(callback, deps?)` | — | Synchronous work after DOM mutation, ref binding and portals, before `pp.effect` — measurement |
 | `pp.ref(initial?)` | `{ current }` | A value that persists without re-rendering; an element handle through `pp-ref` |
@@ -44,6 +44,9 @@ Rules that hold for every hook:
   `pp.memo` and `pp.callback`. Without one, an effect runs after every
   render. Dependencies compare by identity, so an object or function rebuilt
   each render belongs in `pp.memo`/`pp.callback` before it is a dependency.
+- A script runs from top to bottom on every render and cannot wait:
+  `await` at its top level is a compile error. Put the call in an async
+  function and start it from an effect, `pp.effect(() => { load(); }, []);`.
 - Top-level declarations reach the markup — every destructuring form
   included: `const [isPending, start] = pp.transition()` and
   `const [error, reset] = pp.errorBoundary()` bind like `pp.state` does.
@@ -412,11 +415,15 @@ html! {
             <ThemeBadge />
         </themecontext.provider>
         <script>r##"
-            const ThemeContext = pp.createContext("light");
+            // On globalThis so the consumer's script reads the same token.
+            const ThemeContext = (globalThis.ThemeContext ??= pp.createContext("light"));
             const [theme, setTheme] = pp.state("dark");
         "##</script>
     </section>
 }
+
+// In `ThemeBadge`'s own script:
+// const theme = pp.context(globalThis.ThemeContext);
 ```
 
 - Resolution walks the logical component ancestry, not the live DOM, so
@@ -426,8 +433,8 @@ html! {
   `pulsepoint-performance.md`).
 - A component does not consume the value it provides in the same render.
 - Provider and consumer must share the token object. When they live in
-  different component scripts, put the token in a store module both read, or
-  pass it down.
+  different component scripts, publish the token on `globalThis` as above,
+  put it in a store module both read, or pass it down.
 - When a provider stops providing or is destroyed, consumers fall back to the
   next ancestor provider, then to the token's default.
 - There is no `pp-context` attribute and no `pp.provideContext`.

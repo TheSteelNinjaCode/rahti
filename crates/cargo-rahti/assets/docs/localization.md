@@ -23,7 +23,8 @@ Declare supported Unicode locale identifiers and the default in
 }
 ```
 
-`locales` must be non-empty and unique after canonicalization. `default`
+`locales` and `default` are both required; an `i18n` object without either is
+a build error. `locales` must be non-empty and unique after canonicalization. `default`
 and every fallback must appear in it. A fallback chain cannot repeat a locale
 or contain its own source. `dir` defaults to `lang`.
 
@@ -61,10 +62,13 @@ src/app/
 
 On those routes the segment is authoritative. `/es/account` uses `es`;
 an unsupported value such as `/fr/account` answers 404 even though the
-filesystem route is dynamic.
+filesystem route is dynamic. That 404 is a bare response with an empty body
+from the localization layer, not the root `not-found.rs` page.
 
 A route without either segment negotiates `Accept-Language`, then uses the
-configured default. This is useful for an unprefixed entry page that redirects
+configured default. Negotiation honours `q` weights and matches a regional
+tag such as `es-MX` to the first configured locale of the same language. This
+is useful for an unprefixed entry page that redirects
 to a canonical localized URL:
 
 ```rust
@@ -109,8 +113,13 @@ let label = t("navigation-account");
 selects the locale's plural category. Interpolated values carry Unicode
 directionality isolation.
 
+`locale`, `t`, `t_with`, and `localized_path` panic when the process has not
+built an i18n-enabled router: a project with no `i18n` object, or a unit test
+that calls them before `routes::router()`.
+
 Lookup checks the active locale, its configured fallback chain, and finally
-the default locale. A missing message returns its key. Translation results are
+the default locale. A missing message returns its key. A message that fails
+to format, such as one missing an argument, is treated as missing. Translation results are
 ordinary strings: `@{t("key")}` is escaped by `html!` like every other
 runtime value. A catalog is never trusted raw HTML.
 
@@ -141,8 +150,9 @@ Use the real scaffold root-layout shape; the abbreviated example only shows
 the locale attributes. Common right-to-left language subtags return `rtl`;
 the rest return `ltr`.
 
-The localization layer surrounds metadata and layouts, so `metadata()` may
-call `t`. Every localized dynamic response receives `Content-Language`.
+The localization layer is the outermost layer of each route group: it
+surrounds the auth guard, the application request pipeline, metadata and
+layouts, so `metadata()` and application middleware may call `t`. Every localized dynamic response receives `Content-Language`.
 
 ## Links, Authentication, RPCs, and Caching
 
@@ -161,9 +171,9 @@ catalog automatically; seed the particular translated strings they need from
 Rust.
 
 Locale-prefixed URLs naturally partition page-cache keys because the complete
-URI is part of the key. An i18n request whose locale came from
-`Accept-Language` bypasses page caching; only an explicit locale URL is safe
-to cache. Use an uncacheable negotiation redirect, then cache that URL.
+URI is part of the key. Every request on a route without a root locale
+segment bypasses page caching, whether or not it sent `Accept-Language`; only
+an explicit locale URL is safe to cache. Use an uncacheable negotiation redirect, then cache that URL.
 
 ## Static Export
 
@@ -175,6 +185,8 @@ src/app/[locale]/about/page.rs
     -> /en/about
     -> /es/about
 ```
+
+Such a page exports no `static_paths()`; declaring one is a build error.
 
 If the page has other dynamic segments, its `static_paths()` still returns
 complete concrete URLs, including the locale:

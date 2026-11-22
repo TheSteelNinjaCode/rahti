@@ -47,9 +47,21 @@ content.
 When an application has page or component RPCs, Rahti issues a random
 port-scoped CSRF cookie on page requests. `pp.rpc` reads it and returns it in
 the `X-CSRF-Token` header. The server requires a matching non-empty token.
+The cookie is named `pp_csrf_<port>` (`pp_csrf` when the `Host` header names
+no port), is written `Path=/; SameSite=Lax` without `HttpOnly`, and is issued
+on a page response when the request carried none. Outside development mode it
+is also `Secure`, under the same condition as the session cookie, so a
+production deployment serves pages over HTTPS (or a loopback origin, which
+browsers treat as secure); over plain HTTP the browser discards the cookie and
+every RPC is refused. A call whose header and
+cookie do not match is answered 403 with `{"error": …}` before the function
+runs, and before `#[rpc(auth)]` is consulted.
 
 - Call Rahti RPCs through `pp.rpc` so the wire headers and token are present.
 - Do not disable or bypass the generated `csrf` layer.
+- The check covers RPC calls only. A `route.rs` endpoint receives no CSRF
+  check: put a browser-called mutation behind `#[rpc]`, and give a
+  state-changing API endpoint its own caller verification.
 - CSRF proves request origin/session continuity; it is not authentication or
   authorization. Mark a sensitive RPC `#[rpc(auth)]`, and check inside it that
   the signed-in user may touch the specific row with an application-defined
@@ -130,7 +142,8 @@ customer data, or internal diagnostics there.
 
 The `/mcp/` Streamable HTTP endpoint is a deeper read-only inspection surface.
 Protect it with a unique `RAHTI_MCP_AUTH_TOKEN`; it does not accept the browser
-session as authorization. Release builds fail closed when the token is absent,
+session as authorization. Outside development mode the endpoint fails closed
+with 503 when the token is absent,
 and invalid credentials receive a Bearer challenge. Set
 `RAHTI_MCP_ALLOWED_HOSTS` to the deployment's public hostnames so the MCP
 transport's DNS-rebinding guard accepts the intended origin and nothing else.
@@ -161,7 +174,8 @@ or other secrets. Delete the log before sharing a workspace archive.
   its place: what the file may contain is documented at
   <https://rahti.tsnc.tech/docs/environment>, not scaffolded into a second
   file that would go stale.
-- `src/db.rs` reads `.env` without overriding variables already set, so a
+- `rahti::load_env()`, which `src/db.rs` calls, reads `.env` without
+  overriding variables already set, so a
   deployment that exports `DATABASE_URL` cannot be redirected by a stale file
   on the same machine.
 - SeaORM parameterises queries. Bind values in any raw SQL rather than

@@ -88,7 +88,7 @@ fn a_prop_the_component_reads_is_passed_by_either_spelling() {
     assert_eq!(
         passed(
             "<div><MigrationDialog open={shown} current={id} online-now={live} \
-             onlineNow={live} onPick={choose} /></div>"
+             onlineNow={live} on-pick={choose} /></div>"
         ),
         None
     );

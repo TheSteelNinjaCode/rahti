@@ -16,7 +16,11 @@ cargo rahti generate job send_receipt --params order_id:i64
 
 This adds the function to `src/jobs.rs`, declares `pub mod jobs;` in
 `src/lib.rs`, and makes sure workers start. A parameter with no type is a
-`String`. The result is an ordinary function with an attribute:
+`String`. The generator writes a bare `#[job]` whose body returns `Ok(())`.
+It refuses a name that is not snake_case or is a Rust keyword, a name
+`src/jobs.rs` already defines, a borrowed parameter type, and a project that
+has a `src/jobs/` directory and no `src/jobs.rs`. The result is an ordinary
+function with an attribute:
 
 ```rust
 use rahti::job;
@@ -77,11 +81,17 @@ this line.
 
 | Call | Result |
 | --- | --- |
-| `send_receipt::enqueue(id).await` | `JobId`, waiting for capacity on a memory queue |
-| `send_receipt::enqueue_unique("key", id).await` | `Some(JobId)`, or `None` while a pending or running job holds `key` |
-| `send_receipt::request(id)` | a `NewJob` value, for a store to insert in a transaction |
-| `send_receipt::payload(id)` | the stored arguments, for a schedule |
-| `send_receipt::NAME` | the stored name |
+| `send_receipt::enqueue(id).await` | `Result<JobId, EnqueueError>`, waiting for capacity on a memory queue |
+| `send_receipt::enqueue_unique("key", id).await` | `Result<Option<JobId>, EnqueueError>`: `Ok(Some(JobId))`, or `Ok(None)` while a pending or running job holds `key` |
+| `send_receipt::request(id)` | `Result<NewJob, EnqueueError>`, a value for a store to insert in a transaction |
+| `send_receipt::payload(id)` | `Result<serde_json::Value, serde_json::Error>`, the stored arguments, for a schedule |
+| `send_receipt::NAME` | the stored name, a `&'static str` |
+
+`enqueue_unique` never waits: a full queue returns `EnqueueError::Full`. A
+unique key is 1–128 bytes with no NUL byte; any other key returns
+`EnqueueError::InvalidKey`. The remaining variants are `NotStarted`,
+`UnknownJob(name)`, `Closed` once shutdown begins, `Serialize(error)`, and
+`Store(error)`.
 
 Enqueue after the authoritative transaction commits. A fast worker may
 otherwise observe state that later rolls back. With a store, enqueue inside the
@@ -104,7 +114,10 @@ rahti::jobs::Jobs::new().install();
 this the queue `enqueue` reaches. With no jobs it starts nothing. During a
 static export it also starts nothing, because rendering must not run side
 effects. An `enqueue` with no installed queue returns
-`EnqueueError::NotStarted`, whose message names this line.
+`EnqueueError::NotStarted`, whose message names this line. `install` returns
+`Option<JobQueue>`, `None` when it starts nothing, and
+`rahti::jobs::queue()` returns the installed queue or
+`Err(EnqueueError::NotStarted)`.
 
 Configure the queue in code, because this is application policy:
 
@@ -124,7 +137,9 @@ rahti::jobs::Jobs::new()
 Defaults are one worker, capacity 1,024 in memory and 10,000 in a store, three
 attempts, 250 ms initial exponential backoff capped at 30 seconds, a 30-second
 attempt timeout, and a 30-second shutdown grace. `#[job]` options override the
-attempt policy for that job.
+attempt policy for that job. Every count or duration setter panics on zero, `backoff` panics
+when the maximum is shorter than the initial delay, and `lease` panics below
+one second.
 
 A test reinstalls freely: the newest `install` replaces the previous queue,
 which is what a test binary with one runtime per test needs.
@@ -145,6 +160,13 @@ This writes three application-owned files and changes `src/lib.rs`:
 | `src/models/job.rs` | the `job` table's entity |
 | `src/migrations/m…_create_job.rs` | the migration that creates it |
 
+The migration is `mYYYYMMDD_000001_create_job.rs`, dated in UTC. The entity
+and the migration go to the directories `db.models` and `db.migrations` name
+in `rahti.config.json`, `src/models` and `src/migrations` by default. The
+generator refuses a project with no `db` object in
+`rahti.config.json` and overwrites nothing: an existing file at any of the
+three paths stops it.
+
 Apply the migration, and add a test that holds the adapter to the contract:
 
 ```rust
@@ -156,7 +178,7 @@ async fn the_job_store_keeps_the_contract() {
 ```
 
 `conformance` needs an empty `job` table and panics on the first broken rule.
-The queue now starts with `Jobs::new().store(job_store::SeaJobStore).install()`.
+With the store generated, the queue starts with `Jobs::new().store(job_store::SeaJobStore).install()`.
 Workers wake at once for work this process accepts, and poll for the rest; set
 the interval with `.poll_interval(…)`, one second by default.
 
@@ -276,9 +298,12 @@ collector; Rahti does not publish a metrics route.
 
 ## Programmatic Handlers
 
-`Jobs::handler("name", closure)` registers a closure on a queue from `start()`,
-for a handler that captures state. Its name is a string, so nothing checks a call
-at compile time, and it appears in no manifest. Prefer `#[job]`.
+`Jobs::new().handler("name", closure).start()` registers a closure and returns
+the `JobQueue` it runs on, for a handler that captures state. The closure takes
+one deserialized payload and returns `Result<(), JobError>`; work reaches it
+through `queue.enqueue("name", payload).await`. Its name is a string, so
+nothing checks a call at compile time, and it appears in no manifest. Prefer
+`#[job]`.
 
 ## Operational Boundary
 

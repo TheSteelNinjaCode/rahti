@@ -14,6 +14,13 @@ fn db_at(tree: &Tree) -> Db {
     }
 }
 
+/// A scan whose module files sit beside the files they declare, the default
+/// layout.
+fn scan_tree(tree: &Tree) -> Scan {
+    let db = db_at(tree);
+    scan_into(&db, &db.models, &db.migrations)
+}
+
 /// The contents generated for one of the two directories.
 fn generated(scan: &Scan, dir: &str) -> String {
     let wanted = format!("{dir}/mod.rs");
@@ -30,7 +37,7 @@ fn every_entity_becomes_a_module() {
     tree.file("models/todo.rs", "pub struct Model;")
         .file("models/order_line.rs", "pub struct Model;");
 
-    let out = generated(&scan(&db_at(&tree)), "models");
+    let out = generated(&scan_tree(&tree), "models");
     assert!(out.contains("pub mod todo;"), "{out}");
     assert!(out.contains("pub mod order_line;"), "{out}");
 }
@@ -44,7 +51,7 @@ fn the_entity_declarations_are_ordered() {
         .file("models/alpha.rs", "")
         .file("models/middle.rs", "");
 
-    let out = generated(&scan(&db_at(&tree)), "models");
+    let out = generated(&scan_tree(&tree), "models");
     let at = |name: &str| out.find(name).unwrap_or_else(|| panic!("{name} missing"));
     assert!(
         at("alpha") < at("middle") && at("middle") < at("zebra"),
@@ -62,7 +69,7 @@ fn a_migration_file_is_registered_in_the_migrator() {
         "pub struct Migration;",
     );
 
-    let out = generated(&scan(&db_at(&tree)), "migrations");
+    let out = generated(&scan_tree(&tree), "migrations");
     assert!(
         out.contains("pub mod m20260731_000001_create_todo;"),
         "{out}"
@@ -82,7 +89,7 @@ fn migrations_are_applied_in_filename_order() {
         .file("migrations/m20260731_000001_first.rs", "")
         .file("migrations/m20260901_000001_third.rs", "");
 
-    let out = generated(&scan(&db_at(&tree)), "migrations");
+    let out = generated(&scan_tree(&tree), "migrations");
     let at = |name: &str| {
         out.find(&format!("Box::new({name}"))
             .unwrap_or_else(|| panic!("{name} is not in the migrator:\n{out}"))
@@ -103,7 +110,7 @@ fn migrations_are_applied_in_filename_order() {
 #[test]
 fn an_empty_project_still_compiles() {
     let tree = Tree::new("empty-db");
-    let scan = scan(&db_at(&tree));
+    let scan = scan_tree(&tree);
 
     let models = generated(&scan, "models");
     assert!(
@@ -129,13 +136,69 @@ fn the_directories_are_created_when_missing() {
     assert!(Path::new(&db.migrations).is_dir());
 }
 
+/// `db.models` and `db.migrations` say where the files are; the module files
+/// stay where `src/lib.rs` looks for them and point at each file, so a moved
+/// directory needs nothing written by hand.
+#[test]
+fn a_moved_directory_is_wired_from_the_module_files_home() {
+    let tree = Tree::new("moved-db");
+    tree.file("data/entities/invoice.rs", "")
+        .file("data/changes/m20260101_000001_create_invoice.rs", "");
+    let at = |dir: &str| normalize(&tree.path().join(dir));
+    let db = Db {
+        backend: Backend::Sqlite,
+        models: at("data/entities"),
+        migrations: at("data/changes"),
+    };
+
+    let scan = scan_into(&db, &at("src/models"), &at("src/migrations"));
+
+    // Written at the home, not in the configured directory.
+    let paths: Vec<&str> = scan.modules.iter().map(|(path, _)| path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [at("src/models/mod.rs"), at("src/migrations/mod.rs")]
+    );
+    let models = generated(&scan, "models");
+    assert!(
+        models.contains("#[path = \"../../data/entities/invoice.rs\"]\npub mod invoice;"),
+        "{models}"
+    );
+    let migrations = generated(&scan, "migrations");
+    assert!(
+        migrations.contains(
+            "#[path = \"../../data/changes/m20260101_000001_create_invoice.rs\"]\n\
+             pub mod m20260101_000001_create_invoice;"
+        ),
+        "{migrations}"
+    );
+    assert!(
+        migrations.contains("Box::new(m20260101_000001_create_invoice::Migration)"),
+        "{migrations}"
+    );
+}
+
+/// The default layout keeps its files beside the module file, so nothing
+/// needs a `#[path]`.
+#[test]
+fn the_default_directories_need_no_path() {
+    assert_eq!(relative("src/models", "src/models"), "");
+    assert_eq!(relative("src/models", "src/models/"), "");
+    assert_eq!(
+        relative("src/models", "src/data/entities"),
+        "../data/entities"
+    );
+    assert_eq!(relative("src/models", "db/entities"), "../../db/entities");
+    assert_eq!(declaration("", "todo"), "pub mod todo;\n");
+}
+
 #[test]
 fn mod_rs_is_not_itself_a_module() {
     let tree = Tree::new("skip-mod");
     tree.file("models/mod.rs", "// stale, about to be overwritten")
         .file("models/todo.rs", "");
 
-    let out = generated(&scan(&db_at(&tree)), "models");
+    let out = generated(&scan_tree(&tree), "models");
     assert!(!out.contains("pub mod mod;"), "{out}");
     assert!(out.contains("pub mod todo;"), "{out}");
 }
@@ -148,7 +211,7 @@ fn the_files_are_reported_for_the_manifest() {
     tree.file("models/todo.rs", "")
         .file("migrations/m20260731_000001_create_todo.rs", "");
 
-    let scan = scan(&db_at(&tree));
+    let scan = scan_tree(&tree);
     assert!(
         scan.models[0].ends_with("models/todo.rs"),
         "{:?}",
@@ -168,7 +231,7 @@ fn every_file_is_watched_as_well_as_its_directory() {
     let tree = Tree::new("watched");
     tree.file("models/todo.rs", "");
 
-    let scan = scan(&db_at(&tree));
+    let scan = scan_tree(&tree);
     assert!(
         scan.watched.iter().any(|w| w.ends_with("/models")),
         "{:?}",
@@ -186,7 +249,7 @@ fn every_file_is_watched_as_well_as_its_directory() {
 fn a_nested_entity_directory_is_refused() {
     let tree = Tree::new("nested-models");
     tree.file("models/billing/invoice.rs", "");
-    scan(&db_at(&tree));
+    scan_tree(&tree);
 }
 
 #[test]
@@ -194,7 +257,7 @@ fn a_nested_entity_directory_is_refused() {
 fn a_file_name_that_is_not_a_module_name_is_refused() {
     let tree = Tree::new("bad-name");
     tree.file("models/order-line.rs", "");
-    scan(&db_at(&tree));
+    scan_tree(&tree);
 }
 
 #[test]
@@ -202,5 +265,5 @@ fn a_file_name_that_is_not_a_module_name_is_refused() {
 fn a_keyword_file_name_is_refused() {
     let tree = Tree::new("keyword");
     tree.file("models/type.rs", "");
-    scan(&db_at(&tree));
+    scan_tree(&tree);
 }

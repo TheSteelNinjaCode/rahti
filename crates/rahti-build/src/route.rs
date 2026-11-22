@@ -15,7 +15,7 @@ pub enum Kind {
     NotFound,
     /// `layout.rs` — wraps every page in its subtree.
     Layout,
-    /// `error.rs` — error boundary. Recorded, not yet wired.
+    /// `error.rs` — the error boundary for its subtree.
     Error,
     /// `loading.rs` — the markup shown while the next page is fetched.
     Loading,

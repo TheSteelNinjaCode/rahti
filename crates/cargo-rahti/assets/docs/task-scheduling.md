@@ -24,7 +24,10 @@ use crate::jobs::{finish_import, refresh_index, send_summary};
 static SCHEDULER: OnceLock<SchedulerHandle> = OnceLock::new();
 
 pub fn start_schedule() {
-    let queue = rahti::jobs::queue().expect("the job queue is installed");
+    // No queue is installed during a static export, so no timer starts.
+    let Ok(queue) = rahti::jobs::queue() else {
+        return;
+    };
     let scheduler = Scheduler::new(queue)
         .every(
             "refresh-search-index",
@@ -58,7 +61,16 @@ Schedule names are stable identifiers containing 1–64 ASCII letters, numbers,
 `-`, `_`, or `.`. Names must be unique within one `Scheduler`. The target
 job must already be registered on the supplied queue, so misspelled handlers
 fail during startup rather than at the scheduled time. Payload serialization
-also happens while defining the schedule.
+also happens while defining the schedule. Each builder method returns
+`Result<Scheduler, ScheduleError>`; the variants are `InvalidName(name)`,
+`Duplicate(name)`, `UnknownJob(name)`, `InvalidInterval`,
+`InvalidUtcTime { hour, minute }`, `InvalidLocalTime { hour, minute }`, and
+`Serialize(error)`. `start()` panics on a scheduler with no schedules.
+
+`rahti::jobs::queue()` returns `Err(EnqueueError::NotStarted)` when
+`Jobs::install()` started nothing: during a static export, and in a binary
+with no `#[job]`. Return before building the scheduler in that case, as the
+example does.
 
 The supported timing forms are:
 
@@ -77,7 +89,8 @@ timezone. See `application-timezone.md`.
 
 ## Overlap and Backpressure
 
-Recurring schedules prevent overlap by default. A schedule-specific unique key
+Recurring schedules prevent overlap by default. A schedule-specific unique key,
+`schedule:<name>` in the queue's unique-key namespace,
 is held while its prior job is queued, running, retrying, or backing off. If the
 next occurrence arrives during that period, it is skipped and counted; it is
 not delayed into an accumulating backlog.
@@ -91,18 +104,20 @@ occurrence and records it. This keeps a scheduler timer from becoming an
 unbounded producer. Unknown, closed, or otherwise rejected dispatches are
 recorded as failures.
 
-When a process sleeps, stalls, or starts late, interval occurrences are
+When a process sleeps, stalls, or starts late, missed occurrences are
 coalesced. Rahti schedules the next interval from the current observation time
-rather than replaying every missed tick in a burst. A daily occurrence missed
-while the process is stopped is not replayed.
+rather than replaying every missed tick in a burst. A daily schedule that
+sleeps through several days dispatches once on waking, and its next occurrence
+is the first one after that moment. A daily occurrence missed while the
+process is stopped is not replayed.
 
 ## Shutdown
 
 Each timer subscribes to Rahti shutdown before it starts. Shutdown stops future
 dispatches immediately. `rahti::jobs::finish_shutdown()` first waits for all
 schedulers to stop and only then closes and drains job queues, so a timer cannot
-race the queue boundary. Existing web and static-export scaffolds already call
-that function.
+race the queue boundary. The scaffolded `src/main.rs` calls that function
+after HTTP graceful shutdown and after a static export.
 
 A test can stop only one scheduler with:
 
@@ -111,9 +126,9 @@ scheduler.shutdown().await;
 queue.shutdown().await;
 ```
 
-Always stop the scheduler before its queue. Starting a scheduler during static
-export is permitted for shared startup structure, but static rendering must
-not define an already-due one-shot or otherwise depend on scheduled side
+Always stop the scheduler before its queue. `Jobs::install()` starts no queue
+during a static export, so a scheduler built from `rahti::jobs::queue()` does
+not start there, and static rendering must not depend on scheduled side
 effects.
 
 ## Observability

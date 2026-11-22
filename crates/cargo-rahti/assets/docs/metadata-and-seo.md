@@ -26,7 +26,12 @@ pub fn metadata() -> Metadata {
 }
 ```
 
-The generated router detects that export and merges it in this order:
+Write it as `pub fn metadata() -> Metadata`. A module-level `metadata`
+function in another form — `pub async fn metadata`, `pub(crate) fn metadata`,
+or a private one returning `Metadata` — is a build error that names this
+spelling. A signature rustfmt breaks across lines is read the same.
+
+The generated router merges the detected exports in this order:
 
 ```text
 root layout -> nested layouts -> page
@@ -127,7 +132,7 @@ The supported builders are:
 | Builder | Output |
 | --- | --- |
 | `.title(value)` | templated `<title>` |
-| `.default_title(value)` | fallback `<title>` when descendants omit one |
+| `.default_title(value)` | fallback `<title>` when descendants omit one; not passed through `title_template` |
 | `.absolute_title(value)` | untemplated `<title>` |
 | `.title_template(value)` | inherited title rule |
 | `.description(value)` | `meta name="description"` |
@@ -178,7 +183,13 @@ root layout resolves only the metadata inside its own document tree.
 ## Boundaries
 
 - Metadata applies to `page.rs`, layouts inherited by pages, and the root
-  `not-found.rs`. A `route.rs` is an API endpoint and has no document head.
+  `not-found.rs`. A `route.rs` is an API endpoint and has no document head;
+  exporting `metadata()` from a `route.rs`, `error.rs`, or `loading.rs` is a
+  build error.
+- The root `not-found.rs` gets its document head from `src/app/layout.rs`.
+  Exporting `metadata()` from it without that layout is a build error.
+- A page that fails into an error boundary contributes no metadata of its
+  own. The layouts wrapping the boundary supply theirs.
 - Components do not own route metadata. The page rendering a component owns
   the URL and its SEO contract.
 - Metadata does not replace charset, viewport, stylesheet, icon, preload, or

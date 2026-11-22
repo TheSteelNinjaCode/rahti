@@ -59,6 +59,18 @@ fn localization_default_must_be_supported() {
 }
 
 #[test]
+#[should_panic(expected = "i18n.default is missing")]
+fn localization_requires_its_default() {
+    parse_config(r#"{"i18n":{"locales":["en"]}}"#);
+}
+
+#[test]
+#[should_panic(expected = "i18n.locales is missing")]
+fn localization_requires_its_locales() {
+    parse_config(r#"{"i18n":{"default":"en"}}"#);
+}
+
+#[test]
 #[should_panic(expected = "falls back to itself")]
 fn localization_fallback_cannot_cycle_to_itself() {
     parse_config(r#"{"i18n":{"locales":["en","es"],"default":"en","fallbacks":{"es":["es"]}}}"#);

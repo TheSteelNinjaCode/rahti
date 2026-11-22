@@ -104,15 +104,19 @@ impl fmt::Display for ValidationErrors {
 /// receive the same 422 JSON contract as an RPC.
 impl IntoResponse for ValidationErrors {
     fn into_response(self) -> Response {
-        let message = self.to_string();
-        (
-            VALIDATION_STATUS,
-            Json(serde_json::json!({
-                "error": message,
-                "errors": self.fields,
-            })),
-        )
-            .into_response()
+        let mut body = serde_json::json!({
+            "error": self.to_string(),
+            "errors": self.fields,
+        });
+        if let Some(request_id) = crate::observability::request_id() {
+            body["requestId"] = serde_json::Value::String(request_id.to_string());
+        }
+        let mut response = (VALIDATION_STATUS, Json(body)).into_response();
+        response.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        );
+        response
     }
 }
 

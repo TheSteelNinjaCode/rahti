@@ -141,14 +141,18 @@ production observability (outermost)
       -> CSRF (when the application has RPCs)
         -> development revalidation
           -> route match
-            -> authentication/session scope
-              -> application request pipeline
-                -> page cache / layouts / boundary / handler
-                   or RPC body limit / panic conversion / handler
+            -> localization (when i18n is configured)
+              -> authentication/session scope
+                -> application request pipeline
+                  -> page cache / layouts / boundary / handler
+                     or RPC body limit / panic conversion / handler
 ```
 
 The response travels outward in reverse. Consequences worth preserving:
 
+- an unsupported locale on a locale-segment route is a 404 before
+  authentication and application middleware run, and middleware may read
+  `rahti::i18n::locale()`;
 - a protected route is refused before application middleware runs;
 - rate-limited and CSRF-refused requests cannot reach application middleware;
 - application middleware runs on both a page-cache hit and miss, while the
