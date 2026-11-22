@@ -165,3 +165,18 @@ fn event_text_is_utf8_safe_when_truncated() {
     assert!(truncated.ends_with('…'));
     assert!(truncated.is_char_boundary(truncated.len()));
 }
+
+#[test]
+fn a_record_is_encoded_as_one_complete_line() {
+    let record = serde_json::json!({
+        "kind": "event",
+        "message": "line one\nline two",
+        "fields": { "attempt": 1 },
+    });
+    let line = encode_record(&record);
+    assert_eq!(line.last(), Some(&b'\n'));
+    let body = &line[..line.len() - 1];
+    assert!(!body.contains(&b'\n'), "{}", String::from_utf8_lossy(&line));
+    let parsed: serde_json::Value = serde_json::from_slice(body).unwrap();
+    assert_eq!(parsed, record);
+}

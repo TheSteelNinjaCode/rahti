@@ -565,12 +565,29 @@ fn limit(value: &str) -> String {
     format!("{}…", &value[..end])
 }
 
+/// One record as one complete JSONL line, newline included.
+///
+/// Serialized up front because stderr is unbuffered: formatting a `Value`
+/// straight into it (`eprintln!("{record}")`) issues one `write` per JSON
+/// token, and a log collector reading the pipe between those writes splits
+/// the record across several lines it can no longer parse.
+fn encode_record(record: &Value) -> Vec<u8> {
+    let mut line = serde_json::to_vec(record).unwrap_or_else(|_| b"{}".to_vec());
+    line.push(b'\n');
+    line
+}
+
 fn write_record(record: Value) {
+    use std::io::Write;
+
     static WRITE: Mutex<()> = Mutex::new(());
+    let line = encode_record(&record);
     let _guard = WRITE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    eprintln!("{record}");
+    let mut stderr = std::io::stderr().lock();
+    let _ = stderr.write_all(&line);
+    let _ = stderr.flush();
 }
 
 fn now_ms() -> u64 {
