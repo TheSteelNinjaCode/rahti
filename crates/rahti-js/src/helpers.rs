@@ -127,8 +127,11 @@ pub(crate) fn first_parameter(scoping: &Scoping, callback: &Expression<'_>) -> O
 /// The name a `pp.rpc` call is given, when it is a literal.
 fn rpc_name(argument: &Argument<'_>) -> Option<String> {
     match argument {
-        Argument::StringLiteral(literal) => Some(literal.value.to_string()),
-        Argument::TemplateLiteral(literal) => literal.single_quasi().map(|q| q.to_string()),
+        Argument::StringLiteral(literal) => literal.value.as_str().map(str::to_owned),
+        Argument::TemplateLiteral(literal) => literal
+            .single_quasi()
+            .and_then(|q| q.as_str())
+            .map(str::to_owned),
         _ => None,
     }
 }

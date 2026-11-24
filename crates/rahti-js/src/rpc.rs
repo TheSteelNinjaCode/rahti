@@ -127,7 +127,7 @@ fn literal(value: &Expression<'_>) -> Literal {
             if object.properties.iter().all(|property| match property {
                 ObjectPropertyKind::SpreadProperty(_) => false,
                 ObjectPropertyKind::ObjectProperty(property) => {
-                    !property.computed
+                    !property.key.is_computed()
                         && property
                             .key
                             .static_name()
@@ -385,8 +385,11 @@ impl<'a> Collector<'_, 'a> {
         };
         let span = self.range(argument.span());
         let value = match argument {
-            Argument::StringLiteral(literal) => Some(literal.value.to_string()),
-            Argument::TemplateLiteral(literal) => literal.single_quasi().map(|q| q.to_string()),
+            Argument::StringLiteral(literal) => literal.value.as_str().map(str::to_owned),
+            Argument::TemplateLiteral(literal) => literal
+                .single_quasi()
+                .and_then(|q| q.as_str())
+                .map(str::to_owned),
             _ => None,
         };
         match value {
@@ -435,8 +438,15 @@ impl<'a> Collector<'_, 'a> {
                         None => *open = true,
                     }
                 }
-                ObjectPropertyKind::ObjectProperty(property) if property.computed => *open = true,
-                ObjectPropertyKind::ObjectProperty(property) => match property.key.static_name() {
+                ObjectPropertyKind::ObjectProperty(property) if property.key.is_computed() => {
+                    *open = true
+                }
+                ObjectPropertyKind::ObjectProperty(property) => match property
+                    .key
+                    .static_name()
+                    .as_ref()
+                    .and_then(|name| name.as_str())
+                {
                     Some(name) => {
                         // JSON object literals use the final property with a given name.
                         keys.retain(|key: &Key| key.name != name);

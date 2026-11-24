@@ -14,7 +14,7 @@ use rmcp::{
     model::{
         ErrorData, ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
         ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
-        ServerInfo,
+        ServerConfig,
     },
     schemars,
     service::RequestContext,
@@ -131,8 +131,8 @@ impl RahtiMcp {
 
 #[tool_handler]
 impl ServerHandler for RahtiMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()

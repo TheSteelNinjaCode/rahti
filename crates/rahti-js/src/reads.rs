@@ -200,10 +200,15 @@ impl<'a> Visit<'a> for Collector<'_> {
                 }
                 BindingPattern::ObjectPattern(pattern) => {
                     for property in &pattern.properties {
-                        if property.computed {
+                        if property.key.is_computed() {
                             continue;
                         }
-                        if let Some(name) = property.key.static_name() {
+                        if let Some(name) = property
+                            .key
+                            .static_name()
+                            .as_ref()
+                            .and_then(|name| name.as_str())
+                        {
                             self.reads.push((
                                 None,
                                 Read {

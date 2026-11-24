@@ -564,7 +564,7 @@ impl<'a> Visit<'a> for Collector<'_> {
     fn visit_simple_assignment_target(&mut self, target: &SimpleAssignmentTarget<'a>) {
         if let Some(member) = target.as_member_expression() {
             if let Some(name) = member.static_property_name() {
-                self.assigned.push(name.to_string());
+                self.assigned.push(name.display().to_string());
             }
             self.wrote(member.object());
         }
@@ -576,7 +576,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             && let Some(member) = unary.argument.without_parentheses().as_member_expression()
         {
             if let Some(name) = member.static_property_name() {
-                self.assigned.push(name.to_string());
+                self.assigned.push(name.display().to_string());
             }
             self.wrote(member.object());
         }
