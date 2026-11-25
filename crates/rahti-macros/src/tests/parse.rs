@@ -910,13 +910,19 @@ fn a_script_beside_scripted_childrens_markup_is_refused() {
         r###"<Shell><div><p>{n}</p></div><script>r##"const [n] = pp.state(1);"##</script></Shell>"###,
     );
     assert!(msg.contains("RAHTI_LOOSE_CHILD_SCRIPT"), "{msg}");
-    assert!(msg.contains("the children of `<Shell>` carry a `<script>`"), "{msg}");
+    assert!(
+        msg.contains("the children of `<Shell>` carry a `<script>`"),
+        "{msg}"
+    );
     assert!(msg.contains("2 roots side by side"), "{msg}");
     assert!(msg.contains("replace `<Shell>`'s script"), "{msg}");
 
     let msg = error(r###"<main><Card><script>r##"const a = 1;"##</script></Card></main>"###);
     assert!(msg.contains("RAHTI_LOOSE_CHILD_SCRIPT"), "{msg}");
-    assert!(msg.contains("the `<script>` is their only element"), "{msg}");
+    assert!(
+        msg.contains("the `<script>` is their only element"),
+        "{msg}"
+    );
 
     let msg = error(
         r###"<main><Card>"Total: "<b>{n}</b><script>r##"const [n] = pp.state(1);"##</script></Card></main>"###,

@@ -651,7 +651,7 @@ impl IntoJobResult for Result<(), JobError> {
 
 impl IntoJobResult for crate::Result<()> {
     fn into_job_result(self) -> Result<(), JobError> {
-        self.map_err(|error| JobError::retry(error.message))
+        self.map_err(|error| JobError::retry(error.into_message()))
     }
 }
 

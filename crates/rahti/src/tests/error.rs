@@ -249,3 +249,14 @@ async fn a_boundary_is_told_the_status_and_the_message() {
     let res = Error::new(StatusCode::IM_A_TEAPOT, "no coffee").into_response();
     apply_error(capture, res).await;
 }
+
+#[test]
+fn an_error_is_one_pointer_wide() {
+    // Clippy's `result_large_err` fires at 128 bytes; every application
+    // handler returns `rahti::Result<T>`, so the error stays a pointer.
+    assert_eq!(std::mem::size_of::<Error>(), std::mem::size_of::<usize>());
+    assert_eq!(
+        std::mem::size_of::<crate::Result<()>>(),
+        std::mem::size_of::<usize>()
+    );
+}

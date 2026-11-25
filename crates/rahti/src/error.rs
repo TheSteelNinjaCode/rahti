@@ -35,10 +35,17 @@ pub struct ErrorSource(pub String);
 ///
 /// Deliberately does not implement [`std::error::Error`], so that
 /// `From<E: Error>` stays available for `?`.
+///
+/// The fields live behind one allocation, so the value is a single pointer:
+/// a `rahti::Result<T>` stays small, and Clippy's `result_large_err` has
+/// nothing to report on an application's handlers.
 #[derive(Debug, Clone)]
-pub struct Error {
+pub struct Error(Box<ErrorInner>);
+
+#[derive(Debug, Clone)]
+struct ErrorInner {
     status: StatusCode,
-    pub(crate) message: String,
+    message: String,
     public_message: Option<String>,
     details: Option<serde_json::Value>,
 }
@@ -48,12 +55,12 @@ impl Error {
     /// 5xx statuses remain private unless explicitly replaced or exposed.
     pub fn new(status: StatusCode, message: impl Display) -> Self {
         let message = message.to_string();
-        Error {
+        Error(Box::new(ErrorInner {
             status,
             public_message: (!status.is_server_error()).then(|| message.clone()),
             message,
             details: None,
-        }
+        }))
     }
 
     /// A private 500 — the usual case for `.map_err(Error::internal)?`.
@@ -71,26 +78,31 @@ impl Error {
     /// 5xx explanations such as a maintenance response.
     pub fn public(status: StatusCode, message: impl Display) -> Self {
         let message = message.to_string();
-        Error {
+        Error(Box::new(ErrorInner {
             status,
             public_message: Some(message.clone()),
             message,
             details: None,
-        }
+        }))
     }
 
     pub fn status(&self) -> StatusCode {
-        self.status
+        self.0.status
     }
 
     pub fn message(&self) -> &str {
-        &self.message
+        &self.0.message
+    }
+
+    /// The diagnostic, moved out.
+    pub(crate) fn into_message(self) -> String {
+        self.0.message
     }
 
     /// Replace the client-facing text while retaining the original diagnostic
     /// for server logs.
     pub fn with_public_message(mut self, message: impl Display) -> Self {
-        self.public_message = Some(message.to_string());
+        self.0.public_message = Some(message.to_string());
         self
     }
 
@@ -99,37 +111,37 @@ impl Error {
     /// only status and message. Unexpected production failures suppress these
     /// details with their diagnostic message.
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
-        self.details = Some(details);
+        self.0.details = Some(details);
         self
     }
 
     pub fn details(&self) -> Option<&serde_json::Value> {
-        self.details.as_ref()
+        self.0.details.as_ref()
     }
 
     pub(crate) fn client_message(&self, development: bool) -> &str {
         if development {
-            &self.message
+            &self.0.message
         } else {
-            self.public_message.as_deref().unwrap_or(UNEXPECTED_ERROR)
+            self.0.public_message.as_deref().unwrap_or(UNEXPECTED_ERROR)
         }
     }
 
     pub(crate) fn client_details(&self, development: bool) -> Option<&serde_json::Value> {
-        (development || self.public_message.is_some())
-            .then_some(self.details.as_ref())
+        (development || self.0.public_message.is_some())
+            .then_some(self.0.details.as_ref())
             .flatten()
     }
 
     pub(crate) fn record(&self, target: &str) {
         super::dev::record_server(
-            if self.status.is_server_error() {
+            if self.0.status.is_server_error() {
                 "error"
             } else {
                 "warn"
             },
             target,
-            &format!("rahti: {} — {}", self.status, self.message),
+            &format!("rahti: {} — {}", self.0.status, self.0.message),
         );
     }
 }
@@ -144,7 +156,7 @@ impl IntoResponse for Error {
     fn into_response(self) -> Response {
         self.record("page");
         let client_message = self.client_message(super::dev::enabled()).to_string();
-        problem_response(self.status, client_message)
+        problem_response(self.0.status, client_message)
     }
 }
 
