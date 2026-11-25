@@ -89,8 +89,6 @@ struct CachedUser {
 
 #[tokio::test]
 async fn typed_facade_round_trips_json_through_the_configured_store() {
-    static GLOBAL_TEST: Mutex<()> = Mutex::new(());
-    let _guard = GLOBAL_TEST.lock().unwrap();
     configure(MemoryStore::with_capacity(8));
 
     let user = CachedUser {

@@ -236,3 +236,54 @@ fn a_command_is_found_on_path_or_as_a_path() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The linker's own line names the file; everything else about a locked
+/// artifact starts from it.
+#[test]
+fn a_file_the_linker_could_not_replace_is_read_from_its_diagnostic() {
+    let line = r"  = note: LINK : fatal error LNK1104: cannot open file 'C:\app\target\debug\deps\app_macros-1f.dll'";
+    assert_eq!(
+        locked_file(line),
+        Some(PathBuf::from(r"C:\app\target\debug\deps\app_macros-1f.dll"))
+    );
+    assert_eq!(locked_file("error[E0425]: cannot find value `x`"), None);
+    assert_eq!(locked_file("fatal error LNK1104: no file named"), None);
+}
+
+/// An editor's language server is the usual holder, and no restart of the
+/// dev server releases it — so the message has to name the real fix.
+#[test]
+fn a_file_held_by_the_language_server_names_the_setting_that_frees_it() {
+    let out = locked_message(
+        Path::new("target/debug/deps/app_macros.dll"),
+        &[(4242, "rust-analyzer-proc-macro-srv".to_string())],
+    );
+    assert!(out.contains("app_macros.dll"), "{out}");
+    assert!(
+        out.contains("rust-analyzer-proc-macro-srv (pid 4242)"),
+        "{out}"
+    );
+    assert!(out.contains("rust-analyzer.cargo.targetDir"), "{out}");
+}
+
+#[test]
+fn a_file_held_by_another_program_says_to_close_it() {
+    let out = locked_message(Path::new("app.exe"), &[(7, "debugger".to_string())]);
+    assert!(out.contains("debugger (pid 7)"), "{out}");
+    assert!(out.contains("Close that program"), "{out}");
+    assert!(!out.contains("rust-analyzer"), "{out}");
+}
+
+/// The linker's command line is one note tens of thousands of characters
+/// long; passed on whole it buries the line that says what went wrong.
+#[test]
+fn an_enormous_diagnostic_line_is_cut_short() {
+    let short = "error: could not compile `app`";
+    assert_eq!(readable(short), short);
+
+    let long = format!("  = note: \"link.exe\" {}", "x".repeat(30_000));
+    let out = readable(&long);
+    assert!(out.len() < 400, "{}", out.len());
+    assert!(out.starts_with("  = note: \"link.exe\""), "{out}");
+    assert!(out.contains("more characters omitted"), "{out}");
+}

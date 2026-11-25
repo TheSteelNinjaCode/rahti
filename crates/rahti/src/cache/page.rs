@@ -319,10 +319,8 @@ impl StoredPage {
                 })?;
                 headers.append(name, value);
             }
-            if head {
-                if let Ok(value) = HeaderValue::from_str(&body_len.to_string()) {
-                    headers.insert(header::CONTENT_LENGTH, value);
-                }
+            if head && let Ok(value) = HeaderValue::from_str(&body_len.to_string()) {
+                headers.insert(header::CONTENT_LENGTH, value);
             }
             headers.insert(CACHE_HEADER, HeaderValue::from_static("HIT"));
         }

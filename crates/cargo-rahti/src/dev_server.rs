@@ -18,6 +18,12 @@
 //! start the source is type-checked first and the server stopped before the
 //! build.
 //!
+//! Another program can hold a file the linker writes: an editor's language
+//! server loads the compiled macro library, and Windows will not replace a
+//! loaded file. Stopping the server releases nothing then, so that failure is
+//! reported as what it is — the file, the process holding it, and the fix —
+//! and a running server is left running.
+//!
 //! The new server has to outlive this command, and the shell that ran it.
 //! On Windows an agent's tool runs each command inside a job object that kills
 //! everything in it when the tool's process tree ends, so the server is
@@ -27,7 +33,7 @@ use rahti_build::dev_server::{self, SERVER_LOG_PATH, ServerInfo};
 use rahti_build::script_check;
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -92,12 +98,22 @@ pub fn run_restart(args: &[&str]) -> Result<(), String> {
         Some(info) if !holds_cargo_binary(&root, info.pid) => {
             say("Building while the running server stays up.");
             match build(&root, &mut phases)? {
-                Some(executable) => Some(executable),
+                Built::Executable(executable) => Some(executable),
+                // Held by something other than the server: stopping the
+                // server would release nothing and leave nothing running.
+                Built::Locked(file) if !held_by(&file, info.pid) => {
+                    return Err(format!(
+                        "{} {} is still running the old code.",
+                        locked_advice(&file),
+                        info.url
+                    ));
+                }
                 // A failed build is a compile error, unless the server holds
                 // some other file the linker writes. A type check tells the
                 // two apart, and only the second is worth stopping for.
-                None if cargo(&root, &["check"])? => None,
-                None => return Err(old_code(info)),
+                Built::Locked(_) => None,
+                Built::Failed if cargo(&root, &["check"])? => None,
+                Built::Failed => return Err(old_code(info)),
             }
         }
         Some(info) => {
@@ -121,7 +137,18 @@ pub fn run_restart(args: &[&str]) -> Result<(), String> {
         Some(executable) => executable,
         None => {
             say("Building.");
-            build(&root, &mut phases)?.ok_or("the build failed, and no server is running now.")?
+            match build(&root, &mut phases)? {
+                Built::Executable(executable) => executable,
+                Built::Locked(file) => {
+                    return Err(format!(
+                        "{} No server is running now.",
+                        locked_advice(&file)
+                    ));
+                }
+                Built::Failed => {
+                    return Err("the build failed, and no server is running now.".to_string());
+                }
+            }
         }
     };
 
@@ -582,20 +609,49 @@ fn cargo_program() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
-/// Build the project's binary and return the path cargo reports for it, or
-/// `None` when the build fails.
+/// How a build ended.
+enum Built {
+    /// The path cargo reports for the project's binary.
+    Executable(PathBuf),
+    /// The source did not compile, or did not link.
+    Failed,
+    /// The linker could not replace this file because a process has it open.
+    Locked(PathBuf),
+}
+
+/// Build the project's binary.
 ///
 /// Rendered diagnostics go to standard error as usual, and standard output
 /// carries the JSON that names the artifact, so a compile error reads the same
-/// as `cargo build` while the path is never guessed.
-fn build(root: &Path, phases: &mut Phases) -> Result<Option<PathBuf>, String> {
+/// as `cargo build` while the path is never guessed. Standard error passes
+/// through this process on the way, which is where a file the linker could
+/// not replace is noticed.
+fn build(root: &Path, phases: &mut Phases) -> Result<Built, String> {
     let began = Instant::now();
+    let color = if std::io::stderr().is_terminal() {
+        "--color=always"
+    } else {
+        "--color=never"
+    };
     let mut child = Command::new(cargo_program())
-        .args(["build", "--message-format=json-render-diagnostics"])
+        .args(["build", "--message-format=json-render-diagnostics", color])
         .current_dir(root)
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot run cargo: {error}"))?;
+
+    let stderr = child.stderr.take().ok_or("cargo gave no error stream")?;
+    let diagnostics = std::thread::spawn(move || {
+        let mut locked = None;
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if let Some(file) = locked_file(&line) {
+                locked = Some(file);
+            }
+            eprintln!("{}", readable(&line));
+        }
+        locked
+    });
 
     let stdout = child.stdout.take().ok_or("cargo gave no output stream")?;
     let mut executable = None;
@@ -613,13 +669,139 @@ fn build(root: &Path, phases: &mut Phases) -> Result<Option<PathBuf>, String> {
     }
 
     let status = child.wait().map_err(|error| error.to_string())?;
+    let locked = diagnostics.join().ok().flatten();
     if !status.success() {
-        return Ok(None);
+        return Ok(locked.map_or(Built::Failed, Built::Locked));
     }
     let executable = executable.ok_or("cargo built no executable: is this a binary project?")?;
     phases.compile = Some(compiled);
     phases.link = Some(linked.saturating_sub(compiled));
-    Ok(Some(executable))
+    Ok(Built::Executable(executable))
+}
+
+/// The longest diagnostic line passed on whole.
+const READABLE_LINE: usize = 2_000;
+
+/// A diagnostic line as it is passed on. A failed link prints the linker's
+/// whole command line as one note, tens of thousands of characters that bury
+/// the one line saying what went wrong, so a line that long is cut short.
+pub(crate) fn readable(line: &str) -> std::borrow::Cow<'_, str> {
+    if line.len() <= READABLE_LINE {
+        return line.into();
+    }
+    let kept: String = line.chars().take(200).collect();
+    format!(
+        "{kept} … ({} more characters omitted)",
+        line.len() - kept.len()
+    )
+    .into()
+}
+
+/// The file a linker diagnostic says it could not open for writing: the
+/// MSVC linker's `LNK1104`, which is what a file held open by another process
+/// produces.
+pub(crate) fn locked_file(line: &str) -> Option<PathBuf> {
+    let (_, rest) = line.split_once("LNK1104")?;
+    let (_, rest) = rest.split_once('\'')?;
+    let (path, _) = rest.split_once('\'')?;
+    Some(PathBuf::from(path))
+}
+
+/// What to do about a file the linker could not replace.
+fn locked_advice(file: &Path) -> String {
+    locked_message(file, &holders(file))
+}
+
+pub(crate) fn locked_message(file: &Path, holders: &[(u64, String)]) -> String {
+    let held = if holders.is_empty() {
+        "another process has it open".to_string()
+    } else {
+        let names: Vec<String> = holders
+            .iter()
+            .map(|(pid, name)| format!("{name} (pid {pid})"))
+            .collect();
+        format!("it is open in {}", names.join(", "))
+    };
+    let language_server = holders
+        .iter()
+        .any(|(_, name)| name.contains("rust-analyzer"));
+    let fix = if language_server || holders.is_empty() {
+        "An editor's rust-analyzer loads the compiled macro library from `target/`. Give it a \
+         build directory of its own with `\"rust-analyzer.cargo.targetDir\": true` in the \
+         editor's settings (`.vscode/settings.json` for VS Code), restart the language server \
+         once so it lets go of this file, then run `cargo rahti restart` again."
+    } else {
+        "Close that program, then run `cargo rahti restart` again."
+    };
+    format!(
+        "the build stopped because the linker cannot replace {}: {held}. {fix}",
+        file.display()
+    )
+}
+
+/// Whether `pid` is among the processes holding `file`.
+fn held_by(file: &Path, pid: u64) -> bool {
+    holders(file).iter().any(|(holder, _)| *holder == pid)
+}
+
+/// The processes that have `file` open, as Windows' Restart Manager reports
+/// them. Empty when none are found or the question cannot be asked.
+#[cfg(windows)]
+fn holders(file: &Path) -> Vec<(u64, String)> {
+    const SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class RahtiLock {
+  [StructLayout(LayoutKind.Sequential)] public struct Proc { public int Pid; public System.Runtime.InteropServices.ComTypes.FILETIME Start; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct Info {
+    public Proc Process;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string App;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string Service;
+    public int Type; public uint Status; public uint Session; [MarshalAs(UnmanagedType.Bool)] public bool Restartable;
+  }
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmStartSession(out uint handle, int flags, string key);
+  [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint handle);
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmRegisterResources(uint handle, uint files, string[] names, uint apps, [In] Proc[] procs, uint services, string[] serviceNames);
+  [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint handle, out uint needed, ref uint count, [In, Out] Info[] info, ref uint reasons);
+  public static int[] Holders(string path) {
+    uint handle; if (RmStartSession(out handle, 0, Guid.NewGuid().ToString()) != 0) return new int[0];
+    try {
+      RmRegisterResources(handle, 1, new[] { path }, 0, null, 0, null);
+      uint needed = 0, count = 0, reasons = 0;
+      RmGetList(handle, out needed, ref count, null, ref reasons);
+      if (needed == 0) return new int[0];
+      var info = new Info[needed]; count = needed;
+      if (RmGetList(handle, out needed, ref count, info, ref reasons) != 0) return new int[0];
+      var pids = new int[count]; for (int i = 0; i < count; i++) pids[i] = info[i].Process.Pid; return pids;
+    } finally { RmEndSession(handle); }
+  }
+}
+'@
+foreach ($id in [RahtiLock]::Holders($env:RAHTI_LOCKED_FILE)) {
+  $p = Get-Process -Id $id -ErrorAction SilentlyContinue
+  if ($p) { "$id`t$($p.ProcessName)" }
+}
+"#;
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .env("RAHTI_LOCKED_FILE", file)
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let (pid, name) = line.trim().split_once('\t')?;
+            Some((pid.parse().ok()?, name.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn holders(_file: &Path) -> Vec<(u64, String)> {
+    Vec::new()
 }
 
 fn artifact_executable(line: &str) -> Option<PathBuf> {

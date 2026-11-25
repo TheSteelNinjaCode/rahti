@@ -182,6 +182,23 @@ pub const DOC_WEBSOCKETS: &str = include_str!("../assets/docs/websockets.md");
 /// agent tools agree on, and a second copy of its content here would only
 /// ever drift from the first.
 pub const CLAUDE_MD: &str = "@AGENTS.md\n";
+/// `.vscode/settings.json`, which gives rust-analyzer a build directory of
+/// its own.
+///
+/// rust-analyzer loads the compiled `html!` macro library to expand templates
+/// in the editor, and Windows refuses to replace a loaded file. Sharing
+/// `target/` therefore makes `cargo build`, `cargo test` and
+/// `cargo rahti restart` fail to link whenever that library is rebuilt — and
+/// a coding agent cannot close somebody's editor.
+pub const VSCODE_SETTINGS: &str = r#"{
+  // rust-analyzer builds into `target/rust-analyzer` instead of `target/`.
+  // It loads the compiled `html!` macro library to expand templates in the
+  // editor, and Windows refuses to replace a loaded file, so a shared
+  // directory makes `cargo build`, `cargo test` and `cargo rahti restart`
+  // fail to link (LNK1104) whenever that library is rebuilt.
+  "rust-analyzer.cargo.targetDir": true
+}
+"#;
 /// `.cargo/config.toml`, whose one alias is the missing half of live reload.
 ///
 /// The running server watches `public/` itself and needs no help there; a
@@ -801,7 +818,6 @@ pub struct StartupError {
 }
 
 impl StartupError {
-    #[allow(dead_code)]
     fn new(step: &'static str, message: impl Into<String>) -> Self {
         StartupError { step, message: message.into() }
     }
@@ -963,10 +979,6 @@ pub const DB_RS: &str = r#"//! The database connection.
 //!
 //! This file is yours. If you want a pool size, a statement timeout, or a
 //! read replica, this is where they go.
-
-// A connection you have not queried yet is not dead code, and a new project
-// has not queried it yet — the same reason `src/models/mod.rs` carries this.
-#![allow(dead_code)]
 
 use std::sync::OnceLock;
 
@@ -1626,6 +1638,9 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          own that step. After every batch of edits:\n\n\
          1. `cargo rahti restart`. A compile error leaves the old server running\n\
             and says so. Do not start a second server, and never force-kill one.\n\
+            When it says the linker cannot replace a file another program has\n\
+            open, report that line: `.vscode/settings.json` keeps rust-analyzer\n\
+            out of `target/`, and you never end a process you did not start.\n\
          2. Load every affected route in a browser with a full page load, and\n\
             exercise what changed.\n\
          3. `cargo rahti status`, or MCP `server_status`. It says whether the\n\
@@ -1794,7 +1809,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/security.md` |\n",
     );
     out.push_str(
-        "| `rahti.config.json`, CSS engines, frontend `twMerge`, static files, the CLI | \
+        "| `rahti.config.json`, CSS engines, frontend `twMerge`, static files, the CLI, dead code | \
          `docs/conventions/configuration-and-tooling.md` |\n",
     );
     out.push_str(
@@ -2177,6 +2192,18 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          Do not add `tw_merge`, npm tooling, or another merger for this\n\
          behavior. `twMerge` does not generate CSS. Read the Tailwind class\n\
          merging agent contract in `docs/conventions/configuration-and-tooling.md`."
+            .to_string(),
+    );
+
+    rules.push(
+        "Dead code is deleted, not silenced. `cargo check` reports a component,
+         helper, or type nothing uses under the app directory and
+         `src/components/`; a build with no warnings is the finished state. An
+         item kept ahead of its caller takes
+         `#[expect(dead_code, reason = \"…\")]` on that item. Never write
+         `#[allow(dead_code)]`. `#[rpc]`, `#[socket]`, `#[job]`, and `pub`
+         items of a `pub mod` are not reported, so search for their callers.
+         See \"Dead Code\" in `docs/conventions/configuration-and-tooling.md`."
             .to_string(),
     );
 

@@ -1,7 +1,7 @@
 //! The rpc wire: what a call has to carry, and what comes back.
 
 use super::*;
-use axum::body::{Body, to_bytes};
+use axum::body::{Body, Bytes, to_bytes};
 use axum::http::Request;
 use axum::response::IntoResponse;
 

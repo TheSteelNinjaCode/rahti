@@ -288,6 +288,10 @@ over the scripts in `public/js/` and records the result in
 - Every scaffolded project also carries a `.cargo/config.toml` whose `dev`
   alias makes `cargo dev` rebuild and restart the server on Rust edits via
   cargo-watch — the half of live reload the running server cannot do itself.
+- Every scaffolded project also carries a `.vscode/settings.json` that gives
+  rust-analyzer its own build directory, so the editor never holds a file
+  `cargo build` or `cargo rahti restart` has to replace; when a linker is
+  refused anyway, restart names the file, the process holding it, and the fix.
 - Every scaffolded project starts with a passing, area-organized test suite:
   `src/tests/mod.rs` collects focused modules, while `support.rs` drives the
   generated router in-process. The suite is included from `src/lib.rs` and
@@ -381,6 +385,11 @@ The current implementation covers:
   PulsePoint's single `pulsepoint` policy, and injected `{…}` markup cannot
   run new code — it is looked up as a name or a compiled binding's source,
   which is why values are escaped;
+
+- dead-code reporting for application code: the generated router and
+  component modules leave rustc's `dead_code` lint on, so an unused component,
+  helper, or type under `app/` or `src/components/` is a `cargo check`
+  warning, with `#[expect(dead_code, reason = "…")]` as the only exemption;
 
 - optional server-side localization with configured Unicode locale
   identifiers, build-validated and binary-embedded Fluent catalogs,

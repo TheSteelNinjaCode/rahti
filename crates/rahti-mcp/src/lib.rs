@@ -34,7 +34,7 @@ struct DiagnosticsRequest {
 #[derive(Debug, Clone)]
 pub struct RahtiMcp {
     project: Project,
-    #[allow(dead_code)] // read by the `tool_handler` expansion
+    #[expect(dead_code, reason = "read by the `tool_handler` expansion")]
     tool_router: ToolRouter<Self>,
 }
 

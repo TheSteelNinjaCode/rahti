@@ -36,7 +36,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "dev-watch")]
+use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
 use axum::Router;
@@ -82,6 +84,7 @@ static STARTED_AT_MS: OnceLock<u128> = OnceLock::new();
 const MARKER: &str = "id=\"rahti-dev\"";
 
 /// A burst of filesystem events for one save collapses into one message.
+#[cfg(feature = "dev-watch")]
 const DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// Whether live reload is wired up at all.
@@ -114,6 +117,10 @@ fn boot_id() -> &'static str {
 
 /// What the client should do about a change.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    all(not(feature = "dev-watch"), not(test)),
+    expect(dead_code, reason = "only the `public/` watcher sends a signal")
+)]
 enum Signal {
     /// Stylesheets only — swap them in place.
     Css,
@@ -559,11 +566,11 @@ fn init_diagnostics() {
     }
     static INITIALIZED: OnceLock<()> = OnceLock::new();
     INITIALIZED.get_or_init(|| {
-        if let Some(parent) = Path::new(LOG_PATH).parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                eprintln!("rahti dev: cannot create {}: {error}", parent.display());
-                return;
-            }
+        if let Some(parent) = Path::new(LOG_PATH).parent()
+            && let Err(error) = std::fs::create_dir_all(parent)
+        {
+            eprintln!("rahti dev: cannot create {}: {error}", parent.display());
+            return;
         }
 
         let session = json!({

@@ -167,17 +167,17 @@ fn gen_manifest(
     database: Option<&crate::db::Scan>,
     config: &Config,
 ) -> String {
-    manifest_json(
+    manifest_json(&Manifest {
         entries,
         components,
         component_rpcs,
-        &[],
-        &[],
+        sockets: &[],
+        jobs: &[],
         database,
         config,
-        &serde_json::json!([]),
-        &serde_json::json!({}),
-    )
+        contracts: &serde_json::json!([]),
+        rpc_types: &serde_json::json!({}),
+    })
 }
 
 /// One `#[socket]` list, the shape `socket_list` produces.
@@ -662,6 +662,28 @@ fn a_root_layout_is_not_wrapped_in_the_layout_above_it() {
     // page at all — module included.
     assert!(!out.contains("l_root"), "{out}");
     assert!(out.contains("apply_root_layout(l_portal::layout"), "{out}");
+    // The marker is read as text, so the router names it: rustc's dead-code
+    // lint stays on for the application and does not report the constant.
+    assert!(
+        out.contains("const _: bool = l_portal::ROOT_LAYOUT;"),
+        "{out}"
+    );
+}
+
+/// The router is where every page and layout is declared, so an `allow` at its
+/// top would silence the dead-code lint for the whole of `app/`.
+#[test]
+fn the_router_leaves_the_dead_code_lint_on() {
+    let out = gen_routes(
+        &entries(&[
+            (LAYOUT, "src/app/layout.rs", &[]),
+            (PAGE, "src/app/page.rs", &[]),
+        ]),
+        &[],
+        &config(),
+    );
+    assert!(!out.contains("allow("), "{out}");
+    assert!(!out.contains("ROOT_LAYOUT"), "{out}");
 }
 
 /// Next.js's shape: no `app/layout.rs`, and each top-level group brings its
@@ -1139,7 +1161,7 @@ fn every_dynamic_router_carries_the_application_pipeline_inside_auth() {
         .split("let group_")
         .skip(1)
         .take(groups)
-        .chain(out.split("let rpc = Router::new()").nth(1).into_iter())
+        .chain(out.split("let rpc = Router::new()").nth(1))
     {
         let dynamic = dynamic.split(';').next().unwrap();
         let pipeline_at = dynamic
@@ -1448,20 +1470,20 @@ fn no_sockets_means_no_endpoint() {
 
 #[test]
 fn the_manifest_lists_the_sockets() {
-    let out = manifest_json(
-        &app(),
-        &[],
-        &[],
-        &sockets(&[
+    let out = manifest_json(&Manifest {
+        entries: &app(),
+        components: &[],
+        component_rpcs: &[],
+        sockets: &sockets(&[
             ("chat", "src/app/page.rs"),
             ("feed", "src/components/ticker.rs"),
         ]),
-        &[],
-        None,
-        &config(),
-        &serde_json::json!([]),
-        &serde_json::json!({}),
-    );
+        jobs: &[],
+        database: None,
+        config: &config(),
+        contracts: &serde_json::json!([]),
+        rpc_types: &serde_json::json!({}),
+    });
     assert!(
         out.contains("{ \"name\": \"chat\", \"file\": \"src/app/page.rs\", \"auth\": false },"),
         "{out}"
@@ -1478,17 +1500,17 @@ fn the_manifest_lists_the_sockets() {
 fn the_manifest_marks_authenticated_sockets() {
     let mut guarded = sockets(&[("private_feed", "src/app/account/page.rs")]);
     guarded[0].auth = true;
-    let out = manifest_json(
-        &app(),
-        &[],
-        &[],
-        &guarded,
-        &[],
-        None,
-        &config(),
-        &serde_json::json!([]),
-        &serde_json::json!({}),
-    );
+    let out = manifest_json(&Manifest {
+        entries: &app(),
+        components: &[],
+        component_rpcs: &[],
+        sockets: &guarded,
+        jobs: &[],
+        database: None,
+        config: &config(),
+        contracts: &serde_json::json!([]),
+        rpc_types: &serde_json::json!({}),
+    });
     assert!(
         out.contains(
             "{ \"name\": \"private_feed\", \"file\": \"src/app/account/page.rs\", \"auth\": true }"

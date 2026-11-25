@@ -67,11 +67,16 @@ const NEVER_REWRITTEN: [&str; 1] = ["Cargo.toml"];
 /// a project whose `initialize_application` is missing or old cannot be
 /// packaged, and `cargo rahti native doctor` sends people here to fix it.
 ///
+/// `.vscode/settings.json` is the author's too: it is written once, so that
+/// rust-analyzer does not hold cargo's build files, and from then on it is
+/// where somebody keeps their editor.
+///
 /// Taking an application file back is still possible, but it has to be asked
 /// for by name: `--force src/app/page.rs` is a sentence somebody meant to
 /// write, and a bare `--force` that quietly deleted a homepage is not.
 fn authored(path: &str) -> bool {
-    path.starts_with("src/") && !matches!(path, "src/main.rs" | "src/lib.rs")
+    path == ".vscode/settings.json"
+        || (path.starts_with("src/") && !matches!(path, "src/main.rs" | "src/lib.rs"))
 }
 
 /// What is left to do by hand when a database was added to a project whose
@@ -148,9 +153,11 @@ pub fn run(args: &[&str]) -> Result<(), String> {
             &config,
             &wiring,
             true,
-            added_db,
-            added_ws,
-            added_mcp,
+            Added {
+                db: added_db,
+                ws: added_ws,
+                mcp: added_mcp,
+            },
             options.force.as_deref(),
         );
         return Ok(());
@@ -195,9 +202,11 @@ pub fn run(args: &[&str]) -> Result<(), String> {
         &config,
         &wiring,
         false,
-        added_db,
-        added_ws,
-        added_mcp,
+        Added {
+            db: added_db,
+            ws: added_ws,
+            mcp: added_mcp,
+        },
         options.force.as_deref(),
     );
     Ok(())
@@ -419,13 +428,13 @@ fn wire(root: &Path, config: &Config, dry_run: bool) -> Result<Wiring, String> {
     if let Some(backend) = config.db {
         let name = ".env";
         let full = root.join(name);
-        if let Ok(current) = fs::read_to_string(&full) {
-            if let Some(amended) = wiring::with_database_url(&current, backend) {
-                if !dry_run {
-                    fs::write(&full, amended).map_err(|e| format!("cannot write {name}: {e}"))?;
-                }
-                wiring.env.push(name.to_string());
+        if let Ok(current) = fs::read_to_string(&full)
+            && let Some(amended) = wiring::with_database_url(&current, backend)
+        {
+            if !dry_run {
+                fs::write(&full, amended).map_err(|e| format!("cannot write {name}: {e}"))?;
             }
+            wiring.env.push(name.to_string());
         }
 
         if !root.join(".env").exists() {
@@ -722,16 +731,26 @@ impl Plan {
     }
 }
 
+/// The features this run added to the project.
+struct Added {
+    db: Option<Backend>,
+    ws: bool,
+    mcp: bool,
+}
+
 fn report(
     plan: &Plan,
     config: &Config,
     wiring: &Wiring,
     dry_run: bool,
-    added_db: Option<Backend>,
-    added_ws: bool,
-    added_mcp: bool,
+    added: Added,
     force: Option<&[String]>,
 ) {
+    let Added {
+        db: added_db,
+        ws: added_ws,
+        mcp: added_mcp,
+    } = added;
     fn verb<'a>(dry_run: bool, past: &'a str, future: &'a str) -> &'a str {
         if dry_run { future } else { past }
     }

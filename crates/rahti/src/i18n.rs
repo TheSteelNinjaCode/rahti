@@ -233,15 +233,14 @@ fn negotiate(state: &I18nState, request: &Request) -> Option<String> {
         if state.0.supported.contains(&requested) {
             return Some(requested);
         }
-        if let Some(language) = requested.split('-').next() {
-            if let Some(found) = state
+        if let Some(language) = requested.split('-').next()
+            && let Some(found) = state
                 .0
                 .locales
                 .iter()
                 .find(|supported| supported.split('-').next() == Some(language))
-            {
-                return Some(found.clone());
-            }
+        {
+            return Some(found.clone());
         }
     }
     Some(state.0.default.clone())

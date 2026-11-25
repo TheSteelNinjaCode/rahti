@@ -11,10 +11,10 @@ use std::{
         Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime},
 };
 
-use chrono::{DateTime, TimeZone as _, Utc};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::{
@@ -532,7 +532,9 @@ impl std::error::Error for ScheduleError {
 mod tests {
     use super::*;
     use crate::jobs::{JobError, Jobs};
+    use chrono::TimeZone as _;
     use std::sync::atomic::AtomicUsize;
+    use std::time::UNIX_EPOCH;
     use tokio::sync::{Notify, Semaphore};
 
     #[tokio::test]

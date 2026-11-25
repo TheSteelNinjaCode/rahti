@@ -282,7 +282,6 @@ pub fn routes_rs(
     out.push_str("// Regenerated on every build from ");
     out.push_str(&config.app_dir);
     out.push_str("/\n\n");
-    out.push_str("#![allow(dead_code)]\n\n");
     out.push_str("use axum::Router;\n\n");
 
     out.push_str("/// Host from rahti.config.json.\n");
@@ -342,6 +341,23 @@ pub fn routes_rs(
         ));
     }
     out.push('\n');
+
+    // `ROOT_LAYOUT` is read from the file's text by the scanner, and nothing
+    // in Rust would otherwise name it. Naming it here keeps the dead-code lint
+    // on for the whole application without a layout having to silence it.
+    let declared_roots: Vec<&&Entry> = wired
+        .iter()
+        .filter(|e| e.kind == Kind::Layout && e.root && !e.dirs.is_empty())
+        .collect();
+    for layout in &declared_roots {
+        out.push_str(&format!(
+            "const _: bool = {}::ROOT_LAYOUT;\n",
+            layout.module
+        ));
+    }
+    if !declared_roots.is_empty() {
+        out.push('\n');
+    }
 
     // Routes sharing a layout chain and an error boundary share a
     // sub-router, because both are layers and a layer covers a whole router.
@@ -899,17 +915,31 @@ pub fn routes_rs(
     out
 }
 
-pub fn manifest_json(
-    entries: &[Entry],
-    components: &[String],
-    component_rpcs: &[Rpc],
-    sockets: &[Rpc],
-    jobs: &[serde_json::Value],
-    database: Option<&crate::db::Scan>,
-    config: &Config,
-    contracts: &serde_json::Value,
-    rpc_types: &serde_json::Value,
-) -> String {
+/// Everything `.rahti/manifest.json` describes.
+pub struct Manifest<'a> {
+    pub entries: &'a [Entry],
+    pub components: &'a [String],
+    pub component_rpcs: &'a [Rpc],
+    pub sockets: &'a [Rpc],
+    pub jobs: &'a [serde_json::Value],
+    pub database: Option<&'a crate::db::Scan>,
+    pub config: &'a Config,
+    pub contracts: &'a serde_json::Value,
+    pub rpc_types: &'a serde_json::Value,
+}
+
+pub fn manifest_json(manifest: &Manifest) -> String {
+    let Manifest {
+        entries,
+        components,
+        component_rpcs,
+        sockets,
+        jobs,
+        database,
+        config,
+        contracts,
+        rpc_types,
+    } = *manifest;
     let mut out = String::new();
     let has_components = !component_rpcs.is_empty();
     out.push_str("{\n");

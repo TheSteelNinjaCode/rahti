@@ -81,6 +81,7 @@ fn the_application_is_under_src_and_main_is_not() {
         "src/db.rs",
         "src/models/invoice.rs",
         "src/migrations/m20260101_000001_create_invoice.rs",
+        ".vscode/settings.json",
     ] {
         assert!(authored(path), "{path} is the author's");
     }

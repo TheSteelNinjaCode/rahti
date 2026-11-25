@@ -117,12 +117,12 @@ async fn bind(host: &str, port: u16) -> TcpListener {
         }
         Ok(listener) => listener,
         Err(e) if e.kind() == ErrorKind::AddrInUse => {
-            if crate::dev::enabled() {
-                if let Some(listener) = next_free(&host, port).await {
-                    let moved = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-                    println!("rahti dev: {addr} is in use — using port {moved} instead.");
-                    return listener;
-                }
+            if crate::dev::enabled()
+                && let Some(listener) = next_free(&host, port).await
+            {
+                let moved = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+                println!("rahti dev: {addr} is in use — using port {moved} instead.");
+                return listener;
             }
             eprintln!(
                 "rahti: {addr} is already in use.\n  \
@@ -237,10 +237,10 @@ fn url_of(addr: SocketAddr) -> String {
 /// configurations.
 async fn next_free(host: &str, port: u16) -> Option<TcpListener> {
     for candidate in port.checked_add(1)?..=u16::MAX {
-        if let Ok(listener) = TcpListener::bind((host, candidate)).await {
-            if !shadowed(&listener).await {
-                return Some(listener);
-            }
+        if let Ok(listener) = TcpListener::bind((host, candidate)).await
+            && !shadowed(&listener).await
+        {
+            return Some(listener);
         }
     }
     None

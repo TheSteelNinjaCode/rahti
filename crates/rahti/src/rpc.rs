@@ -54,7 +54,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::pin::Pin;
 
-use axum::body::{Bytes, to_bytes};
+use axum::body::to_bytes;
 use axum::extract::{FromRequest, Multipart, Request};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
@@ -285,6 +285,8 @@ impl RpcCall {
     ///
     /// The `Err` side is the finished response to send back, so a caller does
     /// nothing but return it.
+    // The `Err` is the finished response, returned as-is; see `arg`.
+    #[allow(clippy::result_large_err)]
     pub async fn from_request(req: Request) -> Result<Self, Response> {
         let (parts, body) = req.into_parts();
         let name = rpc_name(&parts.headers)?;
@@ -351,6 +353,8 @@ impl RpcCall {
     /// are unreachable. That is not silent: the call remembers where it
     /// stopped, and [`RpcCall::arg`] says so instead of reporting a missing
     /// value.
+    // The `Err` is the finished response, returned as-is; see `arg`.
+    #[allow(clippy::result_large_err)]
     pub async fn from_request_streaming(req: Request, field: &str) -> Result<Self, Response> {
         let (parts, body) = req.into_parts();
         let name = rpc_name(&parts.headers)?;
@@ -447,12 +451,16 @@ impl RpcCall {
         })
     }
 
+    // The `Err` is the finished response, returned as-is; see `arg`.
+    #[allow(clippy::result_large_err)]
     async fn from_multipart(name: String, req: Request) -> Result<Self, Response> {
         Self::from_multipart_within(name, req, Limits::from_env(MAX_BODY)).await
     }
 
     /// The same, against limits the caller chose — which is how the spill is
     /// tested without a 256 KiB body.
+    // The `Err` is the finished response, returned as-is; see `arg`.
+    #[allow(clippy::result_large_err)]
     async fn from_multipart_within(
         name: String,
         req: Request,

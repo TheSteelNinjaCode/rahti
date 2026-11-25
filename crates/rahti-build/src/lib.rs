@@ -297,17 +297,17 @@ pub fn run() {
     for path in &contracts.read {
         println!("cargo:rerun-if-changed={path}");
     }
-    let manifest = codegen::manifest_json(
-        &scan.entries,
-        &components.files,
-        &components.rpcs,
-        &sockets,
-        &jobs.jobs,
-        database.as_ref(),
-        &config,
-        &contracts.contracts,
-        &contracts.types,
-    );
+    let manifest = codegen::manifest_json(&codegen::Manifest {
+        entries: &scan.entries,
+        components: &components.files,
+        component_rpcs: &components.rpcs,
+        sockets: &sockets,
+        jobs: &jobs.jobs,
+        database: database.as_ref(),
+        config: &config,
+        contracts: &contracts.contracts,
+        rpc_types: &contracts.types,
+    });
     write_if_changed(MANIFEST_PATH, &manifest);
     write_if_changed(RPC_SHAPES_PATH, &contracts.shapes);
 }
@@ -626,10 +626,10 @@ fn formatted(source: &str) -> String {
 
     // Dropped after the write so rustfmt sees end-of-input and can finish;
     // holding it open would deadlock `wait_with_output`.
-    if let Some(mut stdin) = child.stdin.take() {
-        if stdin.write_all(source.as_bytes()).is_err() {
-            return source.to_string();
-        }
+    if let Some(mut stdin) = child.stdin.take()
+        && stdin.write_all(source.as_bytes()).is_err()
+    {
+        return source.to_string();
     }
 
     match child.wait_with_output() {

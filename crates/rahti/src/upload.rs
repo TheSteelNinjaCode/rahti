@@ -41,7 +41,7 @@ use std::task::{Context, Poll};
 
 use axum::body::Bytes;
 use axum::http::StatusCode;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 use tokio_stream::Stream;
 use tokio_util::io::ReaderStream;
 
@@ -346,7 +346,10 @@ impl RpcFile {
                 // out from under the reader — which on Windows would not even
                 // be allowed, and on Unix would leave a handle onto a file
                 // with no name.
-                Source::File(handle, Arc::clone(file))
+                Source::File {
+                    handle,
+                    _spilled: Arc::clone(file),
+                }
             }
         }))
     }
@@ -658,7 +661,10 @@ enum Source {
     Memory(io::Cursor<Bytes>),
     /// The handle, and the file it belongs to — held so that the temporary
     /// file outlives the reader rather than the other way round.
-    File(tokio::fs::File, Arc<Spilled>),
+    File {
+        handle: tokio::fs::File,
+        _spilled: Arc<Spilled>,
+    },
 }
 
 impl AsyncRead for RpcFileReader {
@@ -669,7 +675,7 @@ impl AsyncRead for RpcFileReader {
     ) -> Poll<io::Result<()>> {
         match &mut self.get_mut().0 {
             Source::Memory(cursor) => Pin::new(cursor).poll_read(cx, buf),
-            Source::File(handle, _) => Pin::new(handle).poll_read(cx, buf),
+            Source::File { handle, .. } => Pin::new(handle).poll_read(cx, buf),
         }
     }
 }
@@ -749,6 +755,7 @@ impl Spool {
     }
 
     /// How much has been taken so far.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.len
     }
@@ -810,10 +817,11 @@ async fn create_spill_file() -> io::Result<(PathBuf, tokio::fs::File)> {
     ))
 }
 
-/// Read a whole reader, for the tests and for callers that already decided
-/// they want everything.
-#[allow(dead_code)]
+/// Read a whole reader, for the tests.
+#[cfg(test)]
 pub(crate) async fn read_all(mut reader: RpcFileReader) -> io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt as _;
+
     let mut out = Vec::new();
     reader.read_to_end(&mut out).await?;
     Ok(out)

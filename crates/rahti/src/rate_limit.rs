@@ -369,8 +369,8 @@ pub(crate) fn public_file(root: &Path, uri_path: &str) -> bool {
 }
 
 fn client_ip(request: &Request, trust_forwarded: bool) -> Option<IpAddr> {
-    if trust_forwarded {
-        if let Some(client) = request
+    if trust_forwarded
+        && let Some(client) = request
             .headers()
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
@@ -378,9 +378,8 @@ fn client_ip(request: &Request, trust_forwarded: bool) -> Option<IpAddr> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .and_then(|value| value.parse::<IpAddr>().ok())
-        {
-            return Some(client);
-        }
+    {
+        return Some(client);
     }
     request
         .extensions()

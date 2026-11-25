@@ -215,15 +215,15 @@ impl CacheStore for MemoryStore {
                 }
             };
 
-            if !state.entries.contains_key(key) && state.entries.len() == self.capacity {
-                if let Some(oldest) = state
+            if !state.entries.contains_key(key)
+                && state.entries.len() == self.capacity
+                && let Some(oldest) = state
                     .entries
                     .iter()
                     .min_by_key(|(_, entry)| entry.touched)
                     .map(|(key, _)| key.clone())
-                {
-                    state.entries.remove(&oldest);
-                }
+            {
+                state.entries.remove(&oldest);
             }
             let touched = state.tick();
             state.entries.insert(

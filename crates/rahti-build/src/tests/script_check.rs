@@ -102,12 +102,11 @@ fn errors_are_recorded_and_go_stale_when_a_script_changes() {
     assert_eq!(result["status"], "failed", "{result}");
     assert_eq!(result["errorCount"], 1);
     assert_eq!(result["stale"], false);
-    assert_eq!(
+    assert!(
         result["tool"]
             .as_str()
             .unwrap()
-            .starts_with("node_modules/.bin/tsc"),
-        true
+            .starts_with("node_modules/.bin/tsc")
     );
 
     // Read back by another process, the way `status` and MCP read it.

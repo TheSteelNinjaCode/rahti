@@ -39,6 +39,9 @@ pub const URL_ATTR: &str = "pp-loading-url";
 /// Built once, from the generated router, and read on every root document.
 static REGIONS: OnceLock<String> = OnceLock::new();
 
+/// One `loading.rs`: the URL prefix it sits at, and its `loading` function.
+pub type Region<'a> = (&'a str, fn() -> Html);
+
 /// Record the app's loading regions.
 ///
 /// Called by generated code with one pair per `loading.rs`: the URL prefix the
@@ -47,7 +50,7 @@ static REGIONS: OnceLock<String> = OnceLock::new();
 /// cannot differ between two requests.
 ///
 /// An app with no `loading.rs` never calls this, and nothing is injected.
-pub fn install(regions: &[(&str, fn() -> Html)]) {
+pub fn install(regions: &[Region<'_>]) {
     if regions.is_empty() {
         return;
     }
@@ -62,7 +65,7 @@ pub fn install(regions: &[(&str, fn() -> Html)]) {
 /// Split out from [`install`] so it can be tested without touching the
 /// process-wide slot: a test that installed would leak into every other test
 /// in the binary, since the whole point of the slot is that it is set once.
-fn container(regions: &[(&str, fn() -> Html)]) -> String {
+fn container(regions: &[Region<'_>]) -> String {
     let mut out = format!("<div id=\"{REGION_ID}\" hidden style=\"display:none\">");
     for (url, render) in regions {
         // A `<div>` specifically: the runtime's selector names the tag.

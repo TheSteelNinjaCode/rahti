@@ -209,8 +209,8 @@ pub fn with_version(
     let mut table = String::new();
     let mut first_moved: Option<String> = None;
 
-    for index in 0..lines.len() {
-        let trimmed = lines[index].trim();
+    for line in &mut lines {
+        let trimmed = line.trim();
         if trimmed.starts_with('[') {
             table = trimmed.trim_matches(|c| c == '[' || c == ']').to_string();
             if table.ends_with(&format!("dependencies.{name}")) {
@@ -223,14 +223,14 @@ pub fn with_version(
         }
         // The whole key, with only an `=` after it — so `rahti-build` is not
         // found while looking for `rahti`.
-        let Some(rest) = lines[index].trim_start().strip_prefix(name) else {
+        let Some(rest) = line.trim_start().strip_prefix(name) else {
             continue;
         };
         if !rest.trim_start().starts_with('=') {
             continue;
         }
 
-        let (key, value) = lines[index]
+        let (key, value) = line
             .split_once('=')
             .map(|(k, v)| (k.to_string(), v.trim().to_string()))
             .expect("the line was found by its `=`");
@@ -250,7 +250,7 @@ pub fn with_version(
         if !is_older(&pinned, current) {
             continue;
         }
-        lines[index] = format!("{key}= {}", value.replacen(&pinned, current, 1));
+        *line = format!("{key}= {}", value.replacen(&pinned, current, 1));
         first_moved.get_or_insert(pinned);
     }
 

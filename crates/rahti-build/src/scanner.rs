@@ -866,18 +866,16 @@ fn validate(entries: &[Entry]) {
     if let Some(not_found) = entries
         .iter()
         .find(|e| e.kind == Kind::NotFound && e.dirs.is_empty() && e.metadata)
-    {
-        if !entries
+        && !entries
             .iter()
             .any(|e| e.kind == Kind::Layout && e.dirs.is_empty())
-        {
-            panic!(
-                "rahti: {} exports `metadata()`, but there is no `layout.rs` at \
+    {
+        panic!(
+            "rahti: {} exports `metadata()`, but there is no `layout.rs` at \
                  the app root to give the 404 a document head.\n  \
                  Add `layout.rs` beside it, or delete `metadata()`.",
-                not_found.file
-            );
-        }
+            not_found.file
+        );
     }
 
     // Two files stamping the same `pp-component`. The macro derives the

@@ -8,10 +8,6 @@
 //! crate itself rather than a path inside whoever is compiling — so the
 //! expansion compiles the same wherever it is written.
 
-// Framework surface: exported for apps to use, so "nothing in this crate
-// calls it yet" is not a defect.
-#![allow(dead_code, unused_imports)]
-
 mod attrs;
 pub mod auth;
 pub mod authorization;

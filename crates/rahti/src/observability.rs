@@ -369,13 +369,12 @@ fn should_observe(state: &ObservabilityState, method: &Method, path: &str) -> bo
 }
 
 fn choose_request_id(value: Option<&HeaderValue>, policy: &Observability) -> RequestId {
-    if policy.accept_request_ids {
-        if let Some(value) = value
+    if policy.accept_request_ids
+        && let Some(value) = value
             .and_then(|value| value.to_str().ok())
             .filter(|value| valid_request_id(value))
-        {
-            return RequestId(value.to_string());
-        }
+    {
+        return RequestId(value.to_string());
     }
     RequestId(generated_request_id())
 }

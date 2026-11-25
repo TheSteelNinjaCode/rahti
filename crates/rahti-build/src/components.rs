@@ -227,11 +227,7 @@ fn mod_rs(dir: &Path, modules: &[String]) -> String {
     ));
     out.push_str("//\n");
     out.push_str("// Every `.rs` file here is declared as a module, so a component is in scope\n");
-    out.push_str("// as `crate::components::<file>::<Component>` as soon as it is saved.\n\n");
-
-    // A component the app has not called yet is a component in progress, not
-    // dead code — the same reason the `rahti` crate carries this.
-    out.push_str("#![allow(dead_code, unused_imports)]\n");
+    out.push_str("// as `crate::components::<file>::<Component>` as soon as it is saved.\n");
 
     if modules.is_empty() {
         out.push_str(

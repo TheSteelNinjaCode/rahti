@@ -578,20 +578,19 @@ fn check_single_root(roots: &[Root], call_site: Span) -> Result<(), Error> {
         });
     }
 
-    if roots.iter().any(|r| matches!(r, Root::Doctype)) {
-        if let Some(Root::Component(name, span)) =
+    if roots.iter().any(|r| matches!(r, Root::Doctype))
+        && let Some(Root::Component(name, span)) =
             roots.iter().find(|r| matches!(r, Root::Component(..)))
-        {
-            return Err(Error {
-                span: *span,
-                msg: format!(
-                    "rahti: a document writes its root element literally, and `<{name}>` is \
+    {
+        return Err(Error {
+            span: *span,
+            msg: format!(
+                "rahti: a document writes its root element literally, and `<{name}>` is \
                      a component.\n  A root layout's parent element is `<html>` — the \
                      doctype and the document element stay in the layout; components go \
                      inside them."
-                ),
-            });
-        }
+            ),
+        });
     }
     Ok(())
 }

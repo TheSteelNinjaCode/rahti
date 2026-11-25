@@ -422,6 +422,42 @@ beside the server. On Windows a server started another way — `cargo run`,
 type-checked first and the server is stopped before the build, and the timing
 line begins with a `check` part.
 
+### A build file held by another program
+
+On Windows a file that a process has open cannot be replaced, and the server
+is not the only process that opens build files. rust-analyzer loads the
+compiled macro library to expand `html!` in the editor; when that library is
+rebuilt in the same `target/`, `cargo build`, `cargo test` and
+`cargo rahti restart` all fail to link with `LNK1104`.
+
+The scaffold writes `.vscode/settings.json` so this does not happen:
+
+```json
+{
+  "rust-analyzer.cargo.targetDir": true
+}
+```
+
+rust-analyzer then builds into `target/rust-analyzer` and loads its macro
+library from there, leaving the files cargo writes alone. The cost is a second
+build cache. Another editor needs the same rust-analyzer setting in its own
+configuration. A language server that was already running when the setting
+was added keeps the file it loaded until it is restarted once.
+
+When the linker is refused anyway, restart says which file, which process, and
+what to do, and leaves a running server running:
+
+```text
+error: the build stopped because the linker cannot replace
+target\debug\deps\app_macros-1f.dll: it is open in
+rust-analyzer-proc-macro-srv (pid 4242). …
+```
+
+Act on that line. Stopping the dev server releases nothing here, deleting
+`target/` fails on the same lock, and a coding agent does not end a process it
+did not start: report the line and the setting to the person whose editor it
+is.
+
 Restart ends by saying where its time went:
 
 ```text
@@ -629,9 +665,10 @@ the render contract and output safety rules.
 - `--force` takes edited files back anyway, which is how a project that
   diverged from the scaffold rejoins it. Bare, it takes the framework's own
   files — `src/main.rs`, `build.rs`, `.cargo/config.toml`, the documents, the
-  PulsePoint assets — and leaves everything else under `src/`, because that is
-  your application and a flag that deleted a homepage for saying "update my
-  framework files" would be a trap. Naming paths takes exactly those, an
+  PulsePoint assets — and leaves `.vscode/settings.json` and everything else
+  under `src/`, because that is your editor and your application, and a flag
+  that deleted a homepage for saying "update my framework files" would be a
+  trap. Naming paths takes exactly those, an
   application file included: `--force src/app/page.rs`. A path that is not a
   scaffold file of this project is refused rather than silently ignored, and
   `Cargo.toml` is refused either way — a forced manifest would undo your
@@ -692,6 +729,50 @@ line that installs it and installs nothing.
 `native/` is excluded from the project workspace, so `cargo check --workspace`
 in a web project never resolves a Tauri dependency. Full rules, paths and
 security model: `native-packaging.md`.
+
+## Dead Code
+
+`cargo check` reports application code nothing uses. rustc's `dead_code` lint
+is on for every file under the configured `app.dir` and under
+`src/components/`, so a component no template renders, a helper no function
+calls, and a struct nothing builds each arrive as a warning naming the file
+and line:
+
+```text
+src/components/promo_banner.rs:4:8: warning: function `PromoBanner` is never used
+```
+
+A build with no warnings is the finished state. When a warning names an item:
+
+1. Delete it, together with whatever only it used. This is the default.
+2. Keep it only when it is deliberately ahead of its caller, and say so on the
+   item itself:
+
+   ```rust
+   #[component]
+   #[expect(dead_code, reason = "rendered by the pricing page, added next")]
+   pub fn PromoBanner(text: &str) -> Html {
+       html! { <p class="banner">@{text}</p> }
+   }
+   ```
+
+   `#[expect]` warns as soon as the item gains a caller, so the exemption is
+   removed in the change that makes it untrue.
+
+Never write `#[allow(dead_code)]`, on an item or over a module: it keeps
+hiding the item after the reason is gone, and over a module it hides
+everything added there later.
+
+What the lint does not report, and why:
+
+| Code | Why it is not reported |
+| --- | --- |
+| `page`, `layout`, `error`, `not_found`, `loading`, `metadata`, `cache`, `static_paths`, and a `route.rs` method | The generated router calls them. |
+| `pub const ROOT_LAYOUT` | The generated router names it. |
+| `#[rpc]`, `#[socket]`, and `#[job]` functions | The attribute registers them, so rustc counts each as used whether or not anything calls it. Check an rpc's callers by searching for `pp.rpc("name"`, and a job's for `jobs::name::enqueue`. |
+| A `pub` item in a module that `src/lib.rs` declares `pub mod` | The application is a library target, and rustc treats a library's public items as used from outside. Search for callers before keeping one. |
+| `src/models/` and `src/migrations/` | Their generated `mod.rs` exempts them: a SeaORM entity defines items no application code names. |
+| A function in a `<script>` that nothing calls | It is JavaScript, outside rustc's view. |
 
 ## Generated Artifacts
 

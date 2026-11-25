@@ -360,6 +360,16 @@ preserve them, and documentation or scaffold changes must teach them.
     `twMerge` does not generate CSS. Read "Tailwind class merging: agent
     contract" in `docs/conventions/configuration-and-tooling.md`.
 
+46. Dead code is deleted, not silenced. Generated `src/routes.rs` and
+    `src/components/mod.rs` carry no `allow`, so rustc's `dead_code` lint
+    reports an unused component, helper, or type anywhere under `app/` and
+    `src/components/`, and a build with no warnings is the finished state. An
+    item kept ahead of its caller takes `#[expect(dead_code, reason = "…")]`
+    on that item, which warns once it is used. Never write
+    `#[allow(dead_code)]` by hand, on an item or a module, in the application
+    or the framework crates. See "Dead Code" in
+    `docs/conventions/configuration-and-tooling.md`.
+
 ## Repository Map
 
 - `crates/rahti/` - server runtime: HTML values, layouts, metadata, errors,

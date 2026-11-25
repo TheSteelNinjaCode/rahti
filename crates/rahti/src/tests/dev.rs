@@ -71,6 +71,7 @@ fn a_document_that_already_has_the_client_is_left_alone() {
 // ---------------------------------------------------------------- watching
 
 /// A stylesheet can be swapped in place; anything else needs the page back.
+#[cfg(feature = "dev-watch")]
 #[test]
 fn only_stylesheets_can_be_hot_swapped() {
     assert!(is_css(&PathBuf::from("public/css/styles.css")));

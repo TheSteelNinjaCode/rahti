@@ -687,6 +687,11 @@ crate::components::<file>::<Component>
 One file may export several components. A nested file is reached through its
 full generated module path.
 
+A component nothing renders is reported by `cargo check` as
+`function … is never used`. Delete it, or mark one that is deliberately ahead
+of its caller with `#[expect(dead_code, reason = "…")]`; see "Dead Code" in
+`configuration-and-tooling.md`.
+
 Components live in `src/components/`. That is the only directory the build
 generates module files for. The scaffold's `globals.css` points Tailwind at
 all of `src/`, so the classes of any Rust file under it are compiled; a
