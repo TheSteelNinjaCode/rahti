@@ -54,8 +54,13 @@ axum = { version = "0.8.9", features = ["multipart"] }
 # MAC: a comparison that is not constant-time is a forgeable session, and that
 # is not a thing to write twice.
 base64 = "0.23"
+# Calendar values are chrono's, the type the database layer and the rest of
+# the ecosystem speak; the zone rules behind `rahti::time::Tz` are jiff's,
+# whose IANA database is maintained and embedded (`tzdb-bundle-always`), so a
+# named zone resolves in a slim container with no `/usr/share/zoneinfo` and on
+# Windows alike. See src/time.rs.
 chrono = "0.4.45"
-chrono-tz = "0.10.4"
+jiff = { version = "1.0.3", features = ["tzdb-bundle-always"] }
 hmac = "0.13"
 sha2 = "0.11"
 # CSRF tokens are asked of the operating system, not of the clock — see the

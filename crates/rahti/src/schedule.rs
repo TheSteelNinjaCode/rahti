@@ -100,7 +100,7 @@ impl Scheduler {
             job,
             payload,
             Cadence::Daily {
-                zone: chrono_tz::UTC,
+                zone: crate::time::Tz::UTC,
                 hour,
                 minute,
             },
@@ -269,7 +269,7 @@ enum Cadence {
     Every(Duration),
     Once(SystemTime),
     Daily {
-        zone: chrono_tz::Tz,
+        zone: crate::time::Tz,
         hour: u8,
         minute: u8,
     },
@@ -387,7 +387,7 @@ async fn dispatch(queue: &JobQueue, entry: &Entry, state: &State) {
     }
 }
 
-fn next_daily(now: SystemTime, zone: chrono_tz::Tz, hour: u8, minute: u8) -> SystemTime {
+fn next_daily(now: SystemTime, zone: crate::time::Tz, hour: u8, minute: u8) -> SystemTime {
     let now_utc: DateTime<Utc> = now.into();
     let mut day = now_utc.with_timezone(&zone).date_naive();
     for _ in 0..=2 {
@@ -626,11 +626,11 @@ mod tests {
     fn daily_utc_moves_to_the_next_matching_minute() {
         let now = UNIX_EPOCH + Duration::from_secs(12 * 3_600 + 30 * 60);
         assert_eq!(
-            next_daily(now, chrono_tz::UTC, 13, 15),
+            next_daily(now, crate::time::Tz::UTC, 13, 15),
             UNIX_EPOCH + Duration::from_secs(13 * 3_600 + 15 * 60)
         );
         assert_eq!(
-            next_daily(now, chrono_tz::UTC, 12, 30),
+            next_daily(now, crate::time::Tz::UTC, 12, 30),
             now + Duration::from_secs(24 * 60 * 60)
         );
     }
@@ -655,7 +655,7 @@ mod tests {
                 .into()
         };
         let cadence = Cadence::Daily {
-            zone: chrono_tz::UTC,
+            zone: crate::time::Tz::UTC,
             hour: 8,
             minute: 30,
         };

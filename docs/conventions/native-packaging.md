@@ -286,6 +286,27 @@ than flipping the manifest flag, which would have permitted it everywhere.
 It is reapplied on every Android build, because `gen/android` is regenerated
 rather than reviewed.
 
+### Android and the status bar
+
+Android 15 draws every application targeting API 35 or later edge to edge,
+and Tauri's generated activity asks for it as well, so a WebView left alone
+sits under the status bar: a page's header lands beside the clock and the
+battery, and a tap there reaches the system, not the page. Android System
+WebView does not report that area to an ordinary page through
+`env(safe-area-inset-top)`, so CSS cannot fix it.
+
+Every Android build therefore pads the activity's content by the system bars,
+the display cutout and the keyboard, in `MainActivity.kt` inside the generated
+project. The page gets exactly the area it can use, and a form field the
+keyboard would cover scrolls into view as it does in a browser. An activity
+the tool does not recognise is reported with the code to add, not edited.
+
+The launcher icon has the same kind of trap: Android shows only the middle of
+the adaptive icon's 108dp layer through the launcher's mask. The default icons
+and everything `cargo rahti native icon` writes keep the whole image inside
+the 66dp circle every mask keeps, so even a round launcher neither crops nor
+shifts it.
+
 ### The database
 
 `database.mode` decides, and the default is `sqlite-local`: a SQLite file in
@@ -494,9 +515,9 @@ RAHTI_NATIVE_ANDROID_KEY_ALIAS
 RAHTI_NATIVE_ANDROID_KEY_PASSWORD
 ```
 
-`doctor --release` says which are missing. `build --target android --debug`
-produces a package that installs without any of them, which is what testing
-wants.
+`doctor --release` checks them. Without the Android ones a release is signed
+with this machine's own key (see below), and `build --target android --debug`
+is signed with Android's debug key, which is what testing wants.
 
 The two platforms get there differently, and the Android one is worth knowing
 about. Tauri reads the Windows certificate from the environment, so those two
@@ -510,6 +531,45 @@ directory the shell's `.gitignore` excludes, and is named there as well.
 This matters because the failure is silent: passing a keystore and assuming
 Tauri picks it up produces a release that builds fine and is **unsigned**,
 which Google Play refuses and which will not install.
+
+A few things follow from that file being a Java properties file and from the
+build owning it:
+
+- Every value is escaped, so a password may contain `\`, `#`, `=`, `:`, `!`,
+  spaces or non-ASCII characters and still reaches Gradle as written.
+- A relative `RAHTI_NATIVE_ANDROID_KEYSTORE` is resolved against the directory
+  the build runs from, and a keystore that is not there, or a missing password
+  or alias, stops the build before anything compiles. `doctor --release` makes
+  the same check.
+- A build without the variables removes the file, so neither an earlier key nor
+  its passwords outlive the variables that supplied them, and the Gradle
+  signing configuration only applies when the file names a key.
+- A release that comes out unsigned anyway is reported as a warning, in the
+  output and in `native/.rahti/build.json`.
+
+### Without a key of your own
+
+Android installs nothing unsigned, so a release build never comes out
+unsigned. With no `RAHTI_NATIVE_ANDROID_KEYSTORE` set, it signs with this
+machine's release key for the application, and makes that key the first time:
+
+```text
+Windows  %APPDATA%\rahti-native\keys\<identifier>\
+macOS    ~/Library/Application Support/rahti-native/keys/<identifier>/
+Linux    $XDG_DATA_HOME (or ~/.local/share)/rahti-native/keys/<identifier>/
+```
+
+`RAHTI_NATIVE_KEY_DIR` replaces the `…/rahti-native/keys` part. The folder holds
+`release.jks` and `release-key.json` with the alias and the generated
+passwords; it is outside the project, so it is never committed. The build says
+which key signed, and `native/.rahti/build.json` records it under `signing`.
+
+**Back that folder up.** Every update to an installed application has to be
+signed with the key that signed the first install, so the key is made once and
+never replaced; a folder holding one of the two files and not the other stops
+the build rather than being overwritten. On Google Play it is your upload key.
+To build on another machine, copy the folder there, or point the
+`RAHTI_NATIVE_ANDROID_*` variables at it.
 
 ## Shutdown
 

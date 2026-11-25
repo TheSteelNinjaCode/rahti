@@ -5,17 +5,229 @@
 //! cache TTLs, retry delays, signatures, or any other absolute duration.
 
 use std::{
+    collections::HashSet,
     fmt,
     str::FromStr,
-    sync::{OnceLock, RwLock},
+    sync::{Mutex, OnceLock, RwLock},
 };
 
 pub use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use chrono::{Duration, LocalResult, TimeZone as _};
-pub use chrono_tz::Tz;
+use chrono::{Duration, FixedOffset, LocalResult, MappedLocalTime, NaiveTime, TimeZone as _};
 
 pub const APP_TIMEZONE_ENV: &str = "APP_TIMEZONE";
 pub const DEFAULT_APP_TIMEZONE: &str = "UTC";
+
+/// An IANA time zone, usable wherever chrono takes a zone: `DateTime<Tz>`,
+/// `with_timezone(&zone)`, `zone.with_ymd_and_hms(…)`. Its rules come from
+/// jiff's time zone database: the host's own when it has one, otherwise the
+/// copy embedded in the binary, so a zone resolves the same way in a slim
+/// container and on Windows. `Tz` is `Copy`, and so is `DateTime<Tz>`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Tz {
+    name: &'static str,
+}
+
+impl Tz {
+    pub const UTC: Tz = Tz { name: "UTC" };
+
+    /// The zone's IANA name, as the database spells it (`America/New_York`).
+    pub fn name(self) -> &'static str {
+        self.name
+    }
+
+    /// The zone's rules. The database caches them, so this is a lookup, and a
+    /// name that resolved once keeps resolving.
+    fn rules(self) -> jiff::tz::TimeZone {
+        if self.name == Self::UTC.name {
+            return jiff::tz::TimeZone::UTC;
+        }
+        jiff::tz::db()
+            .get(self.name)
+            .unwrap_or(jiff::tz::TimeZone::UTC)
+    }
+
+    fn offset_at(self, rules: &jiff::tz::TimeZone, instant: jiff::Timestamp) -> TzOffset {
+        let info = rules.to_offset_info(instant);
+        TzOffset::new(self, info.offset().seconds(), info.abbreviation())
+    }
+}
+
+/// A zone name, kept for the life of the process: there are a few hundred,
+/// and each is stored once however often it is parsed.
+fn interned(name: &str) -> &'static str {
+    static NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    let mut names = NAMES
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(known) = names.get(name) {
+        return known;
+    }
+    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+    names.insert(leaked);
+    leaked
+}
+
+impl FromStr for Tz {
+    type Err = AppTimeError;
+
+    /// An IANA name, matched without regard to case and kept in the
+    /// database's own spelling.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        let zone = jiff::tz::db()
+            .get(name)
+            .map_err(|_| AppTimeError::InvalidZone(name.to_string()))?;
+        let canonical = zone.iana_name().unwrap_or(name);
+        Ok(Self {
+            name: interned(canonical),
+        })
+    }
+}
+
+impl fmt::Debug for Tz {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name)
+    }
+}
+
+impl fmt::Display for Tz {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name)
+    }
+}
+
+/// The offset of a `Tz` at one instant, with the zone it belongs to and its
+/// abbreviation (`EST`, `CEST`, `-03`), which is how it displays.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct TzOffset {
+    zone: Tz,
+    fixed: FixedOffset,
+    abbreviation: [u8; 8],
+    length: u8,
+}
+
+impl TzOffset {
+    fn new(zone: Tz, seconds: i32, abbreviation: &str) -> Self {
+        let fixed = FixedOffset::east_opt(seconds)
+            .unwrap_or_else(|| FixedOffset::east_opt(0).expect("zero is a valid offset"));
+        let mut bytes = [0u8; 8];
+        let mut length = 0;
+        for letter in abbreviation.chars() {
+            let width = letter.len_utf8();
+            if length + width > bytes.len() {
+                break;
+            }
+            letter.encode_utf8(&mut bytes[length..]);
+            length += width;
+        }
+        Self {
+            zone,
+            fixed,
+            abbreviation: bytes,
+            length: length as u8,
+        }
+    }
+
+    pub fn abbreviation(&self) -> &str {
+        std::str::from_utf8(&self.abbreviation[..usize::from(self.length)]).unwrap_or("")
+    }
+
+    pub fn zone(&self) -> Tz {
+        self.zone
+    }
+}
+
+impl chrono::Offset for TzOffset {
+    fn fix(&self) -> FixedOffset {
+        self.fixed
+    }
+}
+
+impl fmt::Debug for TzOffset {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.abbreviation())
+    }
+}
+
+impl fmt::Display for TzOffset {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.abbreviation())
+    }
+}
+
+/// A chrono UTC wall time as a jiff instant, or `None` outside jiff's range
+/// (years -9999 to 9999).
+fn instant_of(utc: &NaiveDateTime) -> Option<jiff::Timestamp> {
+    let nanos = utc.and_utc().timestamp_subsec_nanos().min(999_999_999);
+    jiff::Timestamp::new(utc.and_utc().timestamp(), nanos as i32).ok()
+}
+
+/// A chrono local wall time as a jiff civil time, or `None` outside its range.
+fn civil_of(local: &NaiveDateTime) -> Option<jiff::civil::DateTime> {
+    use chrono::{Datelike, Timelike};
+    let nanos = local.nanosecond().min(999_999_999);
+    jiff::civil::DateTime::new(
+        i16::try_from(local.year()).ok()?,
+        local.month() as i8,
+        local.day() as i8,
+        local.hour() as i8,
+        local.minute() as i8,
+        local.second() as i8,
+        nanos as i32,
+    )
+    .ok()
+}
+
+impl chrono::TimeZone for Tz {
+    type Offset = TzOffset;
+
+    fn from_offset(offset: &TzOffset) -> Self {
+        offset.zone
+    }
+
+    fn offset_from_local_date(&self, local: &NaiveDate) -> MappedLocalTime<TzOffset> {
+        self.offset_from_local_datetime(&local.and_time(NaiveTime::MIN))
+    }
+
+    /// A wall time a transition skips is `None`; one it repeats is
+    /// `Ambiguous`, the earlier instant first.
+    fn offset_from_local_datetime(&self, local: &NaiveDateTime) -> MappedLocalTime<TzOffset> {
+        use jiff::tz::AmbiguousOffset;
+        let Some(civil) = civil_of(local) else {
+            return LocalResult::None;
+        };
+        let rules = self.rules();
+        let at = |offset: jiff::tz::Offset| {
+            offset
+                .to_timestamp(civil)
+                .ok()
+                .map(|instant| self.offset_at(&rules, instant))
+        };
+        match rules.to_ambiguous_timestamp(civil).offset() {
+            AmbiguousOffset::Unambiguous { offset } => {
+                at(offset).map_or(LocalResult::None, LocalResult::Single)
+            }
+            AmbiguousOffset::Gap { .. } => LocalResult::None,
+            AmbiguousOffset::Fold { before, after } => match (at(before), at(after)) {
+                (Some(earlier), Some(later)) => LocalResult::Ambiguous(earlier, later),
+                (Some(only), None) | (None, Some(only)) => LocalResult::Single(only),
+                (None, None) => LocalResult::None,
+            },
+        }
+    }
+
+    fn offset_from_utc_date(&self, utc: &NaiveDate) -> TzOffset {
+        self.offset_from_utc_datetime(&utc.and_time(NaiveTime::MIN))
+    }
+
+    fn offset_from_utc_datetime(&self, utc: &NaiveDateTime) -> TzOffset {
+        match instant_of(utc) {
+            Some(instant) => self.offset_at(&self.rules(), instant),
+            // Outside the database's range a zone has no rules to apply.
+            None => TzOffset::new(*self, 0, "UTC"),
+        }
+    }
+}
 
 /// A validated application calendar timezone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,9 +250,7 @@ impl AppTime {
         } else {
             name
         };
-        Tz::from_str(name)
-            .map(|zone| Self { zone })
-            .map_err(|_| AppTimeError::InvalidZone(name.to_string()))
+        Tz::from_str(name).map(|zone| Self { zone })
     }
 
     /// Read `APP_TIMEZONE` after loading `.env`, defaulting to UTC.
@@ -217,6 +427,56 @@ mod tests {
             AppTime::named("America/Santo_Domingoo"),
             Err(AppTimeError::InvalidZone(_))
         ));
+    }
+
+    #[test]
+    fn a_zone_name_is_matched_without_case_and_kept_in_its_own_spelling() {
+        let zone: Tz = "america/new_york".parse().unwrap();
+        assert_eq!(zone.name(), "America/New_York");
+        assert_eq!(zone, "America/New_York".parse::<Tz>().unwrap());
+        assert_eq!(Tz::UTC.name(), "UTC");
+        assert!("Not/A_Zone".parse::<Tz>().is_err());
+    }
+
+    #[test]
+    fn an_aware_time_shows_its_offset_and_abbreviation() {
+        let zone: Tz = "America/New_York".parse().unwrap();
+        let winter = zone.with_ymd_and_hms(2026, 1, 14, 21, 30, 0).unwrap();
+        let summer = zone.with_ymd_and_hms(2026, 7, 14, 21, 30, 0).unwrap();
+        assert_eq!(winter.to_string(), "2026-01-14 21:30:00 EST");
+        assert_eq!(summer.to_rfc3339(), "2026-07-14T21:30:00-04:00");
+        assert_eq!(summer.offset().abbreviation(), "EDT");
+        // A `DateTime<Tz>` is `Copy`, as it was with the zone it replaces.
+        let copied = winter;
+        assert_eq!(copied, winter);
+    }
+
+    #[test]
+    fn a_skipped_wall_time_has_no_instant_and_a_repeated_one_has_two() {
+        let zone: Tz = "America/New_York".parse().unwrap();
+        let skipped = NaiveDate::from_ymd_opt(2026, 3, 8)
+            .unwrap()
+            .and_hms_opt(2, 30, 0)
+            .unwrap();
+        assert!(matches!(
+            zone.from_local_datetime(&skipped),
+            LocalResult::None
+        ));
+        let repeated = NaiveDate::from_ymd_opt(2026, 11, 1)
+            .unwrap()
+            .and_hms_opt(1, 30, 0)
+            .unwrap();
+        let LocalResult::Ambiguous(earlier, later) = zone.from_local_datetime(&repeated) else {
+            panic!("1:30 repeats on the day clocks fall back");
+        };
+        assert_eq!(later - earlier, Duration::hours(1));
+        assert_eq!(
+            (
+                earlier.offset().abbreviation(),
+                later.offset().abbreviation()
+            ),
+            ("EDT", "EST")
+        );
     }
 
     #[test]

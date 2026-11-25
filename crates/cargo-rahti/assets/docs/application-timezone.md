@@ -16,11 +16,12 @@ Set one IANA timezone name in the environment or the ignored `.env`:
 APP_TIMEZONE="America/Santo_Domingo"
 ```
 
-An absent or blank value means `UTC`. Names are case-sensitive IANA database
-identifiers such as `UTC`, `America/New_York`, `Europe/Berlin`, or
-`Asia/Tokyo`. A misspelling fails application startup and includes the
-offending value; Rahti never silently falls back from an invalid configured
-name.
+An absent or blank value means `UTC`. Names are IANA database identifiers
+such as `UTC`, `America/New_York`, `Europe/Berlin`, or `Asia/Tokyo`, matched
+without regard to case and reported in the database's own spelling
+(`america/new_york` resolves to `America/New_York`). A misspelling fails
+application startup and includes the offending value; Rahti never silently
+falls back from an invalid configured name.
 
 The scaffold resolves and installs the setting once in
 `initialize_application`:
@@ -32,9 +33,10 @@ rahti::time::configure(app_time);
 ```
 
 Resolve it before starting schedulers or serving requests. Changing the
-environment requires a process restart. Rahti bundles the IANA rules through
-its Rust dependency, so named zones work on Windows and do not depend on an
-operating-system timezone database. `AppTime::named("Europe/Berlin")`
+environment requires a process restart. Zone rules come from the host's IANA
+database where it has one and from a copy embedded in the Rahti binary
+otherwise, so named zones resolve on Windows and in slim containers that ship
+no `/usr/share/zoneinfo`. `AppTime::named("Europe/Berlin")`
 resolves a name without reading the environment, which is how a test installs
 a zone; quotes around either value are ignored.
 
@@ -58,6 +60,15 @@ assert_eq!(local_now.timezone(), zone);
 `now()` returns an aware `DateTime<Tz>`. `today()` returns a
 `NaiveDate` because a calendar date has no instant until it is interpreted in
 a timezone.
+
+`Tz` is Rahti's zone type and a chrono `TimeZone`, so it works wherever
+chrono takes one: `value.with_timezone(&zone)`,
+`zone.with_ymd_and_hms(2026, 1, 14, 21, 30, 0)`, `zone.from_local_datetime(…)`.
+It is `Copy`, `"Europe/Berlin".parse::<Tz>()` resolves one, and `name()`
+returns its IANA name. An aware value displays the zone's abbreviation
+(`2026-01-14 21:30:00 EST`), and `value.offset().abbreviation()` returns it.
+A wall time a transition skips has no instant (`LocalResult::None`); one it
+repeats has two (`LocalResult::Ambiguous`, the earlier first).
 
 The module re-exports `DateTime`, `NaiveDate`, `NaiveDateTime`, `Tz`,
 and `Utc` for application code that does not otherwise depend directly on
