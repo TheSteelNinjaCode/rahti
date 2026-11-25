@@ -306,6 +306,57 @@ fn a_bare_force_leaves_an_unrecorded_file() {
     assert_eq!(plan.yours, [DOC]);
 }
 
+// --------------------------------------------------------------- line endings
+
+/// The ledger with `DOC` recorded as the scaffold wrote `text`.
+fn recorded_as(text: &str) -> Ledger {
+    let mut ledger = Ledger::new();
+    ledger.insert(DOC.to_string(), sha256::hex(text.as_bytes()));
+    ledger
+}
+
+/// git on Windows checks a file out with CRLF. Nobody edited it, and calling
+/// it the author's would keep every later fix out of that clone for good.
+#[test]
+fn a_checkout_with_other_line_endings_is_still_the_scaffolds() {
+    let root = project_with(&[(DOC, "an older copy\r\nof the scaffold\r\n")]);
+    let recorded = recorded_as("an older copy\nof the scaffold\n");
+    let options = Options::parse(&[]).unwrap();
+
+    let (plan, ledger) = plan(&root, &template(), &recorded, &options);
+
+    assert!(plan.yours.is_empty(), "{:?}", plan.yours);
+    assert_eq!(plan.updated, [DOC]);
+    assert_eq!(ledger[DOC], sha256::hex(b"the template"));
+}
+
+/// The same checkout of a file that is already the template's: current, and
+/// not rewritten on every run for the sake of its line endings.
+#[test]
+fn a_current_file_with_other_line_endings_is_not_rewritten() {
+    let wanted = vec![(DOC.to_string(), b"the template\nline two\n".to_vec())];
+    let root = project_with(&[(DOC, "the template\r\nline two\r\n")]);
+    let recorded = recorded_as("the template\nline two\n");
+    let options = Options::parse(&[]).unwrap();
+
+    let (plan, _) = plan(&root, &wanted, &recorded, &options);
+
+    assert_eq!(plan.current, [DOC]);
+    assert!(!plan.writes(DOC));
+}
+
+/// An edit is still an edit, whatever its line endings.
+#[test]
+fn an_edited_file_with_other_line_endings_is_still_the_authors() {
+    let root = project_with(&[(DOC, "an older copy\r\nwith my change\r\n")]);
+    let recorded = recorded_as("an older copy\nof the scaffold\n");
+    let options = Options::parse(&[]).unwrap();
+
+    let (plan, _) = plan(&root, &template(), &recorded, &options);
+
+    assert_eq!(plan.yours, [DOC]);
+}
+
 // ------------------------------------------------------------------- rewrite
 
 /// A scratch directory holding the config `new` writes, for the rewrite tests.

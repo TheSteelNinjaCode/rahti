@@ -9,7 +9,9 @@
 //! classified by comparing the bytes on disk with the hash recorded when the
 //! scaffold wrote it:
 //!
-//! - the hashes agree — nobody has touched it, so it is ours to replace;
+//! - the hashes agree — nobody has touched it, so it is ours to replace. A
+//!   checkout that turned LF into CRLF agrees too: line endings are not an
+//!   edit, and a file read as the author's never receives another fix;
 //! - they disagree — the author edited it, so it is theirs and is left alone;
 //! - the file is gone — the author deleted it, which is also an answer.
 //!
@@ -190,7 +192,9 @@ pub fn run(args: &[&str]) -> Result<(), String> {
     if let Some(bytes) = &wiring.manifest
         && pristine
     {
-        ledger.insert("Cargo.toml".to_string(), sha256::hex(bytes));
+        // Recorded as LF, the form every other entry has, so a clone with
+        // other line endings reads the same manifest as the same file.
+        ledger.insert("Cargo.toml".to_string(), sha256::hex(&unix(bytes.as_ref())));
     }
 
     // Written even when nothing else was, because `createdWith` moves with
@@ -232,10 +236,10 @@ fn plan(
         match (recorded.get(path), actual) {
             // Known to the ledger and still on disk: whose is it?
             (Some(hash), Some(bytes)) => {
-                let theirs = &sha256::hex(&bytes) != hash;
+                let theirs = !written_as(&bytes, hash);
                 if theirs && !options.forces(path) {
                     plan.yours.push(path.clone());
-                } else if bytes == *wanted {
+                } else if same_text(&bytes, wanted) {
                     // Already the template's text. A forced file lands here
                     // once it has been taken, so a second `--force` re-adopts
                     // it into the ledger and says nothing.
@@ -264,7 +268,7 @@ fn plan(
             (None, Some(bytes)) => {
                 if !options.names(path) {
                     plan.yours.push(path.clone());
-                } else if bytes == *wanted {
+                } else if same_text(&bytes, wanted) {
                     plan.current.push(path.clone());
                     ledger.insert(path.clone(), sha256::hex(wanted));
                 } else {
@@ -285,6 +289,35 @@ fn plan(
     }
 
     (plan, ledger)
+}
+
+/// `bytes` with every CRLF read as LF.
+///
+/// The scaffold writes LF, and a checkout may not hand it back: git on
+/// Windows converts a text file to CRLF on the way out. That is the same file
+/// and nobody's edit, so every comparison against what the scaffold wrote is
+/// made on this form as well as on the bytes themselves.
+fn unix(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while let Some(at) = rest.windows(2).position(|pair| pair == b"\r\n") {
+        out.extend_from_slice(&rest[..at]);
+        out.push(b'\n');
+        rest = &rest[at + 2..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Whether the file on disk is still what the scaffold recorded as `hash`,
+/// whatever line endings it was checked out with.
+fn written_as(bytes: &[u8], hash: &str) -> bool {
+    sha256::hex(bytes) == hash || sha256::hex(&unix(bytes)) == hash
+}
+
+/// Whether the file on disk is already the template's text.
+fn same_text(bytes: &[u8], wanted: &[u8]) -> bool {
+    bytes == wanted || unix(bytes) == unix(wanted)
 }
 
 // ------------------------------------------------------------------- wiring

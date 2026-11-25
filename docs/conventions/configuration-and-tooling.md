@@ -661,7 +661,9 @@ the render contract and output safety rules.
   it cannot read — a `[dependencies.rahti]` table, a dependency spread over
   several lines — is reported with the line to add rather than guessed at.
 - Upgrade rewrites/removes only files whose current hash still matches the
-  scaffold ledger. Edited files are preserved and reported.
+  scaffold ledger. Edited files are preserved and reported. Line endings are
+  not an edit: a file git checked out with CRLF still matches the LF hash the
+  scaffold recorded, so a Windows clone keeps receiving fixes.
 - `--force` takes edited files back anyway, which is how a project that
   diverged from the scaffold rejoins it. Bare, it takes the framework's own
   files — `src/main.rs`, `build.rs`, `.cargo/config.toml`, the documents, the
