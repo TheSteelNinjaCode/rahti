@@ -2201,8 +2201,9 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `src/components/`; a build with no warnings is the finished state. An
          item kept ahead of its caller takes
          `#[expect(dead_code, reason = \"…\")]` on that item. Never write
-         `#[allow(dead_code)]`. `#[rpc]`, `#[socket]`, `#[job]`, and `pub`
-         items of a `pub mod` are not reported, so search for their callers.
+         `#[allow(dead_code)]`; an installed component-kit file carries its
+         own, which stays. `#[rpc]`, `#[socket]`, `#[job]`, and `pub` items
+         of a `pub mod` are not reported, so search for their callers.
          See \"Dead Code\" in `docs/conventions/configuration-and-tooling.md`."
             .to_string(),
     );

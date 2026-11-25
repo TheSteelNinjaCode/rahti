@@ -763,6 +763,12 @@ Never write `#[allow(dead_code)]`, on an item or over a module: it keeps
 hiding the item after the reason is gone, and over a module it hides
 everything added there later.
 
+A component kit is the one exception, and the kit writes it, not you. A file
+a tool installs into `src/components/` — a `rahti_ui` component, for example —
+ships its whole API and an application uses part of it, so the file opens
+with its own `#![allow(dead_code)]` and a comment saying why. Leave that line
+where the installer put it, and do not copy it into a file you wrote.
+
 What the lint does not report, and why:
 
 | Code | Why it is not reported |

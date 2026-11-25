@@ -367,7 +367,8 @@ preserve them, and documentation or scaffold changes must teach them.
     item kept ahead of its caller takes `#[expect(dead_code, reason = "…")]`
     on that item, which warns once it is used. Never write
     `#[allow(dead_code)]` by hand, on an item or a module, in the application
-    or the framework crates. See "Dead Code" in
+    or the framework crates; a component-kit file a tool installs carries its
+    own file-level allow, which stays. See "Dead Code" in
     `docs/conventions/configuration-and-tooling.md`.
 
 ## Repository Map
