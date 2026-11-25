@@ -613,7 +613,8 @@ serialization the children take is decided per child block:
 - **Children carrying their own `<script>`** are a self-contained block: a
   single root is stamped `pp-component` — the same block a separate
   `html! { … }` child argument is — and its bindings resolve against state
-  it declares itself, never the caller's.
+  it declares itself, never the caller's. The script goes inside that root;
+  see "One Script, Inside Its Block" below.
 - **Static children** are served inline, visible without JavaScript.
 
 Two shapes stay in the component's scope: children rooted in `<>…</>`
@@ -627,6 +628,49 @@ for their owner, and keep it.
 State, functions, and the script that declares them still belong together: a
 reusable interactive child should be its own `#[component]` or carry its own
 script inside its own root.
+
+### One Script, Inside Its Block
+
+A block has one scope, so it carries one `<script>` — a bare one, compiled
+into the client registry; a `<script type="…">` data block or a
+`<script src="…">` is not a component script and is not counted. The runtime
+reads the first component script it meets inside a boundary and nothing else.
+`html!` refuses the two shapes where that first script would be the wrong
+one:
+
+- **A second script in one block** — `RAHTI_SECOND_SCRIPT`. Merge the two,
+  or give the second its own block: a `#[component]` whose root element
+  holds it.
+- **A script loose in a component's children** — `RAHTI_LOOSE_CHILD_SCRIPT`.
+  Children with a script render one parent element (or a `<>…</>`
+  fragment), and the script goes inside it. A page whose root is a layout
+  component is the usual place this comes up:
+
+```rust
+// Refused: the `<script>` sits beside the `<div>`, so the children have two
+// roots and no element of their own to belong to. In `<AppShell>`'s
+// boundary the runtime would take it for AppShell's script, and the
+// shell's own state — its menu, its handlers — would be gone.
+html! {
+    <AppShell active="inbox">
+        <div class="flex flex-col">…</div>
+        <script>r##"const [rows, setRows] = pp.state([]);"##</script>
+    </AppShell>
+}
+
+// The page's block is the `<div>`, and its script is inside it.
+html! {
+    <AppShell active="inbox">
+        <div class="flex flex-col">
+            …
+            <script>r##"const [rows, setRows] = pp.state([]);"##</script>
+        </div>
+    </AppShell>
+}
+```
+
+The same holds when the `<script>` is the only child: it has no element to
+belong to, and `html!` refuses it.
 
 ## Component Modules
 

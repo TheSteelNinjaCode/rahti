@@ -871,6 +871,77 @@ fn empty_script_body() {
     );
 }
 
+/// A block has one scope, so one component script: the runtime reads the
+/// first and nothing else, so a second is refused rather than dropped.
+#[test]
+fn a_second_component_script_in_a_block_is_refused() {
+    let msg = error(
+        r###"<div><p>{a}</p><script>r##"const [a] = pp.state(1);"##</script><script>r##"const [b] = pp.state(2);"##</script></div>"###,
+    );
+    assert!(msg.contains("RAHTI_SECOND_SCRIPT"), "{msg}");
+    assert!(msg.contains("a block has 2 `<script>`s"), "{msg}");
+
+    let msg = error(
+        r###"<main><Card><div><script>r##"const a = 1;"##</script><section><script>r##"const b = 2;"##</script></section></div></Card></main>"###,
+    );
+    assert!(msg.contains("RAHTI_SECOND_SCRIPT"), "{msg}");
+    assert!(msg.contains("the children of `<Card>`"), "{msg}");
+}
+
+/// What the one-script rule must not catch: a script with attributes is a
+/// data block or a file, not the block's scope, and every block — the outer
+/// one and the children between a component's tags — gets one of its own.
+#[test]
+fn one_component_script_per_block_is_accepted() {
+    render(
+        r###"<div><script type="application/json">r##"{}"##</script><script src="/js/x.js"></script><script>r##"const a = 1;"##</script></div>"###,
+    );
+    render(
+        r###"<main><Card><div><p>{n}</p><script>r##"const [n] = pp.state(1);"##</script></div></Card><script>r##"const page = 1;"##</script></main>"###,
+    );
+}
+
+/// Children with their own script are a block of their own and keep the
+/// script inside their single parent. Beside that parent the script would
+/// land loose in the receiving component's boundary and replace its script.
+#[test]
+fn a_script_beside_scripted_childrens_markup_is_refused() {
+    let msg = error(
+        r###"<Shell><div><p>{n}</p></div><script>r##"const [n] = pp.state(1);"##</script></Shell>"###,
+    );
+    assert!(msg.contains("RAHTI_LOOSE_CHILD_SCRIPT"), "{msg}");
+    assert!(msg.contains("the children of `<Shell>` carry a `<script>`"), "{msg}");
+    assert!(msg.contains("2 roots side by side"), "{msg}");
+    assert!(msg.contains("replace `<Shell>`'s script"), "{msg}");
+
+    let msg = error(r###"<main><Card><script>r##"const a = 1;"##</script></Card></main>"###);
+    assert!(msg.contains("RAHTI_LOOSE_CHILD_SCRIPT"), "{msg}");
+    assert!(msg.contains("the `<script>` is their only element"), "{msg}");
+
+    let msg = error(
+        r###"<main><Card>"Total: "<b>{n}</b><script>r##"const [n] = pp.state(1);"##</script></Card></main>"###,
+    );
+    assert!(msg.contains("RAHTI_LOOSE_CHILD_SCRIPT"), "{msg}");
+}
+
+/// What the children rule must not catch: one parent holding the script, a
+/// fragment (one block between its markers), and several roots that carry
+/// no script of their own — owner-scoped or static children.
+#[test]
+fn scripted_children_in_one_parent_are_accepted() {
+    render(
+        r###"<Shell><div><p>{n}</p><script>r##"const [n] = pp.state(1);"##</script></div></Shell>"###,
+    );
+    render(
+        r###"<main><Card><><b>{n}</b><i>"x"</i><script>r##"const [n] = pp.state(1);"##</script></></Card></main>"###,
+    );
+    render(r#"<main><Card><b>{n}</b><i>{m}</i></Card></main>"#);
+    render(r#"<main><Card><b>"a"</b><i>"b"</i></Card></main>"#);
+    render(
+        r###"<main><Card><b>"a"</b><script type="application/json">r##"{}"##</script></Card></main>"###,
+    );
+}
+
 // -------------------------------------------------------------------- slot
 
 #[test]

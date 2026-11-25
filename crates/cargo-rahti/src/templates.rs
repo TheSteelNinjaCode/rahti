@@ -1877,12 +1877,19 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
             .to_string(),
     );
     rules.push(
-        "A reactive block and its `<script>` must be self-contained. Children\n\
-         written between component tags are the exception: a `{…}` binding\n\
-         there reads the writing block's state — `html!` ships such children\n\
-         as an owner-scoped `<template pp-owner=\"…\">`, the React children\n\
-         semantics. Fragment-rooted (`<>…</>`) and `@{expr}`-built children\n\
-         read the component's scope instead."
+        "A reactive block and its `<script>` must be self-contained, and a\n\
+         block carries one `<script>`. Children written between component\n\
+         tags are the exception: a `{…}` binding there reads the writing\n\
+         block's state — `html!` ships such children as an owner-scoped\n\
+         `<template pp-owner=\"…\">`, the React children semantics.\n\
+         Fragment-rooted (`<>…</>`) and `@{expr}`-built children read the\n\
+         component's scope instead. Children that carry their own\n\
+         `<script>` are a block of their own: one parent element with the\n\
+         `<script>` inside it, as in\n\
+         `<Shell><div>…<script>r##\"…\"##</script></div></Shell>`. `html!`\n\
+         refuses a `<script>` beside that element\n\
+         (`RAHTI_LOOSE_CHILD_SCRIPT`) — it would replace `<Shell>`'s own\n\
+         script — and a second `<script>` in a block (`RAHTI_SECOND_SCRIPT`)."
             .to_string(),
     );
     rules.push(

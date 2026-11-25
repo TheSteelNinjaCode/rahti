@@ -137,16 +137,8 @@ fn tw_merge_is_published_only_by_the_tailwind_engine() {
 fn a_block_without_one_script_of_its_own_has_no_names_to_check() {
     // No script: the block renders in the scope of the block around it.
     assert!(unknown_in("<p hidden={!open}>{label}</p>").is_empty());
-    // Two scripts: there is no one scope, but each script is still read.
-    assert_eq!(
-        unknown_in(
-            "<div><p>{label}</p>
-                <script>r##\"const a = 1;\"##</script>
-                <script>r##\"const b = c;\"##</script>
-             </div>"
-        ),
-        ["script c"]
-    );
+    // Two scripts in one block never get here: `html!` refuses the second
+    // (`RAHTI_SECOND_SCRIPT`, see the parse tests).
     // Fragment-rooted children read the component they are passed to.
     assert!(
         unknown_in(

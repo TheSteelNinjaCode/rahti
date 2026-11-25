@@ -130,13 +130,20 @@ preserve them, and documentation or scaffold changes must teach them.
 9. Children are an explicit `Html` argument rendered with `<slot />`. An
    empty tag pair passes `Html::empty()`, a self-closing tag passes no
    `children` at all. `Html::concat(...)` joins a list built in Rust.
-10. A reactive block and its `<script>` must be self-contained. Children
+10. A reactive block and its `<script>` must be self-contained, and a block
+    carries one `<script>`; `html!` refuses a second (`RAHTI_SECOND_SCRIPT`,
+    `crates/rahti-macros/src/parse.rs`). Children
     written between component tags are the exception: a `{…}` binding there
     reads the writing block's state — `html!` ships such children as an
     owner-scoped `<template pp-owner="…">`, the React children semantics —
     and keeps that owner when a component hands them on with `@{children}`.
     Fragment-rooted (`<>…</>`) children and `Html` built in Rust read the
-    component's scope instead. `pp.props` works in a component's script,
+    component's scope instead. Children that carry their own `<script>` are
+    a block of their own: one parent element (or a `<>…</>` fragment) with
+    the `<script>` inside it. `html!` refuses the `<script>` beside that
+    element or as the only child (`RAHTI_LOOSE_CHILD_SCRIPT`): there it would
+    land loose in the receiving component's boundary, and the runtime would
+    take it for that component's script. `pp.props` works in a component's script,
     markup, and inline handlers alike. Read a component's props in the file
     that declares it: `html!` refuses a `{…}` prop that file never reads
     (`RAHTI_PROP_NOT_READ`), and a `pp.props.name` the component's root can

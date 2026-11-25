@@ -482,6 +482,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
         slot_at: None,
         client_bindings: 0,
         scripts: 0,
+        component_scripts: Vec::new(),
         root_attr_bindings: 0,
         root_binding: None,
         root_close_at: None,
@@ -503,6 +504,7 @@ pub fn parse(input: TokenStream) -> Result<Parsed, Error> {
     }
 
     check_single_root(&parser.roots, call_site)?;
+    check_one_component_script(&parser.component_scripts, None)?;
     if forced_component.is_some() && !parser.declares_component {
         parser.reject_root_binding()?;
         parser.claim_scriptless_markup(&mut ops);
@@ -594,6 +596,74 @@ fn check_single_root(roots: &[Root], call_site: Span) -> Result<(), Error> {
     Ok(())
 }
 
+/// A block has one scope, so it carries at most one component `<script>`.
+///
+/// The runtime reads the first script it meets inside a boundary and nothing
+/// else: a second would compile, ship, and never run — or, beside a block's
+/// markup inside another component, run in that component's place. `children`
+/// names the component tag when the block is the children written between its
+/// tags.
+fn check_one_component_script(scripts: &[Span], children: Option<&str>) -> Result<(), Error> {
+    let Some(second) = scripts.get(1) else {
+        return Ok(());
+    };
+    let block = match children {
+        Some(name) => format!("the children of `<{name}>` are one block, and"),
+        None => "a block".to_string(),
+    };
+    Err(Error {
+        span: *second,
+        msg: format!(
+            "rahti[RAHTI_SECOND_SCRIPT]: {block} has {} `<script>`s; a block has one scope \
+             and carries one script.\n  Merge them into one `<script>`, or give the second \
+             its own block — a `#[component]` whose root element holds it.",
+            scripts.len()
+        ),
+    })
+}
+
+/// Children written between a component's tags that carry their own
+/// `<script>` are a block of their own, and a block keeps its script inside
+/// its single parent.
+///
+/// With one parent element (or a `<>…</>` fragment) that holds the script,
+/// the children are stamped as a boundary and the script is theirs. Beside
+/// its markup — `<Shell><div>…</div><script>…</script></Shell>` — or as the
+/// only child, the script has no element of its own to belong to: it lands
+/// loose inside the receiving component's boundary, where the runtime takes
+/// it for that component's script and the component's own state disappears.
+fn check_scripted_children(name: &str, roots: &[Root], scripts: &[Span]) -> Result<(), Error> {
+    let Some(first) = scripts.first() else {
+        return Ok(());
+    };
+    check_one_component_script(scripts, Some(name))?;
+    let held = match roots {
+        [Root::Element(tag, _)] => !tag.eq_ignore_ascii_case("script"),
+        [Root::Fragment(_)] => true,
+        _ => false,
+    };
+    if held {
+        return Ok(());
+    }
+    let shape = if roots.len() > 1 {
+        format!("they have {} roots side by side", roots.len())
+    } else {
+        "the `<script>` is their only element".to_string()
+    };
+    Err(Error {
+        span: *first,
+        msg: format!(
+            "rahti[RAHTI_LOOSE_CHILD_SCRIPT]: the children of `<{name}>` carry a `<script>`, \
+             and {shape}.\n  Children with a script are a block of their own: they render \
+             one parent element, and the `<script>` goes inside it —\n\n      \
+             <{name} …>\n          <div>\n              …\n              \
+             <script>r##\"…\"##</script>\n          </div>\n      </{name}>\n\n  \
+             A `<script>` outside that element would land in `<{name}>`'s own boundary \
+             and replace `<{name}>`'s script."
+        ),
+    })
+}
+
 /// What sat between two tokens in the source.
 ///
 /// Only ever asked of tokens that make up one run of text, so this is the
@@ -632,6 +702,12 @@ struct Parser {
     /// `<script>` elements seen in the block being parsed. Same save/reset
     /// discipline as `client_bindings`.
     scripts: usize,
+    /// Where each component `<script>` — a bare one, compiled into the
+    /// registry — of the block being parsed opens. A block has one scope and
+    /// so at most one; the runtime reads the first it meets and nothing else,
+    /// so a second is refused rather than left for it to drop. Same
+    /// save/reset discipline as `scripts`.
+    component_scripts: Vec<Span>,
     /// The part of `client_bindings` written on the root's own attributes.
     /// Those are the caller's to evaluate, so they are not the block's own
     /// markup; see [`Parser::claim_scriptless_markup`].
@@ -1001,6 +1077,7 @@ impl Parser {
         }
         self.next();
         if component_script {
+            self.component_scripts.push(open);
             self.component_script(markup, ops)?;
         } else {
             markup.push('>');
@@ -1378,6 +1455,7 @@ impl Parser {
         let outer_depth = std::mem::replace(&mut self.depth, 0);
         let outer_bindings = std::mem::replace(&mut self.client_bindings, 0);
         let outer_scripts = std::mem::replace(&mut self.scripts, 0);
+        let outer_component_scripts = std::mem::take(&mut self.component_scripts);
         let outer_root_attr_bindings = std::mem::replace(&mut self.root_attr_bindings, 0);
         let outer_root_binding = self.root_binding.take();
         let outer_root_close_at = self.root_close_at.take();
@@ -1407,6 +1485,8 @@ impl Parser {
             self.roots.as_slice(),
             [Root::Element(..)] | [Root::Fragment(..)]
         );
+        let child_roots = std::mem::take(&mut self.roots);
+        let child_component_scripts = std::mem::take(&mut self.component_scripts);
 
         self.roots = outer_roots;
         self.component_slot = outer_slot;
@@ -1416,12 +1496,16 @@ impl Parser {
         self.depth = outer_depth;
         self.client_bindings = outer_bindings;
         self.scripts = outer_scripts;
+        self.component_scripts = outer_component_scripts;
         self.root_attr_bindings = outer_root_attr_bindings;
         self.root_binding = outer_root_binding;
         self.root_close_at = outer_root_close_at;
         self.inner_spread = outer_inner_spread;
         self.root_attributes = outer_root_attributes;
         children?;
+        if !child_declares {
+            check_scripted_children(&name, &child_roots, &child_component_scripts)?;
+        }
 
         if !(self.is_punct(0, '<') && self.is_punct(1, '/')) {
             return Err(Error {
