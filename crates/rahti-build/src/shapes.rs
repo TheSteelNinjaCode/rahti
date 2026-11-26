@@ -922,6 +922,8 @@ fn external(name: &str, args: &[Ts]) -> Ts {
         | "TimeTime"
         | "TimeDateTime"
         | "TimeDateTimeWithTimeZone"
+        | "Timestamp"
+        | "ZonedDateTime"
         | "Uuid"
         | "Decimal"
         | "BigDecimal"

@@ -54,47 +54,92 @@ let local_now = rahti::time::now();
 let local_date = rahti::time::today();
 let zone = rahti::time::timezone();
 
-assert_eq!(local_now.timezone(), zone);
+assert_eq!(local_now.time_zone(), &zone);
 ```
 
-`now()` returns an aware `DateTime<Tz>`. `today()` returns a
-`NaiveDate` because a calendar date has no instant until it is interpreted in
-a timezone.
+The types are jiff's, re-exported from `rahti::time` so application code
+names them without depending on the crate itself:
 
-`Tz` is Rahti's zone type and a chrono `TimeZone`, so it works wherever
-chrono takes one: `value.with_timezone(&zone)`,
-`zone.with_ymd_and_hms(2026, 1, 14, 21, 30, 0)`, `zone.from_local_datetime(…)`.
-It is `Copy`, `"Europe/Berlin".parse::<Tz>()` resolves one, and `name()`
-returns its IANA name. An aware value displays the zone's abbreviation
-(`2026-01-14 21:30:00 EST`), and `value.offset().abbreviation()` returns it.
-A wall time a transition skips has no instant (`LocalResult::None`); one it
-repeats has two (`LocalResult::Ambiguous`, the earlier first).
+| Type | What it is |
+| --- | --- |
+| `Timestamp` | An instant, with no zone. What is stored and compared. |
+| `ZonedDateTime` | An instant shown in a zone. What `now()` returns. |
+| `Date` | A calendar date. What `today()` returns. |
+| `DateTime` | A wall-clock date and time with no zone and no instant. |
+| `TimeZone` | An IANA zone. What `timezone()` returns. |
 
-The module re-exports `DateTime`, `NaiveDate`, `NaiveDateTime`, `Tz`,
-and `Utc` for application code that does not otherwise depend directly on
-the time crates.
+A `Date` or `DateTime` has no instant until a zone interprets it.
+`TimeZone::get("Europe/Berlin")` resolves a zone by name and `iana_name()`
+returns it. A `ZonedDateTime` displays as
+`2026-01-14T21:30:00-05:00[America/New_York]`; `value.strftime("%Z")` gives
+the zone's abbreviation (`EST`), and `strftime` formats any of these types
+for display. `year()`, `month()`, `day()`, `hour()` and `minute()` read the
+wall-clock fields.
+
+`Timestamp` and `ZonedDateTime` serialize as strings, so an `#[rpc]` returns
+them directly.
 
 ## Stored Timestamps
 
-Store instants in UTC. Convert an aware stored value for presentation without
+Store instants in UTC. Convert a stored instant for presentation without
 changing the instant:
 
 ```rust
-let shown = rahti::time::to_app_time(stored_utc);
+let shown = rahti::time::to_app_time(stored);
 ```
 
-Some database drivers return a naive timestamp for a column whose application
+`to_app_time` takes a `Timestamp` or a `ZonedDateTime`. A database driver
+that returns its own date type hands over the instant as Unix seconds:
+
+```rust
+use rahti::time::Timestamp;
+
+let stored = Timestamp::from_second(unix_seconds)?;
+let shown = rahti::time::to_app_time(stored);
+```
+
+`from_second` carries whole seconds. A column that keeps fractions of a
+second passes them too, as the nanoseconds past that second (0 to
+999,999,999), or the value shown and compared is rounded down to the second:
+
+```rust
+let stored = Timestamp::new(unix_seconds, subsecond_nanoseconds)?;
+```
+
+SeaORM's `DateTime` column value is one such type: a wall-clock value with no
+offset, stored as UTC. Keep the conversion in one application function and
+call it wherever a stored time is shown:
+
+```rust
+use rahti::time::{Timestamp, ZonedDateTime};
+use sea_orm::prelude::DateTime;
+
+/// A stored UTC column value in the application timezone.
+pub fn local(value: DateTime) -> rahti::Result<ZonedDateTime> {
+    let utc = value.and_utc();
+    let nanoseconds = utc.timestamp_subsec_nanos() as i32;
+    let stored = Timestamp::new(utc.timestamp(), nanoseconds)?;
+    Ok(rahti::time::to_app_time(stored))
+}
+```
+
+`local(row.created_at)?.strftime("%b %d, %Y %H:%M").to_string()` is then the
+text a page shows.
+
+Some columns hold a wall-clock value with no offset whose application
 contract is still UTC. Make that assumption explicit:
 
 ```rust
-let shown = rahti::time::from_naive_utc(stored_naive_utc);
+let shown = rahti::time::from_naive_utc(stored_naive_utc)?;
 ```
 
-Do not use `from_naive_utc` for user-entered local wall time. Local input can
-be nonexistent during spring-forward or ambiguous during fall-back and needs
-an application-facing validation policy.
+`from_naive_utc` takes a `DateTime` and returns
+`AppTimeError::UnrepresentableDate` for a value outside the supported range
+(years -9999 to 9999). Do not use it for user-entered local wall time. Local
+input can be nonexistent during spring-forward or ambiguous during fall-back
+and needs an application-facing validation policy.
 
-For a driver that requires naive UTC values, convert before stripping the
+For a column that requires a naive UTC value, convert before stripping the
 offset:
 
 ```rust
@@ -110,13 +155,16 @@ A report for one application calendar day needs UTC instants for its database
 predicate:
 
 ```rust
-use rahti::time::NaiveDate;
+use rahti::time::Date;
 
-let day = NaiveDate::from_ymd_opt(2026, 3, 8).unwrap();
+let day = Date::new(2026, 3, 8)?;
 let (start, end) = rahti::time::day_bounds_utc(day)?;
 
 let rows = query_created_at_gte_lt(start, end).await?;
 ```
+
+`start` and `end` are `Timestamp`s; `as_second()` gives each as Unix seconds
+for a driver that takes a number.
 
 The range is half-open: `[start, end)`. Use greater-than-or-equal for the
 start and strictly-less-than for the end. Adjacent dates then share one

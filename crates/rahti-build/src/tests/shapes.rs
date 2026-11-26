@@ -171,13 +171,13 @@ fn an_unreadable_part_makes_the_shape_partial_not_wrong() {
 
 #[test]
 fn json_of_any_shape_is_dynamic_and_dates_are_strings() {
-    let page = "use serde_json::Value;\nuse chrono::{DateTime, Utc};";
+    let page = "use serde_json::Value;\nuse rahti::time::Timestamp;";
     let (shape, _) = sent(page, "Value");
     assert_eq!(
         (shape.typescript.as_str(), shape.status),
         ("unknown", Status::Dynamic)
     );
-    let (shape, _) = sent(page, "Vec<DateTime<Utc>>");
+    let (shape, _) = sent(page, "Vec<Timestamp>");
     assert_eq!(
         (shape.typescript.as_str(), shape.status),
         ("string[]", Status::Resolved)

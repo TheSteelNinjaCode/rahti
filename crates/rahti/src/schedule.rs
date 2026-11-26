@@ -14,7 +14,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::{
@@ -100,7 +99,7 @@ impl Scheduler {
             job,
             payload,
             Cadence::Daily {
-                zone: crate::time::Tz::UTC,
+                zone: crate::time::TimeZone::UTC,
                 hour,
                 minute,
             },
@@ -269,7 +268,7 @@ enum Cadence {
     Every(Duration),
     Once(SystemTime),
     Daily {
-        zone: crate::time::Tz,
+        zone: crate::time::TimeZone,
         hour: u8,
         minute: u8,
     },
@@ -280,7 +279,7 @@ impl Cadence {
         match self {
             Self::Every(interval) => now.checked_add(*interval).unwrap_or(now),
             Self::Once(at) => *at,
-            Self::Daily { zone, hour, minute } => next_daily(now, *zone, *hour, *minute),
+            Self::Daily { zone, hour, minute } => next_daily(now, zone, *hour, *minute),
         }
     }
 
@@ -292,7 +291,7 @@ impl Cadence {
             // `previous` bounds it from below, so a clock that reads earlier
             // than the occurrence it just dispatched cannot repeat that one.
             Self::Daily { zone, hour, minute } => {
-                Some(next_daily(previous.max(now), *zone, *hour, *minute))
+                Some(next_daily(previous.max(now), zone, *hour, *minute))
             }
             // Fixed delay from the observation time deliberately coalesces
             // missed occurrences. A sleeping process must not replay a burst.
@@ -387,16 +386,18 @@ async fn dispatch(queue: &JobQueue, entry: &Entry, state: &State) {
     }
 }
 
-fn next_daily(now: SystemTime, zone: crate::time::Tz, hour: u8, minute: u8) -> SystemTime {
-    let now_utc: DateTime<Utc> = now.into();
-    let mut day = now_utc.with_timezone(&zone).date_naive();
-    for _ in 0..=2 {
-        if let Some(candidate) = crate::time::resolve_local(zone, day, hour, minute)
-            && candidate > now_utc
-        {
-            return candidate.into();
+fn next_daily(now: SystemTime, zone: &crate::time::TimeZone, hour: u8, minute: u8) -> SystemTime {
+    if let Ok(instant) = crate::time::Timestamp::try_from(now) {
+        let mut day = instant.to_zoned_datetime(zone.clone()).date();
+        for _ in 0..=2 {
+            if let Some(candidate) = crate::time::resolve_local(zone, day, hour, minute)
+                && candidate > instant
+                && let Ok(at) = SystemTime::try_from(candidate)
+            {
+                return at;
+            }
+            day = day.tomorrow().unwrap_or(day);
         }
-        day = day.succ_opt().unwrap_or(day);
     }
     now.checked_add(Duration::from_secs(24 * 60 * 60))
         .unwrap_or(now)
@@ -532,7 +533,6 @@ impl std::error::Error for ScheduleError {
 mod tests {
     use super::*;
     use crate::jobs::{JobError, Jobs};
-    use chrono::TimeZone as _;
     use std::sync::atomic::AtomicUsize;
     use std::time::UNIX_EPOCH;
     use tokio::sync::{Notify, Semaphore};
@@ -624,25 +624,33 @@ mod tests {
         assert_eq!(scheduler.metrics().due, 1);
     }
 
+    /// A UTC wall time in March 2026 as the clock value a scheduler reads.
+    fn march_2026(day: i8, hour: i8, minute: i8) -> SystemTime {
+        let instant = crate::time::TimeZone::UTC
+            .to_timestamp(jiff::civil::date(2026, 3, day).at(hour, minute, 0, 0))
+            .unwrap();
+        SystemTime::try_from(instant).unwrap()
+    }
+
     #[test]
     fn daily_utc_moves_to_the_next_matching_minute() {
         let now = UNIX_EPOCH + Duration::from_secs(12 * 3_600 + 30 * 60);
         assert_eq!(
-            next_daily(now, crate::time::Tz::UTC, 13, 15),
+            next_daily(now, &crate::time::TimeZone::UTC, 13, 15),
             UNIX_EPOCH + Duration::from_secs(13 * 3_600 + 15 * 60)
         );
         assert_eq!(
-            next_daily(now, crate::time::Tz::UTC, 12, 30),
+            next_daily(now, &crate::time::TimeZone::UTC, 12, 30),
             now + Duration::from_secs(24 * 60 * 60)
         );
     }
 
     #[test]
     fn application_daily_time_tracks_dst() {
-        let zone = "America/New_York".parse().unwrap();
-        let before_spring: SystemTime = Utc.with_ymd_and_hms(2026, 3, 7, 13, 0, 0).unwrap().into();
-        let first = next_daily(before_spring, zone, 8, 30);
-        let second = next_daily(first, zone, 8, 30);
+        let zone = crate::time::TimeZone::get("America/New_York").unwrap();
+        let before_spring = march_2026(7, 13, 0);
+        let first = next_daily(before_spring, &zone, 8, 30);
+        let second = next_daily(first, &zone, 8, 30);
         let elapsed = second.duration_since(first).unwrap();
         assert_eq!(elapsed, Duration::from_secs(23 * 60 * 60));
     }
@@ -651,13 +659,9 @@ mod tests {
     /// and its next occurrence is the first one after that moment.
     #[test]
     fn daily_occurrences_missed_during_a_stall_are_coalesced() {
-        let at = |day, hour, minute| -> SystemTime {
-            Utc.with_ymd_and_hms(2026, 3, day, hour, minute, 0)
-                .unwrap()
-                .into()
-        };
+        let at = march_2026;
         let cadence = Cadence::Daily {
-            zone: crate::time::Tz::UTC,
+            zone: crate::time::TimeZone::UTC,
             hour: 8,
             minute: 30,
         };
