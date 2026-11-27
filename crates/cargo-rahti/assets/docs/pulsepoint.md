@@ -54,7 +54,7 @@ Companion guides:
 - `pulsepoint-web-apis.md` — WebGPU, workers, WebAssembly, media and device
   APIs, third-party libraries, DOM ownership for games and widgets.
 - `pulsepoint-navigation.md` — SPA navigation, scroll, loading regions,
-  `pp.redirect`.
+  `pp.redirect`, history entries a page owns (Back closing a drawer).
 
 PulsePoint's **script API** mirrors React hooks. Its **markup is plain HTML**
 with `{…}` bindings, read by a template compiler that has no JSX support
@@ -585,6 +585,11 @@ event, so `onclick={save}` runs `save(event)`.
 Use native lowercase HTML event names, not JSX names such as `onClick`.
 Long native names such as `onlostpointercapture` work the same way: their
 binding runs when the event fires, never while rendering the element.
+
+A handler runs only while its element is in the document. An event that
+reaches an element after its component unmounted — the `close` a `<dialog>`
+fires when a navigation tears it down, say — runs nothing, because the scope
+it would read is gone.
 
 A handler on a block's root element runs in that block's scope, as in React:
 

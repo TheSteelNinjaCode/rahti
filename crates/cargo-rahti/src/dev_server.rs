@@ -633,8 +633,15 @@ fn build(root: &Path, phases: &mut Phases) -> Result<Built, String> {
     } else {
         "--color=never"
     };
-    let mut child = Command::new(cargo_program())
-        .args(["build", "--message-format=json-render-diagnostics", color])
+    let mut command = Command::new(cargo_program());
+    command.args(["build", "--message-format=json-render-diagnostics", color]);
+    // A project with tools beside its server (a migrate or import binary)
+    // builds them all, in an order cargo does not promise; the server is the
+    // one `cargo run` would start, so that is the one built and started.
+    if let Some(name) = server_binary(root) {
+        command.args(["--bin", &name]);
+    }
+    let mut child = command
         .current_dir(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -802,6 +809,51 @@ foreach ($id in [RahtiLock]::Holders($env:RAHTI_LOCKED_FILE)) {
 #[cfg(not(windows))]
 fn holders(_file: &Path) -> Vec<(u64, String)> {
     Vec::new()
+}
+
+/// The binary `cargo run` starts in the project at `root`, when cargo's
+/// metadata names one; `None` leaves the choice to the build's own report.
+fn server_binary(root: &Path) -> Option<String> {
+    let output = Command::new(cargo_program())
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(root)
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let metadata: Value = serde_json::from_slice(&output.stdout).ok()?;
+    let manifest = fs::canonicalize(root.join("Cargo.toml")).ok()?;
+    server_binary_in(&metadata, &manifest)
+}
+
+/// [`server_binary`] over metadata already read: the package whose manifest
+/// is `manifest`, then its `default-run`, its only binary, or the binary
+/// named after it — the order `cargo run` decides in.
+fn server_binary_in(metadata: &Value, manifest: &Path) -> Option<String> {
+    let package = metadata["packages"].as_array()?.iter().find(|package| {
+        package["manifest_path"]
+            .as_str()
+            .and_then(|path| fs::canonicalize(path).ok())
+            .is_some_and(|path| path == manifest)
+    })?;
+    if let Some(name) = package["default_run"].as_str() {
+        return Some(name.to_string());
+    }
+    let bins: Vec<&str> = package["targets"]
+        .as_array()?
+        .iter()
+        .filter(|target| {
+            target["kind"]
+                .as_array()
+                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
+        })
+        .filter_map(|target| target["name"].as_str())
+        .collect();
+    let own = package["name"].as_str()?;
+    match bins.as_slice() {
+        [only] => Some((*only).to_string()),
+        _ => bins.contains(&own).then(|| own.to_string()),
+    }
 }
 
 fn artifact_executable(line: &str) -> Option<PathBuf> {

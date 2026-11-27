@@ -451,7 +451,10 @@ html! {
 - Ref bindings survive re-renders, including re-renders that change nothing.
 - A `pp-ref={name}` in children handed to a component —
   `<Panel><input pp-ref={nameInput} /></Panel>` — binds the ref of the block
-  that wrote it, not one of `Panel`'s.
+  that wrote it, not one of `Panel`'s. That holds for a ref written on a
+  component tag in those children too —
+  `<Drawer><DrawerContent pp-ref={panel}>…</DrawerContent></Drawer>` binds
+  `panel` to the element `DrawerContent` forwards it onto.
 - The runtime writes `data-pp-ref` internally; never author it.
 
 ```rust

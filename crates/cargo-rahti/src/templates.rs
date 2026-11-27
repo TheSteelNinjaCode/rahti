@@ -1741,7 +1741,7 @@ pub fn agents_md(name: &str, db: bool, ws: bool) -> String {
          `docs/conventions/pulsepoint-web-apis.md` |\n",
     );
     out.push_str(
-        "| SPA navigation, scroll, loading regions, `pp.redirect` | \
+        "| SPA navigation, scroll, loading regions, `pp.redirect`, Back closing a drawer or panel | \
          `docs/conventions/pulsepoint-navigation.md` |\n",
     );
     out.push_str(

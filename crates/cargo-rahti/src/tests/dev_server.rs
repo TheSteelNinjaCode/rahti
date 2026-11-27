@@ -130,6 +130,57 @@ fn the_binary_is_read_from_cargos_own_report() {
 }
 
 #[test]
+fn the_server_is_the_binary_cargo_run_would_start() {
+    let root = std::env::temp_dir().join(format!("rahti-server-binary-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let manifest_file = root.join("Cargo.toml");
+    fs::write(&manifest_file, "").unwrap();
+    let manifest = fs::canonicalize(&manifest_file).unwrap();
+    let bin = |name: &str| json!({ "name": name, "kind": ["bin"] });
+    let lib = json!({ "name": "drive", "kind": ["lib"] });
+    let package = |default_run: Value, targets: Vec<Value>| {
+        json!({ "packages": [{
+            "name": "drive",
+            "manifest_path": manifest_file.to_string_lossy(),
+            "default_run": default_run,
+            "targets": targets,
+        }] })
+    };
+
+    let tools = vec![lib.clone(), bin("migrate"), bin("drive"), bin("sync")];
+    assert_eq!(
+        server_binary_in(&package(json!("drive"), tools.clone()), &manifest).as_deref(),
+        Some("drive"),
+        "default-run decides"
+    );
+    assert_eq!(
+        server_binary_in(&package(Value::Null, tools), &manifest).as_deref(),
+        Some("drive"),
+        "else the binary named after the package"
+    );
+    assert_eq!(
+        server_binary_in(
+            &package(Value::Null, vec![lib.clone(), bin("server")]),
+            &manifest
+        )
+        .as_deref(),
+        Some("server"),
+        "else the only one"
+    );
+    assert_eq!(
+        server_binary_in(&package(Value::Null, vec![bin("a"), bin("b")]), &manifest),
+        None,
+        "two strangers are left to the build's report"
+    );
+    assert_eq!(
+        server_binary_in(&json!({ "packages": [] }), &manifest),
+        None,
+        "a virtual workspace root has no package"
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn a_restart_says_where_its_time_went() {
     let phases = Phases {
         compile: Some(Duration::from_millis(7_840)),

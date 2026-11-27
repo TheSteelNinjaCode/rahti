@@ -13,6 +13,9 @@ second client router.
 - `<a pp-spa="false">` makes that one link a normal browser navigation.
 - External links, downloads, `target="_blank"` and modifier-key clicks are
   never intercepted.
+- A click a handler already cancelled with `event.preventDefault()` is not
+  followed. The handler owns it: it can close a panel first and navigate
+  with `pp.redirect(url)` when it is ready.
 - A navigation fetches the next document, replaces the whole `<body>` with
   the new one, and updates the title and the history entry. The window and
   everything a module script put on it stay. A redirect the server answers
@@ -40,6 +43,55 @@ After mount, `pp.redirect(url)` navigates through the SPA path for a
 same-origin URL and with a normal browser navigation for any other. A
 same-origin redirect an rpc answers with is followed the same way; a
 cross-origin or invalid redirect target is ignored.
+
+## History Entries a Page Owns
+
+Back and Forward to an entry whose path and query are those of the document
+on screen fetch nothing. The page stays mounted, its state stays, scroll is
+restored from the entry, and the page's own `popstate` listeners see the
+change. Only an entry of a different path or query loads a document.
+
+That is what lets part of a page close on Back: a drawer, a sheet, a menu,
+a lightbox. On Android, Back is the system button and the swipe gesture as
+well as the browser's arrow, and a reader expects it to close what is open
+rather than leave the page. Such a part owns one entry while it is open:
+
+- When it opens, it pushes an entry on the same URL, keeping the existing
+  state: `history.pushState({ ...history.state, myPanel: true }, "")`.
+- A `popstate` that leaves that entry closes it.
+- Closed any other way, it calls `history.back()` if its entry is still the
+  current one, so the history the reader walks back through never holds a
+  closed panel.
+- A link inside it cancels the click, closes the panel, goes back off the
+  entry, and follows the link with `pp.redirect(url)` once the `popstate`
+  has arrived. Following it straight away leaves the entry under the next
+  page, and Back from there returns to it.
+- An entry left behind when the page unmounts is harmless; do not go back
+  from an effect cleanup, which would undo the navigation that unmounted it.
+
+The rahti-ui `Drawer` does all of this. The listener is a long-lived one, so
+it is installed in a `pp.effect` and reads state through `pp.event`:
+
+```javascript
+const [open, setOpen] = pp.state(false);
+const ENTRY = "filtersPanel";
+const onEntry = () => !!(history.state && history.state[ENTRY]);
+function show() {
+    if (!onEntry()) history.pushState({ ...(history.state || {}), [ENTRY]: true }, "");
+    setOpen(true);
+}
+function hide() {
+    setOpen(false);
+    if (onEntry()) history.back();
+}
+const popped = pp.event(() => {
+    if (open && !onEntry()) setOpen(false);
+});
+pp.effect(() => {
+    window.addEventListener("popstate", popped);
+    return () => window.removeEventListener("popstate", popped);
+}, []);
+```
 
 ## Scroll
 
